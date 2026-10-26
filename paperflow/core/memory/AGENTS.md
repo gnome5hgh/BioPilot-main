@@ -16,9 +16,10 @@
 memory/
 ├─ constants/    # 工具名集合与块的播种文案
 ├─ domain/entity/ # 压缩产物：摘要 / 任务快照 / CompactionResult 整合体
+├─ domain/dto/   # 整合编辑指令契约：MemoryEdit / MemoryEditBatch（LLM 结构化输出，不落库）
 ├─ schemas/      # 表实体与持久化模型：块 / 记忆 / 消息 / Agent 状态
 ├─ storage/      # SQLite 持久化（库、表结构、增量迁移、messages_fts 全文索引）
-├─ common/       # 领域异常（并发写冲突、块字符上限）
+├─ common/       # 领域异常（并发写冲突、块字符上限、整合指令校验失败）
 └─ services/     # 各管理器 + compaction.py（上下文压缩）+ consolidation.py（记忆整合）
                  #   + consolidation_queue.py（轮末 debounce 队列）
 ```
@@ -94,6 +95,7 @@ conda run -n paperflow python -m pytest tests/memory -q
 
 - [`storage/`](storage/)
 - [`domain/entity/`](domain/entity/)
+- [`domain/dto/`](domain/dto/)
 - [`services/compaction.py`](services/compaction.py)
 - [`services/consolidation.py`](services/consolidation.py)
 - [`schemas/`](schemas/)
