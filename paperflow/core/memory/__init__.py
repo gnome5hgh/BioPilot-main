@@ -1,13 +1,15 @@
 """paperflow 核心记忆子系统。
 
-对外统一导出记忆栈组件：schema 数据模型、SQLite 存储层、服务层
-（块/消息/agent 管理器 + MemFS）、压缩配置、
-MemoryConsolidator 后台整合与常量。分层依赖单向：constants/schemas → storage → services → tools。
+对外统一导出记忆栈组件：领域模型（entity 压缩产物 / dto 整合指令契约）、schema
+数据模型、SQLite 存储层、服务层（块/消息/agent 管理器 + MemFS）、压缩配置、
+MemoryConsolidator 后台整合与常量。分层依赖单向：constants/schemas/domain/common → storage → services → tools。
 """
 from paperflow.core.memory.schemas.block import BaseBlock, Block
 from paperflow.core.memory.schemas.memory import Memory
 from paperflow.core.memory.schemas.stored_message import StoredMessage
 from paperflow.core.memory.schemas.agent import AgentState
+from paperflow.core.memory.domain.dto.memory_edit import MemoryEdit
+from paperflow.core.memory.domain.dto.memory_edit_batch import MemoryEditBatch
 from paperflow.core.memory.domain.entity.compaction_result import CompactionResult
 from paperflow.core.memory.domain.entity.summary import Summary
 from paperflow.core.memory.domain.entity.task_snapshot import TaskSnapshot
@@ -24,6 +26,7 @@ from paperflow.core.memory import constants
 __all__ = [
     "BaseBlock", "Block", "Memory", "StoredMessage",
     "AgentState", "MemoryDB",
+    "MemoryEdit", "MemoryEditBatch",
     "CompactionResult", "Summary", "TaskSnapshot",
     "BlockManager", "GitEnabledBlockManager", "MemFS", "MessageManager",
     "AgentManager",

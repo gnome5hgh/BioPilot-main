@@ -43,3 +43,12 @@ class BlockLimitExceeded(ValueError):
         super().__init__(f"block {label} exceeds {limit} character limit")
         self.label = label
         self.limit = limit
+
+
+class MemoryEditValidationError(ValueError):
+    """编辑指令未通过阶段 1 校验（动作与目标不匹配、缺必要字段）。
+
+    与阶段 2 的应用期错误（match 命中不到旧行、块写入超限/read_only）区分：只有
+    校验错误被上抛（原子性——一条不写）；应用期错误计入连败计数，连败 3 次强制
+    前进游标，避免同一批编辑被无限重放。
+    """

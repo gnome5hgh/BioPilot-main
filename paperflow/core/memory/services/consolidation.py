@@ -13,16 +13,15 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Literal
 
-from pydantic import BaseModel, Field
-
-from paperflow.core.memory.common.errors import BlockLimitExceeded
+from paperflow.core.memory.common.errors import (
+    BlockLimitExceeded, MemoryEditValidationError)
+from paperflow.core.memory.domain.dto.memory_edit import MemoryEdit
+from paperflow.core.memory.domain.dto.memory_edit_batch import MemoryEditBatch
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MemoryConsolidator", "MemoryEditBatch", "MemoryEdit",
-           "MemoryEditValidationError"]
+__all__ = ["MemoryConsolidator"]
 
 #: 日期分册的块类型（label = `<类型>_<YYYY-MM-DD>`，写满续号 `<类型>_<YYYY-MM-DD>_2`）。
 #: 核心块不参与分册——它们靠整块重写收敛。
@@ -94,45 +93,6 @@ def _is_writable_label(label: str | None) -> bool:
     if not label:
         return False
     return label in _WRITABLE_LABELS or label.startswith(_WRITABLE_PREFIXES)
-
-
-class MemoryEdit(BaseModel):
-    """单条记忆编辑指令：目标类型 + 动作 + 新行 / 匹配前缀。
-
-    target 是类型枚举而非文件名——真实的块 label 由代码按「类型 + 当天日期」拼装，
-    模型不碰日期。content 与 match 都带长度上限（防 LLM 输出爆炸）；语义约束
-    （rewrite 只给核心块、supersede/drop 必须给 match）在 _validate_edit 里校验。
-
-    Attributes:
-        target: Literal["profile","assistant","feedback","project","reference"]，目标类型
-        action: Literal["add","supersede","drop","rewrite"]，动作（rewrite 仅限核心块）
-        content: str，新行内容（add/supersede）或整块新内容（rewrite），上限取块的字符上限
-        match: str，行首前缀；supersede/drop 据此命中旧行，上限 200 字符
-    """
-
-    target: Literal["profile", "assistant", "feedback", "project", "reference"]
-    action: Literal["add", "supersede", "drop", "rewrite"]
-    content: str = Field(default="", max_length=2000)
-    match: str = Field(default="", max_length=200)
-
-
-class MemoryEditBatch(BaseModel):
-    """一次整合会话的编辑指令集合（上限 20 条，防单轮过量写入）。
-
-    Attributes:
-        edits: list[MemoryEdit]，本轮整合的编辑指令（上限 20 条）
-    """
-
-    edits: list[MemoryEdit] = Field(default_factory=list, max_length=20)
-
-
-class MemoryEditValidationError(ValueError):
-    """编辑指令未通过阶段 1 校验（动作与目标不匹配、缺必要字段）。
-
-    与阶段 2 的应用期错误（match 命中不到旧行、块写入超限/read_only）区分：只有
-    校验错误被上抛（原子性——一条不写）；应用期错误计入连败计数，连败 3 次强制
-    前进游标，避免同一批编辑被无限重放。
-    """
 
 
 class MemoryConsolidator:
