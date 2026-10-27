@@ -1,21 +1,28 @@
 ---
 name: cross-review
-description: 深度多 agent 代码审查——并行多个 subagent 独立找 bug，每条发现经独立 verifier 交叉核实过滤误报，按 Important/Nit/Pre-existing 分档出报告。审「当前分支 vs main 的 merge-base」（默认）、任意固定点（commit/branch/tag）、或工作树未提交改动（wip）。自动读取仓库根 REVIEW.md 的定制层（重点区域/输出约束/风险分流），没有则用默认。用户要求审分支、审改动、找 bug、深度审查、多 agent 审查、交叉核实、修复后复审时使用；需要 Standards/Spec 两轴逐条对照的细审用 code-review。
+description: 深度多 agent 代码审查，六层流程——L0 验证先行（测试/lint/构建原始输出 + 端到端行为验证 + fresh-context 预审）→ L1 并行 finder 找 bug + 每条 finding 多 verifier 投票核实 → L2 独立安全审查轮（可阻塞）→ L3 必需检查 → L4 风险分级报告（0/1/2 人审档，Important/Nit/Pre-existing）。审「当前分支 vs main 的 merge-base」（默认）、任意固定点、或工作树未提交改动（wip）；修复后可复审。读取仓库根 REVIEW.md 定制层，没有则用内建默认。用户要求审分支、审改动、找 bug、深度审查、多 agent 审查、交叉核实、修复后复审时使用。
 ---
 
-# Cross-Review：多 agent 交叉核实审查
+# Cross-Review：六层审查流程
 
-机制来源：Anthropic《Solving code review at Anthropic》——多 agent 并行找 bug、独立 agent 交叉核实、人的注意力留给高风险决策。本 skill 是它的单人本地版：**审查到报告为止**，修不修由人决定。
+本 skill 执行六层审查流程中的审查侧五层：L0 验证先行、L1 AI review、L2 安全审查、L3 必需检查、L4 风险分级（第 11 节声明 L5/L6 为何出界）。核心立场：**人的精力是稀缺资源**——先抓真 bug，再降审查轮数；routine 问题交自动化，人留给方向、高风险与最终裁决。**agent 审查通过永远不等于人工批准，合并由人决定。**
 
-总流程：固定范围解析 → 定制层加载 → 并行 finder → 去重 → 逐条 verifier → 分档报告 + 反馈登记。
+总流程：固定范围 → 定制层 → L0 验证先行 → L1 AI review（并行 finder + 投票核实）→ L2 安全审查 → L3 必需检查 → L4 分级报告 → 反馈登记。
+
+深度三档（REVIEW.md 可覆盖，缺省 Standard）：
+
+- **Quick**：1 个 finder + 每条 finding 1 个 verifier（其确认即发布）。
+- **Standard**：3 个 finder + 每条 finding 3 个 verifier，≥2 同意才发布。
+- **Deep**：3 个 finder + 每条 finding 5 个 verifier，≥3 同意；finder 须通读改动模块的周边实现再下结论。
+- 成本参考：Standard 全链路 token 开销约为 Quick 的 3–5 倍，按改动规模与风险选档。
+
+**动态复现规则**（finder / verifier / 安全 reviewer 共同遵守）：鼓励在**系统临时目录**对可疑路径做无副作用复现，证据标注「实测」；禁止写入被审仓库的工作区（含未跟踪文件）、禁止破坏性命令与网络外呼。
 
 ## 1. 固定范围
 
-三种模式，先定模式再动手：
-
 - **分支审（默认）**：固定点缺省为 `main` 的 merge-base，即 `git diff main...HEAD`；用户点名其他固定点（commit/branch/tag）则用之。同时取 commit 清单 `git log <固定点>..HEAD --oneline`。
 - **wip 审**：审工作树未提交改动 `git diff HEAD`（含暂存），用于大改动中途早发现问题。
-- **复审**：用户修复后说「复审」触发，见第 6 节。
+- **复审**：用户修复后说「复审」触发，见第 10 节。
 
 预检（失败在此停下，不进 subagent）：固定点能被 `git rev-parse` 解析；diff 非空。
 
@@ -23,23 +30,25 @@ description: 深度多 agent 代码审查——并行多个 subagent 独立找 b
 
 ## 2. 加载定制层
 
-- 仓库根 `REVIEW.md`：有则全程遵守（重点盯防区域、可跳过路径、输出约束、风险分流表、**spec 源声明**）。**没有也照常跑**，用以下内建默认：
-  - 重点盯防区域：无清单，全 diff 平扫；约定依据用已注入上下文的 AGENTS.md / CLAUDE.md，两者都没有就退到通用工程判断；
-  - 输出约束：计数开头总结、Nit ≤ 5、无 finding 明确写「无需修改」、必须 `文件:行号` 证据、丢弃风格/诊断/清理类建议；
-  - 风险分流：报告省略「该亲自看哪部分」提示；
-  - 反馈登记：追加到 `.scratch/review-feedback.md`（目录不存在先建）；
-  - 收尾可顺带问用户：要不要按本仓情况起草一份 REVIEW.md。
-- spec 源（供 spec-checker）按序解析：① 用户在本轮输入里点名的路径；② REVIEW.md 声明的 spec 源（各仓存放约定不同，写在这里）；③ 内建默认——`.scratch/` 下与分支名或当前 feature 匹配的 spec、`specs/`、`docs/` 下的 spec/plan 文档；④ 仍没有就问用户一句「spec 在哪，还是没有」，答没有则 spec 轴跳过，报告里注明「无 spec 可对照」。
-- 仓库的代理指令文件（AGENTS.md / CLAUDE.md）通常已注入你的上下文——它是约定类 finding 的依据，不必重读。
+- 仓库根 `REVIEW.md`：有则全程遵守——重点盯防区域、可跳过路径、输出约束、风险分级 rubric、spec 源、反馈 ledger 路径、评测集路径。**没有也照常跑**，用第 8/9 节的内建默认。
+- spec 源（供 spec-checker）按序解析：① 用户在本轮输入里点名的路径；② REVIEW.md 声明的 spec 源；③ 快速扫常见 spec/plan 目录（specs/、docs/ 等）里与分支或改动主题匹配的文档；④ 仍没有就问用户一句「spec 在哪，还是没有」，答没有则 spec 轴跳过，报告里注明「无 spec 可对照」；无人值守等无法获得回答的场景按「无 spec」处理并注明。
+- 仓库的代理指令文件（AGENTS.md / CLAUDE.md）：它们已在本上下文（没有就先读仓库根）。finder 同时检查两类 finding——**违反其中约定的代码**，以及**使其中内容过时的改动**。
 
-## 3. 并行 finder
+## 3. L0 验证先行
 
-单条消息并行派发（用所在客户端的原生 subagent 机制）：
+- 探测并运行本仓库的测试、linter、类型检查与构建（从 CI 配置、任务运行器或 manifest 里找命令；都没有就按语言惯例探测，如 Python 的 unittest/pytest、Node 的 package.json scripts；再没有就如实标「缺该项证据」，不许静默跳过整层），**原始输出原样记录**，不转述不概括——口头「完成了」不算数。任何一步失败：停在这里，报告失败层与输出，不进后续阶段。
+- **端到端行为验证**：改动触及运行时行为（界面、接口、命令行、服务逻辑）时，把产品实际跑起来确认它能正常工作——环境有浏览器或应用自动化能力、或有现成端到端脚本，就实际操作并留证据（截图、实际输出）；界面改动对照设计规范或预期效果。**没有自动化能力就如实标注「行为未验证」**，把可照做的验证步骤写进报告，不许用「看起来没问题」糊弄。纯文档/测试数据改动跳过本步并注明。
+- 派 1 个 fresh-context subagent 通读 diff，只回答一个问题：**这次改动是否做了它声称要做的事、改变了哪些行为面**。它的回答进入报告的「改动档案」；它顺带发现的问题并入第 5 节汇总池，与 finder 发现同权去重。
+- UI 类改动：有设计规范或预期截图依据时一并提供对照。
 
-- **3 个 bug finder**：各自独立扫全 diff 及周边代码。**不分工、不给不同侧重**——独立性是机制的一部分：同一问题被多个 finder 独立发现即互相印证。
-- **1 个 spec-checker**（有 spec 才派）：对照 spec 找四类偏差——要求缺失、部分实现、做了没要的（scope creep）、看似实现实则不对。
+## 4. L1 AI review：并行 finder
 
-finder 的 prompt 必须包含：diff 命令与 commit 清单；REVIEW.md 全文（若有）；以下输出规则：
+并行派发（用所在客户端的原生 subagent 机制；受环境并发上限时改分批派发，批与批之间互不知晓，独立性不受影响），数量按深度档：
+
+- **bug finder**：各自独立扫全 diff 及周边代码。**不分工、不给不同侧重**——同一问题被多个 finder 独立发现即互相印证。
+- **spec-checker**（有 spec 才派 1 个）：对照 spec 找四类偏差——要求缺失、部分实现、做了没要的（scope creep）、看似实现实则不对。
+
+每个 finder 的 prompt 必须包含：diff 命令与 commit 清单；REVIEW.md 全文（若有）；核心三问——**这个改动是否解决了它声称解决的问题？是否契合系统的整体设计？是否破坏了别处的行为？**；以及：修复类改动要追根因，不只看表象。输出规则：
 
 - 每条 finding 给全：类型（bug / convention / spec）、候选档位（Important / Nit）、`文件:行号`、问题描述、失败场景推演、证据（bug 引代码，convention 引规则原文，spec 引 spec 行）。
 - 丢弃纯风格/诊断/清理类建议（加日志、可重构、命名偏好），除非 REVIEW.md 明确要。
@@ -47,34 +56,61 @@ finder 的 prompt 必须包含：diff 命令与 commit 清单；REVIEW.md 全文
 - 改动只是暴露了旧代码已有的问题 → 标 pre-existing。
 - 直接输出 findings 列表，不写寒暄与过程叙述。
 
-## 4. 逐条 verifier
+## 5. 核实 = 投票
 
-汇总全部 findings 去重（同文件同主题合并，记录每条被几个 finder 独立发现），然后**每条派一个 fresh-context verifier**（同文件的相邻 findings 可合并给一个 verifier 省开销）：
+汇总全部 findings 去重（同文件同主题合并；跨轴撞题时保留证据最全的一条为正文、另一轴引用并入依据；预审与各 finder 的发现同权）。记录每条被几路独立发现。**每条 finding 由一组 fresh-context verifier 独立核实并投票**（人数与发布阈值按深度档；一个 verifier 实例可批量核实多条 finding 省开销——独立性以实例为单位，投票时逐条独立裁决）：
 
 - 只给 finding 全文与相关 diff 位置提示，**不给 finder 的数量与身份**——防锚定。
 - 核实方式按类型：bug → 读当前代码推演该失败场景是否真实成立；convention → 与规则原文逐字比对；spec → 与 spec 原文比对。
-- 裁决三值：confirmed / false-positive / pre-existing，各附一句依据。
-- 只有 confirmed 进正式报告；false-positive 丢弃（计数留给总结）；pre-existing 进附录节。
+- 每个 verifier 独立裁决：confirmed / false-positive / pre-existing，各附一句依据。
+- 达到发布阈值的进正式报告；否则丢弃（计数留给总结）。pre-existing 一律进附录节——不是本次改动引入，不算在作者头上。
 
-## 5. 报告
+## 6. L2 安全审查（独立轮，可阻塞）
 
-- 首行计数总结：`X Important / Y Nit / Z Pre-existing（W 条误报被核实过滤）`。
-- **Important**：每条 文件:行号 + 问题 + 失败场景 + 依据。
-- **Nit**：上限默认 5（REVIEW.md 可改），超出只留最值得修的。
-- **Pre-existing**：一行一条——不是本次改动引入，但值得知道。
+固定再派 **1 个安全 reviewer** subagent（不计入 finder 数）：只看安全面——注入、越权、秘密泄漏、危险命令、资源耗尽、信任边界等通用类别。其 finding 单列「安全」节并标注**阻塞**：存在未解决的安全 finding 时，报告结论是「阻塞合并」，不是普通 Important。
+
+## 7. L3 必需检查
+
+确认 L0 的测试 / lint / 类型 / 构建四类证据齐全且通过（或 CI 已绿）。缺任何一类，报告里如实标注「缺 X 证据」——不许写「应该没问题」。
+
+## 8. L4 分级报告
+
+- **改动档案**（置于报告头）：意图（来自 spec / commit / 用户陈述）、怎么测的、怎么回滚——这三问答不上来本身就是要回应的 finding。
+- 首行计数总结：`X Important / Y Nit / Z Pre-existing / S 安全（阻塞）/ W 条误报被投票过滤`。
+- 节顺序：Important（每条 文件:行号 + 问题 + 失败场景 + 依据）→ Nit（上限默认 5，REVIEW.md 可改，超出只留最值得修的）→ 安全（阻塞项）→ Pre-existing（附录，一行一条）。
 - 没有 finding 就明确写「无需修改」，不许凑数。
-- 若 REVIEW.md 有风险分流表：标注本单涉及的最高档区域，提示用户该亲自看哪部分。
-- 报告末尾附**反馈登记区**：逐条列出 finding 编号，请用户裁决——已修 / 误报 / 有意设计 / 不值得修。用户回复后把裁决追加一行到 `.scratch/review-feedback.md`（REVIEW.md 可指定其他路径）；这个 ledger 是修订 REVIEW.md 的依据，勿删。
+- **风险分级**（默认 rubric，REVIEW.md 可覆盖）：按改动内容定档——
+  - **0 人审**：纯文档、注释、文案、测试数据；
+  - **1 人审**：一般功能改动，及敏感区（并发、持久化、安全面、配置加载）；
+  - **2 人审**：最高风险路径，以及会成为后续模板的架构性改动。
+  - 报告标注本单档位与建议谁看。**agent 的任何裁决都不能顶替人审档位。**
+- 每条 finding 编号，并声明处置要求：修掉，或写明不修的理由——每条 finding 必须被回应。
+- 给修复者的建议：同类 finding 按类型一次修完，别逐条修——每轮新 commit 都会触发新一轮审查。
 
-## 6. 复审与防循环
+## 9. 反馈与改进闭环
 
-复审只针对上次报告之后的新增改动。三条铁规（防 agent 作者与 agent reviewer 循环互审）：
+- **四分类**：修了 / 说错了（AI 理解错）/ 行为是有意设计 / 决定无关紧要。用户对报告回复后，把每条裁决追加到反馈 ledger——路径由 REVIEW.md 声明，缺省为仓库根 `review-feedback.md`。
+- ledger 同时记 **rounds-to-pass**（本单初审 + 几轮复审后通过），这是收敛措施是否生效的观测量。
+- **评测集钩子**：REVIEW.md 声明了历史缺陷评测集路径时，每次修改本 skill 或 REVIEW.md 的规则后，先用评测集回归跑一遍——分数升则保留改动，降则回退。
+- 无 REVIEW.md 时，收尾可问用户：要不要按本仓情况起草一份。好 REVIEW.md 很短：本仓的失败长什么样、nit 上限、可跳过路径、要求文件+行号证据、总结以计数开头、允许「无需修改」。
+
+## 10. 复审与防循环
+
+复审只针对上次报告之后的新增改动。四条铁规（防 agent 作者与 agent reviewer 循环互审）：
 
 - 只看上次报告之后的新增 diff，不重扫全量；
 - 不重复上次已报告的 finding（除非新改动让它恶化）；
+- 新增改动超出「修复本次 findings」的范围 → 视同新改动，回全量审；
 - 复审上限 2 轮，到顶输出终报并如实说明剩余风险。
 
-## 7. 边界
+## 11. 边界
 
-- 审到报告为止：不自动修复、不自动 commit。
-- subagent 不可用的环境：退化为单上下文自查，并在报告开头声明「未经交叉核实」。
+- 审到报告为止：不自动修复、不 commit、**不 approve**——只发 finding，合并永远是人决定。
+- **agent 审查通过 ≠ 人工批准**；风险分档决定人必须看什么，agent 结论不能冲抵。
+- 人保留的职责：要不要做（方向、品味、范围）、高风险代码、会成为模板的架构、阅读证据、对结果负责。
+- L5/L6 出界声明：合并队列重跑、flag 渐进发布、遥测监控与事故复盘是部署侧实践，本 skill 不模拟；报告里的「怎么回滚」与「风险分档」是它们在审查侧的替身。
+- subagent 不可用的环境：退化为单上下文自查，并在报告开头声明「未经交叉核实与投票」。
+
+## 内建默认速查（无 REVIEW.md 时）
+
+Nit ≤ 5；风险分级 rubric 如第 8 节；反馈 ledger 落仓库根 `review-feedback.md`；无评测集；深度 Standard；spec 源走第 2 节四级解析。

@@ -24,7 +24,7 @@
 
 ## 输出约束
 
-- 总结以计数开头：X Important / Y Nit / Z Pre-existing。
+- 总结以计数开头：X Important / Y Nit / Z Pre-existing / S 安全（阻塞）/ W 条误报被投票过滤。
 - Nit 上限 5 条。
 - 无 finding 明确写「无需修改」，不许凑数。
 - 每条 finding 给 `文件:行号` 与失败场景；只凭符号名推断的不收。
