@@ -46,9 +46,33 @@ class BlockLimitExceeded(ValueError):
 
 
 class MemoryEditValidationError(ValueError):
-    """编辑指令未通过阶段 1 校验（动作与目标不匹配、缺必要字段）。
+    """编辑指令未通过阶段 1 校验（动作与目标不匹配、缺必要字段、编号非法）。
 
-    与阶段 2 的应用期错误（match 命中不到旧行、块写入超限/read_only）区分：只有
-    校验错误被上抛（原子性——一条不写）；应用期错误计入连败计数，连败 3 次强制
-    前进游标，避免同一批编辑被无限重放。
+    与阶段 2 的应用期错误（定位失败、块写入超限/read_only）区分：只有校验错误被
+    上抛（原子性——一条不写），且不计入连败计数；应用期错误逐条跳过并留日志，一条
+    都没落盘时计入连败，连败 3 次强制前进游标，避免同一批编辑被无限重放。
     """
+
+
+class MemoryEditTargetNotFound(ValueError):
+    """supersede/drop 的编号定位不到旧行。
+
+    两种来源：编号不存在（模型编造或越界），或编号那一行的原文已不在块里（快照
+    之后被其他写者改写）。两者都是**无副作用**的失败——什么都没写，所以整合器
+    可以安全地补一条修复轮；这与「应用失败重放会产生重复写入」的其它错误不同。
+
+    Attributes:
+        target: str，指令声明的目标类型
+        line: int | None，指令给出的快照编号
+    """
+
+    def __init__(self, target: str, line: int | None) -> None:
+        """构造定位失败异常。
+
+        Args:
+            target: str，指令声明的目标类型
+            line: int | None，指令给出的快照编号
+        """
+        super().__init__(f"line {line} not found for {target}")
+        self.target = target
+        self.line = line
