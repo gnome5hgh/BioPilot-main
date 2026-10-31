@@ -1,15 +1,15 @@
 # intent-quality — 意图不生效 / 判错类别 / 启动退出（旧称「路由异常 / 澄清不触发」，那两个概念已退役）
 
-先分清是哪一版。意图层现在的形态是**两层**：**规则层**（`.paperflow/intent/rules.yaml` 的高精度模式，命中即定类、置信度记 1.0，规则层**不做抑制**）与**判定服务**（`typesafe-ai/jev`，只在规则层不命中时才用）。**没有阈值、没有多标签、没有澄清、没有边界仲裁**——遇到这些概念先确认说的是旧版本。条目按发现顺序追加，旧条目保留在下面并标注已过时。
+先分清是哪一版。意图层现在的形态是**两层**：**规则层**（`.biopilot/intent/rules.yaml` 的高精度模式，命中即定类、置信度记 1.0，规则层**不做抑制**）与**判定服务**（`typesafe-ai/jev`，只在规则层不命中时才用）。**没有阈值、没有多标签、没有澄清、没有边界仲裁**——遇到这些概念先确认说的是旧版本。条目按发现顺序追加，旧条目保留在下面并标注已过时。
 
 ### 意图识别错类 / acc 异常下降（已过时 2026-10-14：阈值与标定随混合路由退役，现状见下面「意图判错类别」条）
 - **根因**：阈值被手改或标定未落地。主类阈值与拆分门 `steps_threshold` 独立标定（重扫口径下单独定的），散改常量会破坏一致性；生产基线 acc 0.772。
-- **修法**：阈值改动一律走 `scripts/intent/calibration/apply_calibration.py`（patch `paperflow/config.py`，覆盖 pipeline/bm25/confirm），不手改。
+- **修法**：阈值改动一律走 `scripts/intent/calibration/apply_calibration.py`（patch `biopilot/config.py`，覆盖 pipeline/bm25/confirm），不手改。
 - **验证**：`scripts/intent/eval/` 意图套件 acc 恢复 0.77 量级。
 
 ### 两类贴近时判错（边界仲裁）（已过时 2026-10-14：仲裁层与 `core/intent/pipeline.py` 都已退役）
 - **根因**：top-2 业务候选分数贴近且边界仲裁层未生效（仲裁层：贴近时交 LLM 二选一）。
-- **修法**：确认 `paperflow/core/intent/pipeline.py` 中仲裁路径可达；检查是否被指令前缀类改动绕过（指令前缀对意图模型有害，属已知结论）。
+- **修法**：确认 `biopilot/core/intent/pipeline.py` 中仲裁路径可达；检查是否被指令前缀类改动绕过（指令前缀对意图模型有害，属已知结论）。
 - **验证**：构造边界样例（路由例句库 goldens/），仲裁命中且二选一正确。
 
 ### 澄清从不触发（已过时 2026-10-14：澄清通道整体退役，意图层不再提问；现状见下面「意图层像没生效」条）
@@ -18,7 +18,7 @@
 - **验证**：门禁声明按预期控制澄清是否提问。
 
 ### 路由结果与例句库对不上 / 向量缓存行为异常（已过时 2026-10-14：路由知识库与 `routes_vectors.npz` 已随混合路由退役）
-- **根因**：`.paperflow/intent/routes_vectors.npz`（gitignored 运行时产物，路径声明在 `paperflow/core/intent/routing/route_loader.py`）与路由例句不同步——例句改了缓存没重建。
+- **根因**：`.biopilot/intent/routes_vectors.npz`（gitignored 运行时产物，路径声明在 `biopilot/core/intent/routing/route_loader.py`）与路由例句不同步——例句改了缓存没重建。
 - **修法**：删除该 npz 重建路由向量缓存，重启会话。
 - **验证**：改例句后路由行为随之变化；缓存文件时间戳晚于例句修改时间。
 
@@ -29,7 +29,7 @@
 
 ### 意图已启用却启动即退出（exit 1）
 - **根因**：知识库 fail-closed 校验不过——`load_taxonomy()` 抛 `TaxonomyError`：类别缺条目 / 缺描述 / 缺示例、规则指向未知类别、模式非法正则、模式与示例逐字重复。装配层打印一行「意图识别已启用，但知识库装载失败：<具体原因>」后 `sys.exit(1)`（这是配置与数据错误，必须人去改，所以刻意 fail-closed 而不是降级）。
-- **修法**：按那行提示改 `.paperflow/intent/taxonomy.yaml` 或 `rules.yaml`——错误信息会点名具体类别。
+- **修法**：按那行提示改 `.biopilot/intent/taxonomy.yaml` 或 `rules.yaml`——错误信息会点名具体类别。
 - **验证**：重启能进 REPL。
 
 ### 意图判错类别（规则层误命中 / 判定服务判错）

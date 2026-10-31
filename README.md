@@ -1,4 +1,4 @@
-# paperFlow
+# BioPilot
 
 LLM 驱动的学术研究流程助手：一个交互式终端 REPL，围绕「读论文 → 做笔记 → 追问题」的科研工作流，提供多 Agent 协作、RAG 知识库检索、引用管理与记忆系统。
 
@@ -10,7 +10,7 @@ LLM 驱动的学术研究流程助手：一个交互式终端 REPL，围绕「�
 - **引用管理**：BibTeX 文库读写、语料标题索引、引用溯源，支持 APA / GB/T 7714 等格式
 - **视觉分析**：PDF 图表区域检测与提取，原图入 MinIO 对象存储，多模态模型看图解读
 - **记忆系统**：对话持久化 + 分层记忆块 + 后台 debounce 记忆整合 + 会话回放（`--resume`）
-- **Skills 机制**：`.paperflow/skills/` 单级目录 + 集中 lock 文件
+- **Skills 机制**：`.biopilot/skills/` 单级目录 + 集中 lock 文件
 - **MCP 接入**：桥接外部 MCP server 的工具，写类工具逐次确认，`write_tools` 预批准
 
 ## 环境要求
@@ -40,17 +40,17 @@ docker compose up -d
 curl http://localhost:9091/healthz   # → OK
 
 # 4. 启动交互式 REPL（启动预检会自动探测依赖服务）
-paperflow
+biopilot
 ```
 
-REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/mcp` 查看 MCP server 状态、`/version` 查看版本。历史会话可用 `paperflow --resume` 回放。
+REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/mcp` 查看 MCP server 状态、`/version` 查看版本。历史会话可用 `biopilot --resume` 回放。
 
 ### 一键安装提示词
 
 把下面整段提示词复制给你的 AI 编码工具（ZCode / Claude Code / Codex 等），它会照着在当前仓库里把环境装好并验证：
 
 ```text
-请帮我在本机把 paperFlow 的开发环境装好并验证通过。仓库就是当前工作目录。
+请帮我在本机把 BioPilot 的开发环境装好并验证通过。仓库就是当前工作目录。
 
 要求：只做环境安装与配置，不要改任何源码。
 
@@ -69,13 +69,13 @@ REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/mcp`
    这两个是必填项；我若给不出，就把情况告诉我，不要随便填。
 8. 验证：
    - python -m pytest tests/ -q（单测用 Milvus Lite 内嵌，不依赖服务栈）
-   - 启动 paperflow，确认没有「依赖服务未就绪」这类警告
+   - 启动 biopilot，确认没有「依赖服务未就绪」这类警告
 9. 每一步做完向我汇报。任何一步失败，把原始报错贴给我并说明你的修复方案，不要静默跳过或降级处理。
 ```
 
 ## 配置说明
 
-所有可调参数的默认值唯一声明在 `paperflow/config/schemas/sections.py`（dataclass 字段默认值），`config.yaml` 是纯覆盖文件——只写要改的值，未列出的字段回落代码默认值。主要配置段：
+所有可调参数的默认值唯一声明在 `biopilot/config/schemas/sections.py`（dataclass 字段默认值），`config.yaml` 是纯覆盖文件——只写要改的值，未列出的字段回落代码默认值。主要配置段：
 
 | 配置段 | 用途 |
 |---|---|
@@ -89,12 +89,12 @@ REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/mcp`
 | `agents.timeouts` | 子 agent 超时覆盖表（仅 YAML 可配） |
 | `mcp_servers` | 外部 MCP server 接入（transport / 工具白名单 / 写类确认） |
 
-API key 也可经环境变量提供（如 `PAPERFLOW_LLM_API_KEY`、`PAPERFLOW_RAG_EMBEDDING_API_KEY`、`PAPERFLOW_VISION_API_KEY`）。
+API key 也可经环境变量提供（如 `BIOPILOT_LLM_API_KEY`、`BIOPILOT_RAG_EMBEDDING_API_KEY`、`BIOPILOT_VISION_API_KEY`）。
 
 ## 架构概览
 
 ```
-paperflow/
+biopilot/
   cli/           装配根:对象图组装 + 启动预检
   config/        全局可调参数的唯一声明点
   core/          核心运行层:agent(ReAct 循环) / llm(客户端 + 结构化输出)
@@ -107,11 +107,11 @@ paperflow/
   terminal/      终端交互层:REPL + 活动流渲染 + 确认中心 + 会话回放
 
 agents/          各角色 agent 的 AGENT.md + tools.py（插件目录，位于仓库根）
-.paperflow/      运行时数据根与资产目录:skills(流程 skill) / intent(意图知识库)
+.biopilot/      运行时数据根与资产目录:skills(流程 skill) / intent(意图知识库)
 ```
 
 数据流：用户输入 →（可选）意图识别 → supervisor ReAct 循环（必要时 spawn 子 agent）→ 工具调用（本地工具 + MCP 工具）→ 结构化摘要聚合 → 流式回答。
 
 ## AI 协作入口
 
-仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`paperflow/` 及其 `cli/`、`config/`、`core/`（再往下十二份）、`tools/`、`citations/`、`terminal/`，以及 `agents/`、`.paperflow/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。
+仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`biopilot/` 及其 `cli/`、`config/`、`core/`（再往下十二份）、`tools/`、`citations/`、`terminal/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。

@@ -10,18 +10,18 @@
 溯源核验(核 `[来源:key§节]` / `**论文引用**` 的 key 是否真实存在于 references.bib)
 派发 citation-agent——引用库的读写归它,本角色不装配引用工具,也不信任标注本身。
 """
-from paperflow.config import PaperFlowConfig
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools import (
+from biopilot.config import BioPilotConfig
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools import (
     ReadFileTool, ReadPdfTool, FormatCheckTool, SubmitReviewTool,
     LookupVenueRankTool, SubmitDownloadReviewTool, GlobTool, GrepTool,
 )
-from paperflow.tools.orchestration.spawn import SpawnSubAgentTool
-from paperflow.tools.recall import get_recall_tools
+from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from biopilot.tools.recall import get_recall_tools
 
-TOOLS = make_tools(PaperFlowConfig.from_env(), [
+TOOLS = make_tools(BioPilotConfig.from_env(), [
     ReadFileTool, ReadPdfTool, FormatCheckTool, SubmitReviewTool,
     LookupVenueRankTool, SubmitDownloadReviewTool, GlobTool, GrepTool,
-    SpawnSubAgentTool(agent_timeouts=PaperFlowConfig.from_env().agents.timeouts,
-                   max_turns=PaperFlowConfig.from_env().agents.max_turns),
+    SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
+                   max_turns=BioPilotConfig.from_env().agents.max_turns),
 ]) + get_recall_tools()

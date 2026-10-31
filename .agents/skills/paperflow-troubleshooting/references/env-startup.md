@@ -2,19 +2,19 @@
 
 按报错关键词 Ctrl-F 定位。条目按发现顺序追加，不重排。
 
-### 「paperflow 起来就退出了」且无报错（REPL EOF）
+### 「biopilot 起来就退出了」且无报错（REPL EOF）
 - **根因**：REPL 经 `conda run` 启动，stdin 未转发 → `input()` 立即 EOF。
-- **修法**：`conda activate paperflow` 后直接运行 `paperflow`（等价 `python -m paperflow`），不经 `conda run`。
+- **修法**：`conda activate biopilot` 后直接运行 `biopilot`（等价 `python -m biopilot`），不经 `conda run`。
 - **验证**：REPL 提示符出现且可交互输入。
 
 ### `SyntaxError` / `compile()` 报错但代码看起来没问题（Python 3.13 代理字符）
 - **根因**：用系统 `python3`（3.13）跑了项目代码；3.13 对含代理字符的 docstring 的 `compile()` 更严格，3.11（项目 env）可通过。
-- **修法**：改用 `conda run -n paperflow python …`；脚本内的 shebang/调用链一并检查。
-- **验证**：同一命令在 paperflow env 下通过；`conda run -n paperflow python -V` 输出 3.11.x。
+- **修法**：改用 `conda run -n biopilot python …`；脚本内的 shebang/调用链一并检查。
+- **验证**：同一命令在 biopilot env 下通过；`conda run -n biopilot python -V` 输出 3.11.x。
 
 ### Milvus 容器反复重启 / crash loop（Standalone 崩溃循环）
 - **根因**：Docker VM 内存不足（曾默认 1.9G，Milvus Standalone 崩溃循环）。
-- **修法**：Docker Desktop 调 VM 内存 ≥4GB 后 `docker compose up -d` 重建；数据卷在 `.paperflow/infra/milvus/` 不用动。
+- **修法**：Docker Desktop 调 VM 内存 ≥4GB 后 `docker compose up -d` 重建；数据卷在 `.biopilot/infra/milvus/` 不用动。
 - **验证**：`docker compose ps` 中 milvus 状态 Up 且 9091 健康检查通过，不再重启。
 
 ### 批量入库被某一篇 PDF 中断（旧工具名 `index_all`，该工具已退役）
@@ -34,8 +34,8 @@
 - **验证**：单个子 agent 的 `read_pdf` 不连续跑多个不同 path；单篇精读子任务不撞超时帽。
 
 ### 启动报「LLM API key 未配置」
-- **根因**：`config.yaml` 的 `llm.api_key` 未配且无环境变量 `PAPERFLOW_LLM_API_KEY`；`config.yaml` gitignored，新环境常缺。
-- **修法**：`cp config.example.yaml config.yaml` 后填 key；RAG 的 key 独立配 `rag.embedding.api_key` 或 `PAPERFLOW_RAG_EMBEDDING_API_KEY`。
+- **根因**：`config.yaml` 的 `llm.api_key` 未配且无环境变量 `BIOPILOT_LLM_API_KEY`；`config.yaml` gitignored，新环境常缺。
+- **修法**：`cp config.example.yaml config.yaml` 后填 key；RAG 的 key 独立配 `rag.embedding.api_key` 或 `BIOPILOT_RAG_EMBEDDING_API_KEY`。
 - **验证**：启动不再报 key 错误，进入正常对话。
 
 ### 检索只有 BM25 结果 / 稠密路静默消失
@@ -44,19 +44,19 @@
 - **验证**：查询时日志无「RAG 查询编码失败，本次退化为纯 BM25 检索」告警；检索结果含向量召回来源。
 
 ### BM25 检索结果缺失或与重启前不一致（重启后漂移）
-- **根因**：旧版本重启后 BM25 索引未恢复；已在 `paperflow/core/rag/services/retriever.py`（BM25 进程级裸 rebuild，自向量库重建）修复。命中此症状说明代码是旧版本。
+- **根因**：旧版本重启后 BM25 索引未恢复；已在 `biopilot/core/rag/services/retriever.py`（BM25 进程级裸 rebuild，自向量库重建）修复。命中此症状说明代码是旧版本。
 - **修法**：更新到含裸 rebuild 的版本；临时绕过可触发一次任意查询（首查即重建）。
 - **验证**：重启后首次查询结果与重启前一致；`retriever.py` 中存在 rebuild 恢复逻辑。
 
-### 想跳过启动时的服务预检（PAPERFLOW_SKIP_BOOTSTRAP）
+### 想跳过启动时的服务预检（BIOPILOT_SKIP_BOOTSTRAP）
 - **根因**：启动自动探测 Milvus，服务未起时会拉起 docker（可能很慢或失败刷屏）。
-- **修法**：`PAPERFLOW_SKIP_BOOTSTRAP=1` 跳过预检；服务失败本就只警告不阻塞（软依赖降级）。
+- **修法**：`BIOPILOT_SKIP_BOOTSTRAP=1` 跳过预检；服务失败本就只警告不阻塞（软依赖降级）。
 - **验证**：设变量后启动秒进 REPL，无服务探测输出。
 
 ### 改了 `config.yaml` 里的一个字段，程序行为完全没变（无报错、静默不生效）
-- **根因**：2026-10-05 配置模块化（spec 2026-10-05-constants-and-config-reorg）后 `config.yaml` 是纯覆盖文件，加载器 `_merge`（`paperflow/config/services/loader.py`）对 dataclass 树里不存在的键**静默忽略、不报错**；键名一次性迁移且无兼容层——按旧平铺键名（如 `milvus_uri`，`docs/SERVER.md` 仍这么写）或拼错、放错层级的字段改动等于没改。另注意：优先级 `PAPERFLOW_*` 环境变量 > YAML，且 config 仅启动时 `from_env()` 加载一次，改完必须重启进程。
-- **修法**：键名/层级对照 `config.example.yaml` 与 `paperflow/config/schemas/sections.py` 的 dataclass 字段路径改写（旧→新键映射见 spec §4）；重启进程；确认 shell/`.env` 无同名 `PAPERFLOW_*` 变量顶掉 YAML 值。
-- **验证**：`conda run -n paperflow python -c "from paperflow.config import PaperFlowConfig; print(PaperFlowConfig.from_env().<改动字段的路径，如 rag.storage.uri>)"` 输出与 config.yaml 改后的值一致；不一致时按 `tests/core/test_config.py` 的 `_leaf_unknowns` 口径扫 config.yaml 未生效键（未知键列表应只为命中的旧键）。
+- **根因**：2026-10-05 配置模块化（spec 2026-10-05-constants-and-config-reorg）后 `config.yaml` 是纯覆盖文件，加载器 `_merge`（`biopilot/config/services/loader.py`）对 dataclass 树里不存在的键**静默忽略、不报错**；键名一次性迁移且无兼容层——按旧平铺键名（如 `milvus_uri`，`docs/SERVER.md` 仍这么写）或拼错、放错层级的字段改动等于没改。另注意：优先级 `BIOPILOT_*` 环境变量 > YAML，且 config 仅启动时 `from_env()` 加载一次，改完必须重启进程。
+- **修法**：键名/层级对照 `config.example.yaml` 与 `biopilot/config/schemas/sections.py` 的 dataclass 字段路径改写（旧→新键映射见 spec §4）；重启进程；确认 shell/`.env` 无同名 `BIOPILOT_*` 变量顶掉 YAML 值。
+- **验证**：`conda run -n biopilot python -c "from biopilot.config import BioPilotConfig; print(BioPilotConfig.from_env().<改动字段的路径，如 rag.storage.uri>)"` 输出与 config.yaml 改后的值一致；不一致时按 `tests/core/test_config.py` 的 `_leaf_unknowns` 口径扫 config.yaml 未生效键（未知键列表应只为命中的旧键）。
 
 ### 重负载任务跑到一半 Milvus 崩溃循环（`streaming node is not alive` / `Slow etcd operation` / `session is expired`）
 - **根因**：与上一条同源但触发条件不同——不是 VM 一开始就太小，而是**任务把 VM 内存吃穿**。Docker VM 约 3.9GB，其中 Milvus 栈（etcd + minio + standalone）并发检索/写入时能占 1GB+。实测一次「读一下某目录下所有论文」：Milvus 在 13 分钟内重启 9 次（此前累计 RestartCount 25），随后整个 OrbStack VM 也重启一次（表现为**所有**容器同时变成 `Up N seconds`，RestartCount 清零）。VM 内内存耗尽后 Milvus 的 datanode/mixcoord/streamingnode 拿不到 etcd 租约（日志依次出现 `etcdserver: request timed out, waiting for the applied index took too long`、`Slow etcd operation`、`streaming node is not alive`、`confirm the lease is expired`）→ standalone 进程退出，`restart: unless-stopped` 反复拉起。宿主同为内存紧张时（`sysctl vm.swapusage` 显示 swap 用量高、宿主 load average 远超核数）会加剧。
@@ -65,8 +65,8 @@
 - **验证**：重负载任务跑完后 `docker inspect milvus-standalone --format '{{.RestartCount}}'` 不再增长；`curl -s localhost:9091/healthz` 持续返回 OK；`docker ps` 各容器 uptime 连续不归零。
 
 ### Milvus 半死时单次 `rag_retrieve` 阻塞 25~90 秒（`Connection recovery failed` / `Fail connecting to server on localhost:19530` / `DEADLINE_EXCEEDED`）
-- **根因**：Milvus 端口仍开着但服务已半死（或正在重启）时，检索不是立刻失败而是长时间阻塞——`paperflow/core/rag/storage/vector_store.py` 构造 `MilvusClient(uri=uri)` **未传 timeout**，全部 RPC 也无 timeout，于是走 pymilvus 默认值：`retry_on_rpc_failure`（`retry_times=75`、backoff 上限 3s）与 `connection_manager._recover → reconnect`（connect deadline 被规范化为 10s）。而一次 `Retriever.retrieve()` 要做**多次** Milvus RPC（首次 `all_documents()` 重建 BM25 + 每个改写 query 一次 `query` + 至多两次 `fetch_by_ids`），几个 10s 恢复等待累加即 25s/64s/90s 量级。**下面这些「没有超时、没有熔断」的断言说的是当时那个版本**——当时 `RAGService.milvus_available()` 结果永久缓存且无人调用（现已是带 TTL 的可连性探测，并被 `IndexStatus` 消费）。
-- **放大伤害**：子 agent 超时帽是预算制（当时 qa-agent 默认 180s——该角色已删除；现役同类角色 note-agent 900s / paper-agent 420s，见 `paperflow/config/schemas/sections.py` 与 `config.agents.timeouts`），1~2 次阻塞检索就能吃穿整个预算 → 子 agent `timeout` → supervisor 重派仍超时 → 整轮十几分钟拿不到结果，最后只能转成向用户请示（旧的 `ask_user` 工具已删除——现在是把问题写进最终回答）。
-- **附注**：Milvus 不可用时 `rag_retrieve` **不会**软降级成纯 BM25，而是返回固定文本「⚠️ 向量检索不可用（Milvus 异常）」（`paperflow/tools/rag/rag_retrieve.py`）；`Retriever` 里只有 embedding 与 reranker 两路有 try/except，向量路与 BM25 路的 `fetch_by_ids` 均无保护——BM25 索引虽在本地内存，其元数据仍依赖 Milvus，所以「退纯 BM25」在 Milvus 挂掉时物理上不可行。别把这条与「embedding 未配 key → 退纯 BM25」的软降级混淆。
-- **修法（已实施）**：各 RPC 传 `rag.storage.timeout`（读路径 5s / 写路径 60s），并在 `rag_retrieve` 边界加检索侧熔断器（`paperflow/core/rag/services/breaker.py`，冷却 60s，跳闸期间直接返回降级文本）。旧版本上遇到时先升到含 `RetrievalBreaker` 的版本。
+- **根因**：Milvus 端口仍开着但服务已半死（或正在重启）时，检索不是立刻失败而是长时间阻塞——`biopilot/core/rag/storage/vector_store.py` 构造 `MilvusClient(uri=uri)` **未传 timeout**，全部 RPC 也无 timeout，于是走 pymilvus 默认值：`retry_on_rpc_failure`（`retry_times=75`、backoff 上限 3s）与 `connection_manager._recover → reconnect`（connect deadline 被规范化为 10s）。而一次 `Retriever.retrieve()` 要做**多次** Milvus RPC（首次 `all_documents()` 重建 BM25 + 每个改写 query 一次 `query` + 至多两次 `fetch_by_ids`），几个 10s 恢复等待累加即 25s/64s/90s 量级。**下面这些「没有超时、没有熔断」的断言说的是当时那个版本**——当时 `RAGService.milvus_available()` 结果永久缓存且无人调用（现已是带 TTL 的可连性探测，并被 `IndexStatus` 消费）。
+- **放大伤害**：子 agent 超时帽是预算制（当时 qa-agent 默认 180s——该角色已删除；现役同类角色 note-agent 900s / paper-agent 420s，见 `biopilot/config/schemas/sections.py` 与 `config.agents.timeouts`），1~2 次阻塞检索就能吃穿整个预算 → 子 agent `timeout` → supervisor 重派仍超时 → 整轮十几分钟拿不到结果，最后只能转成向用户请示（旧的 `ask_user` 工具已删除——现在是把问题写进最终回答）。
+- **附注**：Milvus 不可用时 `rag_retrieve` **不会**软降级成纯 BM25，而是返回固定文本「⚠️ 向量检索不可用（Milvus 异常）」（`biopilot/tools/rag/rag_retrieve.py`）；`Retriever` 里只有 embedding 与 reranker 两路有 try/except，向量路与 BM25 路的 `fetch_by_ids` 均无保护——BM25 索引虽在本地内存，其元数据仍依赖 Milvus，所以「退纯 BM25」在 Milvus 挂掉时物理上不可行。别把这条与「embedding 未配 key → 退纯 BM25」的软降级混淆。
+- **修法（已实施）**：各 RPC 传 `rag.storage.timeout`（读路径 5s / 写路径 60s），并在 `rag_retrieve` 边界加检索侧熔断器（`biopilot/core/rag/services/breaker.py`，冷却 60s，跳闸期间直接返回降级文本）。旧版本上遇到时先升到含 `RetrievalBreaker` 的版本。
 - **验证**：`docker stop milvus-standalone` 后调一次 `rag_retrieve`，应在数秒内返回降级文本，而不是阻塞数十秒；再调一次应瞬时返回（熔断短路）；Milvus 起来后过冷却窗口自动恢复，无需重启进程。

@@ -1,0 +1,9 @@
+"""spawn 派发的跨层契约（单一真相源）。
+
+枚举在 `enums/`（一枚举一文件，本轮是派发结局）；本包只做再导出，消费方一律从
+`biopilot.tools.orchestration.constants` 取。
+"""
+
+from .enums import SubAgentStatus
+
+__all__ = ["SubAgentStatus"]

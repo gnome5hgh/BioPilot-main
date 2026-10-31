@@ -15,13 +15,13 @@
 失败如实回报，是否请示用户由上级决定。也不装记忆工具：
 检索与索引维护不产生需要沉淀的清单或历史。
 """
-from paperflow.config import PaperFlowConfig
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools.rag import (IndexPathsTool, IndexStatusTool, RagRetrieveTool,
+from biopilot.config import BioPilotConfig
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools.rag import (IndexPathsTool, IndexStatusTool, RagRetrieveTool,
                                  ReindexAllTool, ViewImageTool)
-from paperflow.tools.recall import get_recall_tools
+from biopilot.tools.recall import get_recall_tools
 
 # config 在 import 时构造（每进程静态、无副作用，对齐 make_tools 惯例）
-TOOLS = make_tools(PaperFlowConfig.from_env(), [
+TOOLS = make_tools(BioPilotConfig.from_env(), [
     RagRetrieveTool, ViewImageTool, IndexPathsTool, ReindexAllTool, IndexStatusTool,
 ]) + get_recall_tools()

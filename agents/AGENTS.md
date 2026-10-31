@@ -30,7 +30,7 @@
 ## Core Logic
 
 - **判据是「一个 agent = 一类产物的责任人」**：每个领域角色独占自己那类产物的读写，其余角色需要时**派发**它，而不是自己装工具。只读召回（会话检索、工具结果回取）是例外：它不产生领域产物，装配给所有 agent。`supervisor` 只编排，不持有任何执行类工具，工具面是 spawn + 只读召回。
-- **通用铁律不重复写**：诚实性协议、交付契约语义、协作语义都已下沉到全 agent 共有的行为基座（`paperflow/core/agent/constants/base_prompt.py`）。`AGENT.md` 只写角色特有契约。
+- **通用铁律不重复写**：诚实性协议、交付契约语义、协作语义都已下沉到全 agent 共有的行为基座（`biopilot/core/agent/constants/base_prompt.py`）。`AGENT.md` 只写角色特有契约。
 - **权限最小化**：`allowed_spawns` 由派发工具在运行时强制（它同时是可派发清单的派生来源）；叶子角色不递归派发；`supervisor` 不装 skill 工具，这是代码级红线。
 - **命名一律 `<域>-agent`**，`supervisor` 是唯一例外（它是编排层，不是领域责任人）。
 
@@ -38,15 +38,15 @@
 
 - 各 `agents/<name>/AGENT.md` — 契约与启发式（frontmatter 含名字、描述、可派发清单）
 - 各 `agents/<name>/tools.py` — 模块级工具列表
-- `paperflow/core/agent/services/registry.py` — 插件发现的唯一入口
-- `paperflow/core/agent/constants/base_prompt.py` — 全 agent 共有的行为基座
+- `biopilot/core/agent/services/registry.py` — 插件发现的唯一入口
+- `biopilot/core/agent/constants/base_prompt.py` — 全 agent 共有的行为基座
 
 ## Usage And Change Notes
 
 - **每个插件恰好两个文件**：`AGENT.md`（YAML frontmatter + Markdown 正文）与 `tools.py`（模块级工具列表）。多余的辅助文件不会被加载。
 - **`name` 必须与目录名一致**，`allowed_spawns` 只能引用已存在的角色。这两条注册期不校验，写错要到运行时才暴露。
 - **正文是契约，不是流程**：派发类角色用五段式（身份 / 边界 / 能力 / 交付契约 / 方法启发式），审查角色按角色裁剪。**不在 `AGENT.md` 里写跨 agent 的编排序列**——编排由 LLM 运行时自主决定。
-- **流程沉在 skill 里**：写笔记、写选题计划、三类审查的具体步骤在 `.paperflow/skills/` 的流程 skill 中，`AGENT.md` 只写契约并指向它；产物标准（模板）作为 skill 的资源随流程分发，审查方持有自己那一份。
+- **流程沉在 skill 里**：写笔记、写选题计划、三类审查的具体步骤在 `.biopilot/skills/` 的流程 skill 中，`AGENT.md` 只写契约并指向它；产物标准（模板）作为 skill 的资源随流程分发，审查方持有自己那一份。
 - **权限最小化**：`allowed_spawns` 与风险档位由框架强制，不靠提示词自律。
 - **产物落点「用户指定优先，否则 config 默认」**：默认落各自的 config 根（笔记 / 选题产物 / 下载的 PDF 三类），但任务文本点名了保存位置就落那里——**用户的原话到不了子 agent**，supervisor 负责把那个绝对路径原样拼进子任务文本。改了落点要清掉旧稿，同一份产物不留两份。
 - **「问用户」不是工具**：子 agent 不能在子任务中途向用户提问——它把缺口写进**最终回答**（配置问询回调的同步确认与此无关，那是风险档位触发的策略升级）。需要用户给信息时，写进最终回答并结束本轮，由 supervisor 决定是否转达。
@@ -55,36 +55,36 @@
 
 ## Dependencies And Collaboration
 
-- 每个角色声明自己的工具；装配层（`paperflow/cli/services/assembly.py`）决定谁装哪些工具与回调。
+- 每个角色声明自己的工具；装配层（`biopilot/cli/services/assembly.py`）决定谁装哪些工具与回调。
 - 角色之间不直接调用，全部经 supervisor 派发。
 - 角色的 `description` 会被自动收进**每个可派发角色**的 system 消息里的可派发清单——清单由该角色自己的 `allowed_spawns` 派生，没有 `allowed_spawns` 的叶子角色不生成该块。派发方按能力选型，**没有「意图 → 子 agent」映射表要维护**。
 
 ## Investigation Rule
 
 1. 先读目标角色的 `AGENT.md`（契约与启发式），再看 `tools.py`（实际能力），最后才看装配层。
-2. 角色拿到或拿不到某个工具，看装配层；派发被拒看 `paperflow/tools/orchestration/spawn.py`；插件没被发现看 `paperflow/core/agent/services/registry.py`。
+2. 角色拿到或拿不到某个工具，看装配层；派发被拒看 `biopilot/tools/orchestration/spawn.py`；插件没被发现看 `biopilot/core/agent/services/registry.py`。
 3. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands
 
 ```bash
-conda run -n paperflow python -m pytest tests/agents -q
+conda run -n biopilot python -m pytest tests/agents -q
 ```
 
 ## Verification
 
 ```bash
-conda run -n paperflow python -m pytest tests/agents -q
+conda run -n biopilot python -m pytest tests/agents -q
 ```
 
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 运行时与注册：[`../paperflow/core/AGENTS.md`](../paperflow/core/AGENTS.md)
-- 运行时 skill 体系：[`../.paperflow/AGENTS.md`](../.paperflow/AGENTS.md)
+- 运行时与注册：[`../biopilot/core/AGENTS.md`](../biopilot/core/AGENTS.md)
+- 运行时 skill 体系：[`../.biopilot/AGENTS.md`](../.biopilot/AGENTS.md)
 
 ## References
 
 - [`supervisor/AGENT.md`](supervisor/AGENT.md)
-- [`AGENT.md` 与 `tools.py` 的加载实现](../paperflow/core/agent/services/registry.py)
-- [`../paperflow/core/agent/constants/base_prompt.py`](../paperflow/core/agent/constants/base_prompt.py)
+- [`AGENT.md` 与 `tools.py` 的加载实现](../biopilot/core/agent/services/registry.py)
+- [`../biopilot/core/agent/constants/base_prompt.py`](../biopilot/core/agent/constants/base_prompt.py)

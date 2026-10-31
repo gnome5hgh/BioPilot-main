@@ -1,11 +1,11 @@
 ---
-name: paperflow-troubleshooting
-description: 排查 paperFlow 项目问题：启动失败/报错、Milvus 服务异常、检索不到或不准、意图不生效或判错类别、测试失败。触发：用户说「排查」「报错了」「起不来」「为什么检索不到」「意图识别不对」「测试挂了」，或准备对本项目异常下结论之前。
+name: biopilot-troubleshooting
+description: 排查 BioPilot 项目问题：启动失败/报错、Milvus 服务异常、检索不到或不准、意图不生效或判错类别、测试失败。触发：用户说「排查」「报错了」「起不来」「为什么检索不到」「意图识别不对」「测试挂了」，或准备对本项目异常下结论之前。
 ---
 
-# PaperFlow Troubleshooting
+# BioPilot Troubleshooting
 
-你是正在排查 paperFlow 问题的编码 agent。本 skill 提供两类东西：已知故障的症状速查表（references/），和本项目环境的铁律。先查表，查不到再走通用流程。
+你是正在排查 BioPilot 问题的编码 agent。本 skill 提供两类东西：已知故障的症状速查表（references/），和本项目环境的铁律。先查表，查不到再走通用流程。
 
 ## 流程
 
@@ -22,8 +22,8 @@ description: 排查 paperFlow 项目问题：启动失败/报错、Milvus 服务
 
 ## 环境铁律（每次排查先过一遍）
 
-1. 测试/脚本/安装一律 `conda run -n paperflow …`，绝不裸 `python`/`pip`：系统 python3 是 3.13，会被含代理字符的 docstring 炸 `compile()`；项目 env 是 3.11。
-2. 交互式 REPL 例外：`conda run` 不转发 stdin，REPL 启动即 EOF。先 `conda activate paperflow`，再直接 `paperflow`。
+1. 测试/脚本/安装一律 `conda run -n biopilot …`，绝不裸 `python`/`pip`：系统 python3 是 3.13，会被含代理字符的 docstring 炸 `compile()`；项目 env 是 3.11。
+2. 交互式 REPL 例外：`conda run` 不转发 stdin，REPL 启动即 EOF。先 `conda activate biopilot`，再直接 `biopilot`。
 3. 单测走 Milvus Lite（内嵌本地文件，`tests/conftest.py` 把 uri 指到临时 `.db`），不需要服务栈。**评测相反**：`scripts/rag/rag_eval/` 连 Standalone、媒体块原图还要 MinIO，跑之前先 `docker compose up -d`（Lite 没有对象存储，起不来）。
 4. 全量套件当前全绿，整跑即可。历史上曾有「tests/rag 与其他套件合跑原生 Abort、须分套件跑」的环境问题，2026-10-14 实测已不复现（`1612 passed`，约 95s）；看到红先按真实失败查，别假定它是已知噪音。
 5. `config.yaml` 被 gitignore。缺失或字段异常时先对照仓库根 `config.example.yaml`，别假设代码坏了。

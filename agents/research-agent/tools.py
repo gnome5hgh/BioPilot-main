@@ -7,20 +7,20 @@
 它）与 citation-agent（溯源要确认或入库的 key、参考文献渲染——引用库的读写归它，
 本角色不装配引用工具）。课题/方向有歧义时把问题写进最终回答（问用户不需要工具）。
 """
-from paperflow.config import PaperFlowConfig
-from paperflow.tools.orchestration.spawn import SpawnSubAgentTool
-from paperflow.tools import (
+from biopilot.config import BioPilotConfig
+from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from biopilot.tools import (
     ReadFileTool, ReadPdfTool, ExtractTitleTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool,
 )
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools.recall import get_recall_tools
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools.recall import get_recall_tools
 
 
-TOOLS = make_tools(PaperFlowConfig.from_env(), [
+TOOLS = make_tools(BioPilotConfig.from_env(), [
     ReadPdfTool, ExtractTitleTool,
     ReadFileTool, WriteFileTool, EditFileTool, DeleteFileTool,
     GlobTool, GrepTool,
-    SpawnSubAgentTool(agent_timeouts=PaperFlowConfig.from_env().agents.timeouts,
-                   max_turns=PaperFlowConfig.from_env().agents.max_turns),
+    SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
+                   max_turns=BioPilotConfig.from_env().agents.max_turns),
 ], default_write_root="research") + get_recall_tools()

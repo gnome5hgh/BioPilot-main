@@ -1,7 +1,7 @@
 """note-agent 的工具装配:原子文件工具 + 派发 review-agent 的审稿 spawn。
 
 装配 read_file/read_pdf/write_file/edit_file/delete_file 五个原子工具(复用
-paperflow/tools/ 的集中式安全边界与风险语义)、glob/grep 定位工具,以及
+biopilot/tools/ 的集中式安全边界与风险语义)、glob/grep 定位工具,以及
 SpawnSubAgentTool——AGENT.md 的审稿循环用它派发 review-agent 子 agent 审阅草稿,
 拿回裁决后经 edit_file 修订。
 delete_file：删除自己的笔记产物（笔记不进检索知识库,删除无需任何入库/收敛动作）。
@@ -10,15 +10,15 @@ delete_file：删除自己的笔记产物（笔记不进检索知识库,删除�
 偏好有歧义时把问题写进最终回答（问用户不需要工具），不自行猜。
 spawn 工具需要构造参数(agent_timeouts),故 make_tools 传已实例化的工具实例而非类。
 """
-from paperflow.config import PaperFlowConfig
-from paperflow.tools import (
+from biopilot.config import BioPilotConfig
+from biopilot.tools import (
     ReadFileTool, ReadPdfTool, ExtractTitleTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool,
 )
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools.orchestration.spawn import SpawnSubAgentTool
-from paperflow.tools.recall import get_recall_tools
-from paperflow.tools.vision.analyze_figures import AnalyzeFiguresTool
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from biopilot.tools.recall import get_recall_tools
+from biopilot.tools.vision.analyze_figures import AnalyzeFiguresTool
 
 
 # 装配 10 工具:6 原子工具(含 delete_file 与 extract_title) + 共享 spawn_sub_agent
@@ -27,11 +27,11 @@ from paperflow.tools.vision.analyze_figures import AnalyzeFiguresTool
 # <draft>,对照原文 <pdf>") 提交草稿,修订经 edit_file 覆盖写回同一最终路径,同时
 # 兼顾"修改既有笔记"类任务。agent_timeouts 经 config 注入
 # ——config 在 import 时构造(每进程静态、无副作用,对齐 make_tools 惯例)。
-TOOLS = make_tools(PaperFlowConfig.from_env(), [
+TOOLS = make_tools(BioPilotConfig.from_env(), [
     ReadPdfTool, ExtractTitleTool,
     ReadFileTool, WriteFileTool, EditFileTool, DeleteFileTool,
-    SpawnSubAgentTool(agent_timeouts=PaperFlowConfig.from_env().agents.timeouts,
-                   max_turns=PaperFlowConfig.from_env().agents.max_turns),
+    SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
+                   max_turns=BioPilotConfig.from_env().agents.max_turns),
     GlobTool, GrepTool,
     AnalyzeFiguresTool(),
 ], default_write_root="note") + get_recall_tools()

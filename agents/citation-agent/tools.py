@@ -8,19 +8,19 @@ extract_title。
 删除目标不明确时不要猜：把候选与缺口写进结果交上级定夺（删除动作本身仍由
 策略引擎向用户逐次确认，与提问无关）。
 """
-from paperflow.citations import CitationManager
-from paperflow.config import PaperFlowConfig
-from paperflow.tools.citations import (LookupCitationTool, AddCitationTool,
+from biopilot.citations import CitationManager
+from biopilot.config import BioPilotConfig
+from biopilot.tools.citations import (LookupCitationTool, AddCitationTool,
                                        FormatCitationsTool, ListCitationsTool,
                                        SyncCitationsTool, RemoveCitationTool)
-from paperflow.tools import ExtractTitleTool, ReadPdfTool
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools.recall import get_recall_tools
+from biopilot.tools import ExtractTitleTool, ReadPdfTool
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools.recall import get_recall_tools
 
 
-_cm = CitationManager(PaperFlowConfig.from_env())
+_cm = CitationManager(BioPilotConfig.from_env())
 
-TOOLS = make_tools(PaperFlowConfig.from_env(), [
+TOOLS = make_tools(BioPilotConfig.from_env(), [
     LookupCitationTool(_cm), AddCitationTool(_cm),
     FormatCitationsTool(_cm), ListCitationsTool(_cm),
     SyncCitationsTool(_cm), RemoveCitationTool(_cm),

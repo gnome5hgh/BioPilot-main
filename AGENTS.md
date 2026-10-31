@@ -1,32 +1,32 @@
 # AGENTS.md
 
-本文件为 AI 编码代理（ZCode / Claude Code / Codex 等）提供 `paperFlow` 仓库的进入方式、阅读路径与必须遵守的规则。
+本文件为 AI 编码代理（ZCode / Claude Code / Codex 等）提供 `BioPilot` 仓库的进入方式、阅读路径与必须遵守的规则。
 
 **本文件只写规则，不写现状快照**：字段表、文件清单、枚举取值、当前数量都以源码为准，抄一份到这里必然过期，而读到的旧快照比读不到更糟。判据是「删掉它，agent 会不会做错事」——不会、但得去源码翻的，就删掉。唯一保留的非规则是**导航**（目录地图与「去哪里找」的指针）。
 
 ## Scope
 
-- 本文件是 `paperFlow` 根工作区的总 manifest，负责建立仓库边界、阅读路径、治理规则与公共约束。
+- 本文件是 `BioPilot` 根工作区的总 manifest，负责建立仓库边界、阅读路径、治理规则与公共约束。
 - 作用范围覆盖整个仓库；进入更深层目录后，服从该目录更近的 `AGENTS.md`。
 - **子 manifest 不会自动注入**：客户端只注入从当前目录向上找到的**第一份** manifest，不逐层合并。所以**改某个模块之前，按 Routing 主动读它那份**——那里面是必须遵守的约定，不是可读可不读的背景。
 - 事实优先级：源码与测试 > 本 manifest 及各级子 manifest > `docs/` 设计文档。文档与代码冲突时以代码为准。
 
 ## 模块定位
 
-- 名称：`paperFlow`
+- 名称：`BioPilot`
 - 路径：`.`
 - 角色：`repo-root-workspace-manifest`
 - 当前定位：LLM 驱动的学术研究流程助手。单根 agent（supervisor）接收每一轮用户输入 → 可选的意图预处理 → ReAct 循环 → 拆解子任务派发子 agent → 聚合各子 agent 的结构化摘要后汇总回答。
-- 绑定环境：Python 3.11 / conda env `paperflow`。
+- 绑定环境：Python 3.11 / conda env `biopilot`。
 
 ## 目录结构
 
 ```text
-paperFlow-main/
-├─ paperflow/          # 主包：cli/(装配) config/(参数) core/(运行层，内含 rag/ vision/)
+BioPilot-main/
+├─ biopilot/          # 主包：cli/(装配) config/(参数) core/(运行层，内含 rag/ vision/)
 │                      #   citations/ tools/ terminal/
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
-├─ .paperflow/         # 运行时数据根 + 静态资产（skills/ intent/）
+├─ .biopilot/         # 运行时数据根 + 静态资产（skills/ intent/）
 ├─ .agents/skills/     # 给编码代理按需加载的 skill（与本仓运行时无关）
 ├─ docs/               # 设计文档：adr/ learning/ research/
 ├─ .scratch/           # 开发过程文档：spec/ticket（matt-pocock 本地约定，gitignored；历史 spec/plan 归档在 .scratch/archive/）
@@ -39,22 +39,22 @@ paperFlow-main/
 
 ### 当前目录分层含义
 
-- `paperflow/` 是主包；`cli/` 是装配根，`config/` 是参数唯一声明点，`core/` 是运行层（`rag/` 与 `vision/` 已住进 `core/` 内）。
+- `biopilot/` 是主包；`cli/` 是装配根，`config/` 是参数唯一声明点，`core/` 是运行层（`rag/` 与 `vision/` 已住进 `core/` 内）。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
-- `.paperflow/` 同时是运行时数据根与静态资产根：`skills/` 与 `intent/` 入库，其余都是运行期产物。
-- `.agents/skills/` 与 `.paperflow/skills/` 是**两条不相干的线**：前者给编码代理用，后者是 paperFlow 运行时的能力包。
+- `.biopilot/` 同时是运行时数据根与静态资产根：`skills/` 与 `intent/` 入库，其余都是运行期产物。
+- `.agents/skills/` 与 `.biopilot/skills/` 是**两条不相干的线**：前者给编码代理用，后者是 BioPilot 运行时的能力包。
 - `docs/`、`scripts/`、`tests/` 不入库是既定策略；运行期目录与个人路径不得入库。
 
 ## 技术结构
 
 - 语言与运行时：Python ≥ 3.11；依赖声明在 `pyproject.toml`，开发依赖经 `pip install -e ".[dev]"`。
-- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图的对象存储），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.paperflow/infra/`。
+- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图的对象存储），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
 - 外部模型端点：对话 LLM、视觉模型、RAG 嵌入与精排都是 OpenAI 兼容的 HTTP 接口，端点、模型名与 key 经配置提供，不硬编码。
-- 可调参数与默认值的唯一声明点是 `paperflow/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。
+- 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。
 
 ## 环境与依赖
 
-- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `PAPERFLOW_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `PAPERFLOW_RAG_EMBEDDING_API_KEY`）。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
+- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
 - `corpus.pdf_dir` / `corpus.note_dir` 这类**个人路径没有默认值、必须显式配**。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。
 - 依赖服务都是**软依赖**：不可达只警告降级、不阻塞启动。单测用 Milvus Lite 内嵌、不需要这套服务；反之 `scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
 
@@ -63,7 +63,7 @@ paperFlow-main/
 - 承载一个可运行的多 agent 学术研究流程助手：意图预处理、ReAct 编排、领域子 agent、RAG 检索、引用管理、记忆系统、终端交互。
 - 维护 agent 插件契约、工具的安全元数据与安全中间件链。
 - 维护设计文档体系：按模块划分的 ADR（正文恒为最新设计）与学习材料。
-- 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`.paperflow/skills/`。
+- 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`.biopilot/skills/`。
 
 ## 核心协作逻辑
 
@@ -92,15 +92,15 @@ paperFlow-main/
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
 - **同一会话的 `session_id` 三处必须一致**（CLI / AgentManager / `Agent.session_id`），错位会让各自读到空数据；子 agent 共享父 `session_id`（同一会话可检索），但各自持有独立 `conversation_id`（消息不互相污染窗口）。
 - **流式零开销**：`stream_callback` / `telemetry_callback` 为 `None` 时，全链路保持非流式行为。
-- **常量与配置的落点**：一个枚举一个文件（`constants/enums/<name>.py`，`__init__` 只再导出）；常量**有第二个消费方才**进 `constants/`；可调参数进顶层 `paperflow/config/`，组件自己的行为参数跟组件走。
+- **常量与配置的落点**：一个枚举一个文件（`constants/enums/<name>.py`，`__init__` 只再导出）；常量**有第二个消费方才**进 `constants/`；可调参数进顶层 `biopilot/config/`，组件自己的行为参数跟组件走。
 - **标题宁空勿错**：论文标题来自解析器出口，取不到就如实为空；**绝不回退到 PDF 文件名**。
 - **已退役的实现不要复活**：意图的旧混合路由与澄清链路、路径白名单、沙箱轴都已整体移出主干。旧文档里的描述不作论据。
 
 ## 关键入口
 
 - 仓库规则与阅读路径：`AGENTS.md`
-- 装配根：`paperflow/cli/services/assembly.py`；启动预检：`paperflow/cli/services/bootstrap.py`
-- 参数声明点：`paperflow/config/schemas/sections.py`
+- 装配根：`biopilot/cli/services/assembly.py`；启动预检：`biopilot/cli/services/bootstrap.py`
+- 参数声明点：`biopilot/config/schemas/sections.py`
 - 配置模板与字段示例：`config.example.yaml`
 - Agent 插件契约：`agents/AGENTS.md` 与各 `agents/<name>/AGENT.md`
 - 设计文档索引：`docs/adr/`（设计为什么这么做）与 `docs/learning/`（实现怎么运作）
@@ -108,12 +108,12 @@ paperFlow-main/
 ## 渐进式阅读路径
 
 - 仓库边界与公共规则：先读本文件。
-- 改主包某模块：`paperflow/AGENTS.md` → 对应子包 `AGENTS.md` → 源码与 `tests/`。
+- 改主包某模块：`biopilot/AGENTS.md` → 对应子包 `AGENTS.md` → 源码与 `tests/`。
 - 改某个 agent 的契约：`agents/AGENTS.md` → `agents/<name>/AGENT.md` → `tools.py`。
-- 改运行时能力包（skill）：`.paperflow/AGENTS.md` → `paperflow/core/skills/AGENTS.md`。
+- 改运行时能力包（skill）：`.biopilot/AGENTS.md` → `biopilot/core/skills/AGENTS.md`。
 - 追设计背景：`docs/adr/`（按模块一份，正文恒为最新）→ 需要历史时 `docs/adr/修正记录.md`。
 - 想知道某块实现**怎么运作**（而不是为什么这么设计）：`docs/learning/`（按主题一份，正文同样恒为最新）。
-- 排查异常：先过 `.agents/skills/paperflow-troubleshooting/SKILL.md` 的已知根因表。
+- 排查异常：先过 `.agents/skills/biopilot-troubleshooting/SKILL.md` 的已知根因表。
 
 ## 调查规则
 
@@ -121,29 +121,29 @@ paperFlow-main/
 2. 设计背景查 `docs/adr/`；历史决策查 `docs/adr/修正记录.md`。
 3. manifest 不够用时深入源码、`pyproject.toml` 与调用链核实。**代码事实优先于任何文档概括**。
 4. 实验与标定事实查 `scripts/<模块>/` 下各实验目录的 `results/` 报告（`scripts/` 不入库，删掉不可恢复）；评测题集在 `goldens/`、产物在 `results/`。
-5. 运行期目录（`.paperflow/` 下非入库子目录、`.venv/`、`__pycache__/`）与 gitignored 产物不作事实源，除非明确要求排查运行时现象。
+5. 运行期目录（`.biopilot/` 下非入库子目录、`.venv/`、`__pycache__/`）与 gitignored 产物不作事实源，除非明确要求排查运行时现象。
 
 ## 常用命令
 
 ```bash
 # 安装开发依赖（conda env 内）
-conda run -n paperflow pip install -e ".[dev]"
+conda run -n biopilot pip install -e ".[dev]"
 
 # 全量测试
-conda run -n paperflow python -m pytest tests/ -v
+conda run -n biopilot python -m pytest tests/ -v
 
 # 单个测试
-conda run -n paperflow python -m pytest tests/agent/test_agent.py::TestExecTool -v
+conda run -n biopilot python -m pytest tests/agent/test_agent.py::TestExecTool -v
 
-# 依赖服务栈（Milvus Standalone + MinIO）；paperflow 启动时会自动拉起，此命令用于手动管理
+# 依赖服务栈（Milvus Standalone + MinIO）；biopilot 启动时会自动拉起，此命令用于手动管理
 docker compose up -d
 
 # 交互式 REPL（⚠️ 不能经 conda run：它不转发 stdin，REPL 会立即 EOF 退出）
-conda activate paperflow && paperflow     # 等价：python -m paperflow（同一 env 内）
+conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 env 内）
 ```
 
-- 启动时自动探测依赖服务，未起则自动 `docker compose up -d` 并等待健康；失败只警告不阻塞。跳过预检：`PAPERFLOW_SKIP_BOOTSTRAP=1`。
-- 非交互命令（测试 / 脚本 / 安装）**一律经 `conda run -n paperflow`**，不要用裸 `python` 或 `pip`。唯一例外就是上面的交互式 REPL。
+- 启动时自动探测依赖服务，未起则自动 `docker compose up -d` 并等待健康；失败只警告不阻塞。跳过预检：`BIOPILOT_SKIP_BOOTSTRAP=1`。
+- 非交互命令（测试 / 脚本 / 安装）**一律经 `conda run -n biopilot`**，不要用裸 `python` 或 `pip`。唯一例外就是上面的交互式 REPL。
 
 ## 统一编码规范
 
@@ -182,12 +182,12 @@ conda activate paperflow && paperflow     # 等价：python -m paperflow（同�
 
 ## Routing
 
-- 当前目录是 `paperFlow` 根工作区 manifest。
-- 主包入口：[`paperflow/AGENTS.md`](paperflow/AGENTS.md)（其下 [`cli/`](paperflow/cli/AGENTS.md) / [`config/`](paperflow/config/AGENTS.md) / [`core/`](paperflow/core/AGENTS.md) / [`tools/`](paperflow/tools/AGENTS.md) / [`citations/`](paperflow/citations/AGENTS.md) / [`terminal/`](paperflow/terminal/AGENTS.md)；`core/` 之下的十二份见 core manifest）
+- 当前目录是 `BioPilot` 根工作区 manifest。
+- 主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`cli/`](biopilot/cli/AGENTS.md) / [`config/`](biopilot/config/AGENTS.md) / [`core/`](biopilot/core/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`citations/`](biopilot/citations/AGENTS.md) / [`terminal/`](biopilot/terminal/AGENTS.md)；`core/` 之下的十二份见 core manifest）
 - 插件目录入口：[`agents/AGENTS.md`](agents/AGENTS.md)
-- 资产与数据根入口：[`.paperflow/AGENTS.md`](.paperflow/AGENTS.md)（其下 [`skills/`](.paperflow/skills/AGENTS.md) / [`intent/`](.paperflow/intent/AGENTS.md)）
+- 资产与数据根入口：[`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)（其下 [`skills/`](.biopilot/skills/AGENTS.md) / [`intent/`](.biopilot/intent/AGENTS.md)）
 - 设计文档索引：[`docs/adr/`](docs/adr/)（修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）、[`docs/learning/`](docs/learning/)
-- 排障技能：[`.agents/skills/paperflow-troubleshooting/SKILL.md`](.agents/skills/paperflow-troubleshooting/SKILL.md)
+- 排障技能：[`.agents/skills/biopilot-troubleshooting/SKILL.md`](.agents/skills/biopilot-troubleshooting/SKILL.md)
 - manifest 治理技能（搭建 / 增删模块 / 体检）：[`.agents/skills/agents-md-governance/SKILL.md`](.agents/skills/agents-md-governance/SKILL.md)
 
 ## References
@@ -197,9 +197,9 @@ conda activate paperflow && paperflow     # 等价：python -m paperflow（同�
 - [`REVIEW.md`](REVIEW.md)（代码审查的仓库定制层：重点盯防区域 / 输出约束 / 风险分流，供 cross-review 等审查流程读取）
 - [`docker-compose.yml`](docker-compose.yml)
 - [`pyproject.toml`](pyproject.toml)
-- [`paperflow/AGENTS.md`](paperflow/AGENTS.md)
+- [`biopilot/AGENTS.md`](biopilot/AGENTS.md)
 - [`agents/AGENTS.md`](agents/AGENTS.md)
-- [`.paperflow/AGENTS.md`](.paperflow/AGENTS.md)
+- [`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)
 - [`docs/adr/`](docs/adr/)（按模块的设计决策；修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）
 - [`docs/learning/`](docs/learning/)（按主题的实现讲解，与 ADR 同一套同步规则）
-- [`.agents/skills/paperflow-troubleshooting/SKILL.md`](.agents/skills/paperflow-troubleshooting/SKILL.md)
+- [`.agents/skills/biopilot-troubleshooting/SKILL.md`](.agents/skills/biopilot-troubleshooting/SKILL.md)

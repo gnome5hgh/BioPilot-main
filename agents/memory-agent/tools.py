@@ -14,13 +14,13 @@ MemFS 把每个块投影成 markdown（`<memory 根>/<块名>.md`，system 块�
 不给写文件工具：块的写入一律经记忆工具（走 BlockManager 的原子读-改-写 + CAS），
 直接改投影文件会绕开那条路径。
 """
-from paperflow.config import PaperFlowConfig
-from paperflow.tools import GlobTool, ReadFileTool
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools.memory import get_memory_tools
-from paperflow.tools.recall import get_recall_tools
+from biopilot.config import BioPilotConfig
+from biopilot.tools import GlobTool, ReadFileTool
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools.memory import get_memory_tools
+from biopilot.tools.recall import get_recall_tools
 
 #: 记忆写入/管理 8 件 + 只读召回包 + 读块内容的只读工具。
 # 记忆工具是无状态类、执行时才取运行时上下文，直接实例化；读工具经 make_tools 注入 _config。
 TOOLS = get_memory_tools() + get_recall_tools() + make_tools(
-    PaperFlowConfig.from_env(), [ReadFileTool, GlobTool])
+    BioPilotConfig.from_env(), [ReadFileTool, GlobTool])

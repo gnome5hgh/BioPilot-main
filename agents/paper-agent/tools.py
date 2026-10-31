@@ -8,18 +8,18 @@ FetchPdfTool（对门禁通过的论文下载 PDF）、glob/grep 定位工具、
 启动期 collect_mcp_agent_tools 并入（paper-search-mcp 覆盖 arXiv/OpenAlex/Semantic Scholar）。
 需要用户拿主意时把问题写进最终回答（问用户不需要工具），不自行猜。
 """
-from paperflow.config import PaperFlowConfig
-from paperflow.tools.common.factory import make_tools
-from paperflow.tools.orchestration.spawn import SpawnSubAgentTool
-from paperflow.tools import (
+from biopilot.config import BioPilotConfig
+from biopilot.tools.common.factory import make_tools
+from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from biopilot.tools import (
     FetchPdfTool, DeleteFileTool, GlobTool, GrepTool, ReadPdfTool, ExtractTitleTool,
 )
-from paperflow.tools.vision.analyze_figures import AnalyzeFiguresTool
-from paperflow.tools.recall import get_recall_tools
+from biopilot.tools.vision.analyze_figures import AnalyzeFiguresTool
+from biopilot.tools.recall import get_recall_tools
 
-TOOLS = make_tools(PaperFlowConfig.from_env(), [
+TOOLS = make_tools(BioPilotConfig.from_env(), [
     FetchPdfTool, DeleteFileTool, GlobTool, GrepTool,
     ReadPdfTool, ExtractTitleTool,
     AnalyzeFiguresTool(),
-]) + [SpawnSubAgentTool(agent_timeouts=PaperFlowConfig.from_env().agents.timeouts,
-                   max_turns=PaperFlowConfig.from_env().agents.max_turns)] + get_recall_tools()
+]) + [SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
+                   max_turns=BioPilotConfig.from_env().agents.max_turns)] + get_recall_tools()
