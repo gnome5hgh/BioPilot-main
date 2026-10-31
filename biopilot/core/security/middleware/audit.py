@@ -223,56 +223,65 @@ def _result_fields(result) -> tuple[Any, Any]:
 
 
 class AuditMiddleware(SecurityMiddleware):
-    """审计中间件：把工具调用与审批/LLM 事件追加写入当日 JSONL 文件。
+    """审计中间件：把工具调用与审批/LLM 事件 insert-only 写入 MySQL 审计表。
 
     Attributes:
-        audit_dir: str，审计日志目录（当日文件 audit_YYYYMMDD.jsonl）
-        _lock: threading.Lock，JSONL 追加写锁（保证逐行原子写入）
+        db: MemoryDB，审计事件落库句柄（与记忆/会话同实例，insert-only 并发安全）
     """
 
-    def __init__(self, audit_dir: str = ".biopilot/security/audit"):
-        """指定审计日志目录；默认落在工作区 .biopilot/security/audit 下。
-
-        初始化时建好线程写锁——子 agent 的工具调用可能在不同线程并发写入，
-        后面每次追加写都在锁内完成。
+    def __init__(self, db):
+        """指定审计事件落库句柄。
 
         Args:
-            audit_dir: str，审计日志目录；默认 ".biopilot/security/audit"
+            db: MemoryDB，MySQL 连接池（audit_event 表经 _SCHEMA 幂等建表）。
         """
-        self.audit_dir = audit_dir
-        # 并发写锁：多个子代理的工具调用可能在不同线程并发写入，JSONL 追加写
-        # 不加锁会出现行与行互相穿插、污染审计记录；加锁保证逐行原子写入。
-        self._lock = threading.Lock()
-
-    def _current_path(self) -> Path:
-        """返回当日审计文件的绝对路径：每天一个 audit_YYYYMMDD.jsonl。"""
-        # 跨日滚动：每次写盘按当天文件名解析（修复长驻进程跨零点写错文件）
-        return Path(self.audit_dir) / f"audit_{datetime.now():%Y%m%d}.jsonl"
+        self.db = db
 
     def _write_event(self, entry: AuditEntry) -> None:
-        """把一条事件追加写入当日 JSONL 文件；失败降级为 stderr 告警，不抛异常。
+        """把一条事件 insert-only 写入 MySQL 审计表；失败降级为 stderr 告警，不抛异常。
+
+        多进程并发插入天然安全（无共享文件句柄，无需写锁）。payload 列存完整
+        to_json_dict（固定键集，取证原文），核心列单提出来供管理端按维度查询。
 
         Args:
             entry: AuditEntry，待落盘的审计事件
 
         Returns:
-            无返回值；写盘失败降级为 stderr 告警，不抛异常。
+            无返回值；写库失败降级为 stderr 告警，不抛异常。
         """
-        # 跨日滚动：mkdir 与 open 共用同一次路径解析，避免跨零点时两者解析出不同文件名
-        path = self._current_path()
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # 加锁写盘：整段「open + write」在锁内，保证 JSONL 行不会被并发线程分段交叉
-            with self._lock:
-                with open(path, "a", encoding="utf-8") as f:
-                    # 写盘前清洗代理码点：入参/结果可能带 surrogate（surrogateescape
-                    # 残留），严格 UTF-8 写文件会炸——清洗后再写，审计不丢行。
-                    f.write(sanitize_surrogates(
-                        json.dumps(entry.to_json_dict(), ensure_ascii=False)) + "\n")
+            data = entry.to_json_dict()
+            # 写库前清洗代理码点：入参/结果可能带 surrogate（surrogateescape 残留），
+            # 严格 utf8mb4 写入会炸——清洗后再写，审计不丢行。
+            payload = sanitize_surrogates(json.dumps(data, ensure_ascii=False))
+            self.db.execute(
+                "INSERT INTO audit_event (user_id, event_type, span_id, trace_id,"
+                " session_id, agent_type, tool_name, risk_level, turn, started_at,"
+                " ended_at, policy_decision, result_status, approval_outcome,"
+                " created_at, payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (data.get("user_id"), data.get("event_type"), data.get("span_id"),
+                 data.get("trace_id"), data.get("session_id"),
+                 data.get("agent_type"), data.get("tool_name"),
+                 data.get("risk_level"), data.get("turn"), data.get("started_at"),
+                 data.get("ended_at"), data.get("policy_decision"),
+                 data.get("result_status"), data.get("approval_outcome"),
+                 datetime.now().isoformat(), payload))
         except Exception as e:
-            # 写盘失败（磁盘满/权限）不得中断工具结果返回：打印告警后降级跳过，
+            # 写库失败（连接断/库不可达）不得中断工具结果返回：打印告警后降级跳过，
             # 与 _run_after_hooks 的哲学一致——审计是横切关注点，失败不该毁掉主流程
             print(f"[audit] write failed: {e}", file=sys.stderr)
+
+    def read_events(self) -> list[dict]:
+        """按插入序读回全部审计事件（payload 还原为 to_json_dict 的 dict 形态）。
+
+        供测试断言与管理端查询使用；生产侧按维度查询走 SQL 直接过滤核心列。
+
+        Returns:
+            事件 dict 列表（键为标准审计字段名），按插入顺序。
+        """
+        rows = self.db.execute(
+            "SELECT payload FROM audit_event ORDER BY id").fetchall()
+        return [json.loads(r["payload"]) for r in rows]
 
     async def before(self, ctx: ToolContext) -> None:
         """工具执行前：为本次调用建立审计 span 并落盘 tool_started 起始事件。

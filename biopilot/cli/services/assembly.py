@@ -300,7 +300,7 @@ def main(argv: list[str] | None = None) -> int | None:
         # 审计目录从 workspace 派生：默认按 cwd 相对定位会让
         # BIOPILOT_RUNTIME_WORKSPACE 重定向时审计仍写进仓库 .biopilot/security/audit，与其他会话的审计混写；
         # 且 cwd 下的 .biopilot/security/audit 落在 WorkspacePolicy 的 ws/security 保护约定之外)
-        AuditMiddleware(audit_dir=str(Path(config.runtime.workspace) / "security" / "audit")),
+        AuditMiddleware(db=db),
         # write_roots = 已声明的产物根 + 工作区：写目标落在其外时升级确认
         WorkspacePolicyMiddleware(workspace=config.runtime.workspace,
                                   write_roots=declared_roots(config)),

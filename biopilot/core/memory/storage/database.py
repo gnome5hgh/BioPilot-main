@@ -76,6 +76,30 @@ CREATE TABLE IF NOT EXISTS consolidation_cursor (
     PRIMARY KEY (agent_id)
 );
 
+-- audit_event 表：安全审计事件（insert-only，工单 06；核心列供查询，payload 存全量取证）
+CREATE TABLE IF NOT EXISTS audit_event (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id VARCHAR(191) NULL,
+    event_type VARCHAR(40) NOT NULL,
+    span_id VARCHAR(32) NULL,
+    trace_id VARCHAR(64) NULL,
+    session_id VARCHAR(191) NULL,
+    agent_type VARCHAR(64) NULL,
+    tool_name VARCHAR(191) NULL,
+    risk_level VARCHAR(20) NULL,
+    turn INTEGER NULL,
+    started_at VARCHAR(40) NULL,
+    ended_at VARCHAR(40) NULL,
+    policy_decision VARCHAR(40) NULL,
+    result_status VARCHAR(40) NULL,
+    approval_outcome VARCHAR(40) NULL,
+    created_at VARCHAR(40) NOT NULL,
+    payload MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_audit_trace (trace_id),
+    KEY idx_audit_session (session_id, created_at)
+);
+
 -- messages 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识
