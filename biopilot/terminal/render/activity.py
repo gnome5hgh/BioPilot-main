@@ -128,6 +128,7 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "memory_rethink": ("🧠 记忆", "次"),
     "memory_finish_edits": ("🧠 记忆", "次"),
     "memory_read": ("📖 读块", "次"),
+    "run_python": ("🐍 沙箱执行", "次"),
     "extract_title": ("🏷️ 摘题", "次"),
     "unread_list_add": ("📋 未读", "次"),
     "unread_list_remove": ("📋 未读", "次"),

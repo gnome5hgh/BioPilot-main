@@ -163,6 +163,8 @@ class CorpusConfig:
 
     #: 语料库笔记目录（笔记产物的默认落点；不进检索知识库,note/）——留空则文件类工具无可用根。
     note_dir: str = ""
+    #: 分析产物根（生信分析代码与结果；空则回退 workspace/analysis）
+    analysis_dir: str = ""
 
     #: 语料库 PDF 目录（RAG 索引源,pdf/）。
     pdf_dir: str = ""

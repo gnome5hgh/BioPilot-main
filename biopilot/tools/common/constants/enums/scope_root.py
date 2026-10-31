@@ -21,5 +21,7 @@ class ScopeRoot(StrEnum):
     RESEARCH = "research"
     #: 记忆数据根（blocks 库所在）
     MEMORY = "memory"
+    #: 分析产物根（生信分析代码与结果落点）
+    ANALYSIS = "analysis"
     #: 草稿根（路径对模型不透明，故 `[目录]` 提示会跳过它）
     SCRATCH = "scratch"

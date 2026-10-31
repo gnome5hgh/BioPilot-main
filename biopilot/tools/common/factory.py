@@ -27,9 +27,16 @@ def _root_map(config: BioPilotConfig) -> dict[str, str]:
         ScopeRoot.PDF: config.corpus.pdf_dir,
         ScopeRoot.RESEARCH: config.corpus.research_dir or str(Path(config.runtime.workspace) / "research"),
         ScopeRoot.MEMORY: str(Path(config.runtime.workspace) / "memory"),
+        ScopeRoot.ANALYSIS: getattr(config.corpus, "analysis_dir", None)
+        or str(Path(config.runtime.workspace) / "analysis"),
         # 模板已随流程入 skill（format_check 的模板经 SkillRegistry 解析）;scratch 仍从 workspace 派生
         ScopeRoot.SCRATCH: str(Path(config.runtime.workspace) / "scratch"),
     }
+
+
+def semantic_roots(config: BioPilotConfig) -> dict[str, str]:
+    """语义根名 → 绝对路径映射（公开供工具复用，如 run_python 定位分析根）。"""
+    return _root_map(config)
 
 
 def declared_roots(config: BioPilotConfig) -> list[str]:
