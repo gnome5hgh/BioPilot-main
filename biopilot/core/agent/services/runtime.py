@@ -360,24 +360,8 @@ class Agent:
         """
         return self.window.wire()
 
-    def _index_text(self) -> str | None:
-        """读取 memory_filesystem.md（MemFS 自动生成的文件树索引）内容。
-
-        索引是渐进暴露的关键：非 system 块不进 compile，但索引让 LLM 知道「有哪些
-        文件可读」。无 MemFS 装配（block_manager 无 memfs）时返回 None。
-        """
-        bm = self.block_manager
-        # GitEnabledBlockManager（子类，block_manager.py:249）：构造时才挂上 self.memfs = MemFS(...)
-        memfs = getattr(bm, "memfs", None)
-        if memfs is None:
-            return None
-        path = memfs.memory_dir / "memory_filesystem.md"
-        if path.exists():
-            return path.read_text(encoding="utf-8")
-        return None
-
     def _memory_message(self) -> Message | None:
-        """编译当前记忆为 system 消息：核心块 + 文件系统索引。
+        """编译当前记忆为 system 消息（assistant/profile 核心块）。
 
         有 block_manager 时先从 BlockManager 重建 memory（Memory(blocks=...）——
         记忆工具（memory_replace 等）在会话内编辑块后，下一轮 LLM 调用即见新内容
@@ -394,15 +378,12 @@ class Agent:
             # 把「缓存的记忆对象」扔掉，从数据库重新读出所有块，拼一个新的 Memory 实例
             self.memory = Memory(blocks=self.block_manager.list_blocks())
 
-        # compile() 只渲染 assistant/profile 两块 + 文件树索引（渐进暴露，其余块按需读）。compiled 的实际内容长这样：
+        # compile() 只渲染 assistant/profile 两块（其余块经记忆工具按需读写）。compiled 的实际内容长这样：
         #   <memory_blocks>
         #   <block name="assistant">…助手工作方式记忆…</block>     ← 只有 assistant/profile 两块的内容
         #   <block name="profile">…用户画像…</block>
         #   </memory_blocks>
-        #   <memory_filesystem>
-        #   …memory_filesystem.md 的内容…                    ← 文件树索引（文件名/结构，不是正文）
-        #   </memory_filesystem>
-        compiled = self.memory.compile(index_text=self._index_text())
+        compiled = self.memory.compile()
         if not compiled:
             return None
         return SystemMessage(content=compiled)

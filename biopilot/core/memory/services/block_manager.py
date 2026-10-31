@@ -3,8 +3,7 @@
 更新块前把旧值整体快照进 block_history、版本号 +1；写入走 CAS（带期望版本的
 条件更新），版本被并发推进时拒绝而非静默覆盖。读-改-写类操作（追加/替换/删除
 行）必须走 mutate_block——它把整段序列放进一次持锁事务，避免两个并发写者各自
-基于同一份旧值计算后互相抹掉。GitEnabledBlockManager 是其 git 变体：块变更同步
-写 markdown 投影 + git commit，语义是「SQL 是源、markdown 是投影」。
+基于同一份旧值计算后互相抹掉。
 """
 from __future__ import annotations
 
@@ -18,7 +17,7 @@ from biopilot.core.memory.storage import block as block_orm
 from biopilot.core.memory.storage.database import MemoryDB
 from biopilot.core.memory.schemas.block import Block
 
-__all__ = ["BlockManager", "GitEnabledBlockManager"]
+__all__ = ["BlockManager"]
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ _CAS_MAX_RETRIES = 3
 _LEGACY_LABELS = {"human": "profile", "persona": "assistant"}
 
 #: 已下线功能的块 label：启动时一次性清除（幂等）。这些块的写入者已退役，
-#: 留着既没有读者、又会出现在 MemFS 索引里误导模型。
+#: 留着既没有读者、又会误导模型。
 _REMOVED_BLOCKS = ("history_list",)
 
 
@@ -190,8 +189,6 @@ class BlockManager:
     def purge_removed_blocks(self) -> list[str]:
         """删除已下线功能的块（幂等）：这些块的写入者已退役，留着只会出现在索引里误导模型。
 
-        git 变体随之删掉 markdown 投影并提交，不留孤儿投影。
-
         Returns:
             实际删除的 label 列表（无删除时为空）。
         """
@@ -244,7 +241,6 @@ class BlockManager:
             block_orm.update_block(self.db, row["id"], value,
                                    expected_version=row["version"])
         block = self.get_block(row["id"])
-        self._after_block_write(block)
         return block
 
     def mutate_block(self, label: str,
@@ -288,22 +284,10 @@ class BlockManager:
                     block_orm.update_block(self.db, row["id"], new_value,
                                            expected_version=row["version"])
                 block = self.get_block(row["id"])
-                self._after_block_write(block)
                 return block
             except ConcurrentUpdateError:
                 continue          # 重读最新值后重放 mutate（纯函数，重放无损）
         raise ConcurrentUpdateError(label)
-
-    def _after_block_write(self, block: Block) -> None:
-        """块内容写成功后的扩展钩子（基类无副作用）。
-
-        Args:
-            block: 刚写入的块。
-
-        设计意图：把「写成功之后要做的同步」集中到一个钩子，update_block_value 与
-        mutate_block 都调用它；子类（如 GitEnabled）只需实现一次就能覆盖所有写入口，
-        不必逐个覆盖写方法。
-        """
 
     def delete_block(self, block_id: str) -> None:
         """删除块。read_only 块拒绝（与 update_block_value 一致），防误删保护块。
@@ -315,7 +299,7 @@ class BlockManager:
             KeyError: block_id 不存在。
             ValueError: 块为 read_only。
 
-        注意：实际删除委托给 _delete() 钩子，便于子类扩展（如 GitEnabled 清理投影）。
+        注意：实际删除委托给 _delete() 钩子（rename 复用）。
         """
         row = block_orm.select_block(self.db, block_id)
         if row is None:
@@ -325,13 +309,12 @@ class BlockManager:
         self._delete(block_id)
 
     def _delete(self, block_id: str) -> None:
-        """底层删除钩子（rename 复用）：不检查 read_only，由 GitEnabled 子类扩展投影清理。
+        """底层删除钩子（rename 复用）：不检查 read_only。
 
         Args:
             block_id: 块的唯一标识。
 
-        设计意图：将实际删除逻辑抽离，使子类可重写此方法添加清理动作（如删除对应 .md 文件），
-        同时基类的 delete_block 保持只读校验不变。
+        设计意图：将实际删除逻辑抽离成独立方法，与只读校验入口分离。
         """
         block_orm.delete_block(self.db, block_id)
 
@@ -376,164 +359,3 @@ class BlockManager:
         block_orm.update_block(self.db, snap["block_id"], snap["value"],
                                expected_version=cur["version"])
         return self.get_block(snap["block_id"])
-
-
-class GitEnabledBlockManager(BlockManager):
-    """BlockManager 的 git 变体：块变更同步到 MemFS markdown 投影并 git commit。
-
-    语义是「SQL 是源、markdown 是投影」：权威数据在 blocks 表，.md 文件只是
-    给人看/给人手改的可读投影，git 只做可审计历史（每写必 commit，无变更不
-    产生空 commit）。
-
-    Attributes:
-        memfs: MemFS，markdown 投影层，每次块变更同步并 commit
-        _memfs_dir: Path，MemFS 根目录（同时是 git 仓库工作区）
-        _repo: dulwich Repo，投影目录的 git 仓库句柄
-    """
-
-    def __init__(self, db, memfs_dir: Path | None = None):
-        """初始化 Git 增强块管理器。
-
-        Args:
-            db: 数据库连接。
-            memfs_dir: 记忆文件系统根目录（默认取 db.path 的父目录）。
-        """
-        super().__init__(db)
-        from biopilot.core.memory.services.memfs import MemFS
-        self.memfs = MemFS(memfs_dir or Path(db.path).parent, db=db)
-        self._memfs_dir = self.memfs.memory_dir
-        self._init_git()
-
-    def _init_git(self) -> None:
-        """惰性初始化 git 仓库（dulwich）。目录不存在时先创建（Repo.init 不建父目录）。"""
-        from dulwich.repo import Repo
-        # 确保目录存在（Repo.init 不创建父目录）
-        self._memfs_dir.mkdir(parents=True, exist_ok=True)
-        git_dir = self._memfs_dir / ".git"
-        if not git_dir.exists():
-            Repo.init(str(self._memfs_dir))
-        self._repo = Repo(str(self._memfs_dir))
-
-    def _git_log(self) -> list[str]:
-        """返回最近最多 50 条 commit 的 sha（无提交历史时返回空列表）。
-
-        Returns:
-            commit SHA 字符串列表，按时间倒序（最新优先）。
-
-        注意：dulwich 1.x 的 get_walker() 返回 WalkEntry，commit 在 .commit 属性上。
-        """
-        from dulwich.repo import Repo
-        repo = Repo(str(self._memfs_dir))
-        try:
-            repo.head()
-        except KeyError:
-            # 无任何 commit 时返回空列表
-            return []
-        # dulwich 1.x 的 get_walker() 返回 WalkEntry，commit 在 .commit 上
-        return [c.commit.id.decode() for c in repo.get_walker(max_entries=50)]
-
-    def _commit(self, message: str) -> str | None:
-        """只跟踪 *.md，无变更返回 None（不产生空 commit）。
-
-        Args:
-            message: commit 信息。
-
-        Returns:
-            commit SHA（字符串），若无变更则返回 None。
-
-        实现细节：
-            1. 用 dulwich.porcelain.add 添加所有 *.md 文件（无论是否变更）。
-            2. 用 porcelain.status 检查 staged 区是否有新增或修改。
-            3. 若无 staged 变更，返回 None 避免空 commit。
-            4. 使用固定作者信息 "BioPilot <biopilot@local>"。
-        """
-        import dulwich.porcelain as porcelain
-        from dulwich.repo import Repo
-        repo = Repo(str(self._memfs_dir))
-
-        # 1. 添加所有 *.md 文件到暂存区（add 对未变更文件也是幂等的）
-        changed = False
-        for path in sorted(self._memfs_dir.rglob("*.md")):
-            rel = str(path.relative_to(self._memfs_dir))
-            porcelain.add(repo, rel)
-            changed = True
-
-        # 2. 若没有找到任何 .md 文件，直接返回（无需 commit）
-        if not changed:
-            return None
-
-        # 3. 检查 staged 区是否有实际变更（新增或修改）
-        status = porcelain.status(repo)
-        staged = status.staged.get("add", []) + status.staged.get("modify", [])
-        if not staged:
-            return None
-
-        # 4. 执行 commit
-        author = b"BioPilot <biopilot@local>"
-        sha = porcelain.commit(repo, message=message, author=author, committer=author)
-        return sha.decode() if isinstance(sha, bytes) else str(sha)
-
-    def create_block(self, label: str, value: str, **kwargs) -> Block:
-        """创建块并同步到 markdown 投影 + git commit。
-
-        Args:
-            label: str，块标签
-            value: str，块内容
-            kwargs: 透传给基类 create_block 的可选字段（description/read_only 等）
-
-        Returns:
-            创建后的 Block（已写入 markdown 投影并 commit）。
-        """
-        b = super().create_block(label, value, **kwargs)
-        self.memfs.sync_block_to_file(b)
-        self._commit(f"create block {label}")
-        return b
-
-    def _after_block_write(self, block: Block) -> None:
-        """写完块后同步 MemFS markdown 投影 + git commit（每写必 commit，无变更不空提交）。
-
-        Args:
-            block: 刚写入的块。
-
-        覆盖基类钩子而非分别覆盖各写方法：这样 update_block_value 与 mutate_block
-        两个入口都自动带上投影同步，不会出现「只落 SQL、漏投影」的分叉。
-        """
-        self.memfs.sync_block_to_file(block)
-        self._commit(f"update block {block.label}")
-
-    def delete_block(self, block_id: str) -> None:
-        """删除块：先执行基类校验（read_only 检查），然后走 _delete 清理投影。
-
-        Args:
-            block_id: str，要删除的块 ID
-        """
-        # 基类 delete_block 校验 read_only 后走 self._delete()（投影清理 + git commit）
-        super().delete_block(block_id)
-
-    def _delete(self, block_id: str) -> None:
-        """删 SQL + 同步删 MemFS 投影 .md + git commit + 重建索引（不留孤儿投影/陈旧索引）。
-
-        Args:
-            block_id: 要删除的块 ID。
-
-        清理顺序：
-            1. 获取块对象（用于定位 .md 文件路径）。
-            2. 调用父类 _delete 删除 SQL 记录。
-            3. 删除对应的 .md 投影文件（若存在）。
-            4. 重建 memory_filesystem.md 索引（去掉该块条目）。
-            5. 提交 git commit。
-        """
-        # 先获取块信息（以便后续删除文件），再删除 SQL 记录
-        b = self.get_block(block_id)
-        super()._delete(block_id)
-
-        # 删除对应的 markdown 投影文件
-        path = self.memfs._file_for(b)
-        if path.exists():
-            path.unlink()
-
-        # 重建文件树索引（确保索引中不再包含被删除的块）
-        self.memfs.regenerate_index()
-
-        # 提交 git
-        self._commit(f"delete block {b.label}")

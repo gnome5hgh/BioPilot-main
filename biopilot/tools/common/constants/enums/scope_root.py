@@ -19,7 +19,7 @@ class ScopeRoot(StrEnum):
     PDF = "pdf"
     #: 选题与研究计划根
     RESEARCH = "research"
-    #: 记忆块投影根（MemFS）
+    #: 记忆数据根（blocks 库所在）
     MEMORY = "memory"
     #: 草稿根（路径对模型不透明，故 `[目录]` 提示会跳过它）
     SCRATCH = "scratch"

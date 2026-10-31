@@ -130,7 +130,6 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "extract_title": ("🏷️ 摘题", "次"),
     "unread_list_add": ("📋 未读", "次"),
     "unread_list_remove": ("📋 未读", "次"),
-    "conversation_search": ("💬 回溯", "次"),
     "read_tool_result": ("📄 取回", "次"),
     # ── 编排与技能 ──
     "spawn_sub_agent": ("🤖 子任务", "次"),

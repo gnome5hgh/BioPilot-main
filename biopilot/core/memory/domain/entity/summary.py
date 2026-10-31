@@ -10,7 +10,7 @@
 8. 下一步（optional_next_step）
 
 用户原话不进摘要：硬约束、截止时间等边界由任务快照逐字保留，
-其余原话靠 SQL + conversation_search 回溯。
+其余原话不作回溯。
 """
 from pydantic import BaseModel
 

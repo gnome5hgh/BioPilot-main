@@ -29,7 +29,7 @@ from biopilot.core.llm import StructuredOutput
 from biopilot.core.tool.services.offload import make_tool_result_offloader
 from biopilot.core.tool.services.tool_result_store import make_tool_result_store
 from biopilot.core.memory.storage.database import MemoryDB
-from biopilot.core.memory.services.block_manager import GitEnabledBlockManager
+from biopilot.core.memory.services.block_manager import BlockManager
 from biopilot.core.memory.services.message_manager import MessageManager
 from biopilot.tools.memory import set_memory_context, MemoryToolsContext
 from biopilot.core.memory.services.agent_manager import AgentManager
@@ -223,7 +223,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # 会各自读到空数据。
     memory_dir = Path(config.runtime.workspace) / "memory"
     db = MemoryDB(memory_dir / "memory.db")
-    block_manager = GitEnabledBlockManager(db, memfs_dir=memory_dir)
+    block_manager = BlockManager(db)
     block_manager.migrate_legacy_labels()   # 旧 human/persona label 一次性迁移为 profile/assistant（幂等）
     block_manager.purge_removed_blocks()    # 已下线功能的块（历史清单）一次性清除（幂等）
     block_manager.ensure_default_blocks()   # 首启播种默认 profile/assistant 核心记忆块

@@ -5,7 +5,7 @@
 （Recall 完整保留可追溯）。
 
 摘要固定 8 节，全部由模型生成；用户原话不进摘要——硬约束、截止时间等
-边界信息由任务快照逐字保留，其余原话靠 SQL + conversation_search 回溯。
+边界信息由任务快照逐字保留，其余原话不作回溯。
 输出受 summary_max_words 总预算约束：快照按固定份额单独立账，超支或快照
 缺失时带反馈重调一次，渲染层逐节水填保证「8 节齐全 + 总量合规」。
 旧摘要并入下一次摘要输入重摘（Claude Code 式，集成指令约束漂移）：窗口
@@ -365,7 +365,7 @@ def deterministic_trim(messages: list[Message], settings: CompactionSettings,
         return None
     placeholder = SystemMessage(content=(
         f"[压缩失败：较早的 {dropped} 条消息已移出窗口；"
-        "原文可用 conversation_search 回溯]"))
+        "原文不回溯，边界信息见任务快照]"))
     return summaries + [placeholder] + tail + snapshots[-1:]
 
 
@@ -568,7 +568,7 @@ def _render_summary(summary: Summary, max_words: int) -> str:
     """把模型写的 8 节内容水填成不超预算的完整摘要。
 
     用户原话不进摘要：硬约束、截止时间等边界由任务快照逐字保留，其余
-    原话靠 SQL + conversation_search 回溯。
+    原话不作回溯。
 
     预算记账：summary_max_words 先扣掉节标题的实际 token 开销，余下按
     _SECTION_SHARES 分给各节正文；内容短于份额的节把闲置预算水填给被截的

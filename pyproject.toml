@@ -9,7 +9,6 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "tiktoken>=0.7.0",
-    "dulwich>=0.22.0",
     "jieba>=0.42",
     "mcp>=1.0,<2.0",
     "numpy>=1.24",

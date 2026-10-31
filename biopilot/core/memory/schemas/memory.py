@@ -1,9 +1,8 @@
 """Memory：核心记忆块容器，负责把块编译成 LLM 可读的 system 文本。
 
 compile() 按「渐进暴露」原则：只把 assistant/profile 两块内容常驻渲染进
-<memory_blocks>，其余块不进 compile——它们以可选的 index_text（文件树索引）
-形式出现，内容按需读取。这样 in-context 窗口只装常驻核心，全量记忆走
-MemFS 的文件树隐喻触达。
+<memory_blocks>，其余块不进 compile——它们经记忆工具按 label 读写。这样
+in-context 窗口只装常驻核心，全量记忆按需触达。
 """
 from __future__ import annotations
 
@@ -40,16 +39,11 @@ class Memory:
         """
         self.blocks: list[Block] = list(blocks or [])
 
-    def compile(self, index_text: str | None = None) -> str:
-        """渲染核心记忆为 system 文本：system/ 块 + 可选的文件系统索引。
+    def compile(self) -> str:
+        """渲染核心记忆为 system 文本：assistant/profile 两块内容常驻。
 
-        渐进暴露按「assistant/profile 两块内容常驻；非 system 块只以索引形式
-        出现」的原则。index_text 由调用方（Agent._memory_message）读取并传入，
-        保持本类无文件 IO。
-
-        Args:
-            index_text: MemFS 自动生成的 memory_filesystem.md 内容（文件树索引）。
-                若为 None 或空，则不添加 <memory_filesystem> 标签。
+        渐进暴露按「assistant/profile 两块内容常驻；其余块经记忆工具按需读写」
+        的原则，本类保持无文件 IO。
 
         Returns:
             完整的 system prompt 文本，结构如下：
@@ -57,13 +51,11 @@ class Memory:
             <block name="assistant">...内容...</block>
             <block name="profile">...内容...</block>
             </memory_blocks>
-            [可选] <memory_filesystem>...索引内容...</memory_filesystem>
 
         设计意图：
             - 常驻核心块（assistant/profile）每轮都完整注入，保障基本身份和用户画像。
-            - 其他块（如 unread_list、feedback_* 分册等）不直接包含内容，只通过
-              文件树索引暴露存在性，LLM 可按需读取具体文件内容。
-            - 这样在上下文窗口中节省大量 token，同时保持全量记忆可访问。
+            - 其他块（如 unread_list、feedback_* 分册等）不直接包含内容，经记忆
+              工具按 label 读写，节省上下文窗口同时保持全量记忆可访问。
         """
         # 筛选出 system 核心块（assistant 和 profile）
         system_blocks = [b for b in self.blocks if b.label in ("assistant", "profile")]
@@ -71,11 +63,6 @@ class Memory:
         for b in system_blocks:
             parts.append(f'<block name="{b.label}">{b.value}</block>')
         parts.append("</memory_blocks>")
-        # 若提供了索引文本，追加文件系统索引块
-        if index_text:
-            parts.append("<memory_filesystem>")
-            parts.append(index_text)
-            parts.append("</memory_filesystem>")
         return "\n".join(parts)
 
     def get_block(self, label: str) -> Block | None:

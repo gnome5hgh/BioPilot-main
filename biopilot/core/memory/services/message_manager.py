@@ -207,32 +207,6 @@ class MessageManager:
             self.db, session_id, limit=limit)
         return [_row_to_schema(r) for r in rows]
 
-    def search_messages(self, agent_id: str | None, query: str,
-                        roles: list[str] | None = None, limit: int = 5,
-                        start_date: str | None = None,
-                        end_date: str | None = None,
-                        session_id: str | None = None) -> list[StoredMessage]:
-        """按 agent 或会话 + 内容 LIKE 检索消息（供 conversation_search 工具使用）。
-
-        Args:
-            agent_id: agent 标识；session_id 为空时按它过滤。
-            query: 搜索关键词（LIKE 匹配）。
-            roles: 可选的角色过滤列表（如 ["user", "assistant"]）。
-            limit: 返回条数上限（默认 5）。
-            start_date: 起始时间（ISO 字符串，含日期即可）。
-            end_date: 结束时间（ISO 字符串）。
-            session_id: 会话标识；提供时按会话分组过滤（旧行回退 agent_id）。
-
-        Returns:
-            StoredMessage 列表，按时间倒序（最新的在前）。
-
-        注意：此检索为纯 SQL LIKE 模式，不支持复杂语义搜索；如需语义检索可后续扩展。
-        """
-        rows = message_orm.search_messages(
-            self.db, agent_id, query, roles=roles, limit=limit,
-            start_date=start_date, end_date=end_date, session_id=session_id)
-        return [_row_to_schema(r) for r in rows]
-
     def size(self, agent_id: str) -> int:
         """返回该 agent 已落盘消息总数（MemoryConsolidator 游标与进度判断的数据源）。
 

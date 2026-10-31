@@ -4,7 +4,7 @@ get_memory_tools() 惰性构建 8 个记忆写入/管理工具（模块级单例
 runtime_context.get_memory_context() 取运行时上下文。任意 agent 的 tools.py 可
 `TOOLS = [...] + get_memory_tools()`。
 
-会话检索与工具结果回取在只读召回包 `biopilot.tools.recall`（见 get_recall_tools），
+工具结果回取在只读召回包 `biopilot.tools.recall`（见 get_recall_tools），
 不再混在写入工具里——读操作要装配给所有需要核对原文的 agent。
 """
 from __future__ import annotations

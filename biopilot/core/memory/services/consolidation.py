@@ -155,8 +155,8 @@ class MemoryConsolidator:
         Args:
             agent_state: AgentState 实例（supervisor 的 agent 状态），提供 agent_id
                 供按会话查询消息、推导游标。
-            block_manager: BlockManager，编辑指令最终映射到它执行（block CRUD +
-                MemFS markdown 投影与 git commit），并读出全部可写块的旧值。
+            block_manager: BlockManager，编辑指令最终映射到它执行（block CRUD），并读出全部
+                可写块的旧值。
             message_manager: MessageManager，读对话消息、推导游标（size = 该会话
                 消息总数）。
             structured: StructuredOutput，LLM 抽取编辑指令的通道；LLM 输出不可信，

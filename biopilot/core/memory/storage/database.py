@@ -124,52 +124,7 @@ class MemoryDB:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session"
             " ON messages(session_id, created_at)")
-        self._init_fts()
         self._conn.commit()
-
-    def _init_fts(self) -> None:
-        """建消息全文索引与同步触发器；FTS5 不可用时置 `fts_available=False`。
-
-        优先 trigram（中文子串可命中），其次 unicode61；两者都不可用时检索层
-        退回 SQL LIKE。虚表存一份正文副本，换来的好处是检索不需要额外依赖。
-        """
-        self.fts_available = False
-        self.fts_tokenizer = None
-        for tokenizer in ("trigram", "unicode61"):
-            try:
-                self._conn.execute(
-                    "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5("
-                    "content, message_id UNINDEXED, session_id UNINDEXED,"
-                    " agent_id UNINDEXED, role UNINDEXED, created_at UNINDEXED,"
-                    f" tokenize='{tokenizer}')")
-                self.fts_available = True
-                self.fts_tokenizer = tokenizer
-                break
-            except sqlite3.OperationalError:
-                continue
-        if not self.fts_available:
-            return
-        self._conn.executescript("""
-        CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
-          INSERT INTO messages_fts(rowid, content, message_id, session_id, agent_id, role, created_at)
-          VALUES (new.rowid, new.content, new.id, COALESCE(new.session_id, new.agent_id), new.agent_id, new.role, new.created_at);
-        END;
-        CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
-          DELETE FROM messages_fts WHERE rowid = old.rowid;
-        END;
-        CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
-          DELETE FROM messages_fts WHERE rowid = old.rowid;
-          INSERT INTO messages_fts(rowid, content, message_id, session_id, agent_id, role, created_at)
-          VALUES (new.rowid, new.content, new.id, COALESCE(new.session_id, new.agent_id), new.agent_id, new.role, new.created_at);
-        END;
-        """)
-        # 回填旧行（幂等）：触发器只覆盖初始化之后的新增/更新。
-        self._conn.execute(
-            "INSERT INTO messages_fts(rowid, content, message_id, session_id,"
-            " agent_id, role, created_at)"
-            " SELECT rowid, content, id, COALESCE(session_id, agent_id),"
-            " agent_id, role, created_at FROM messages"
-            " WHERE rowid NOT IN (SELECT rowid FROM messages_fts)")
 
     def _migrate_additive_columns(self) -> None:
         """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等，仅供 init_schema 调用）。
