@@ -33,7 +33,7 @@ BioPilot-main/
 ├─ tests/              # 测试套件
 ├─ scripts/            # 实验与标定脚本
 ├─ config.yaml         # 本地配置（gitignored），模板见 config.example.yaml
-├─ docker-compose.yml  # 依赖服务栈（Milvus Standalone + MinIO）
+├─ docker-compose.yml  # 依赖服务栈（Milvus Standalone + MinIO + MySQL）
 └─ AGENTS.md
 ```
 
@@ -48,7 +48,7 @@ BioPilot-main/
 ## 技术结构
 
 - 语言与运行时：Python ≥ 3.11；依赖声明在 `pyproject.toml`，开发依赖经 `pip install -e ".[dev]"`。
-- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图的对象存储），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
+- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图的对象存储）+ MySQL（记忆/会话真相源，127.0.0.1:3306），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
 - 外部模型端点：对话 LLM、视觉模型、RAG 嵌入与精排都是 OpenAI 兼容的 HTTP 接口，端点、模型名与 key 经配置提供，不硬编码。
 - 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。
 
@@ -56,7 +56,7 @@ BioPilot-main/
 
 - 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
 - `corpus.pdf_dir` / `corpus.note_dir` 这类**个人路径没有默认值、必须显式配**。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。
-- 依赖服务都是**软依赖**：不可达只警告降级、不阻塞启动。单测用 Milvus Lite 内嵌、不需要这套服务；反之 `scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
+- 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 与 LLM key 是**硬依赖**：不可达/未配置即启动 fail-fast（真相源不能静默降级）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
 
 ## 仓库职责
 
@@ -135,7 +135,7 @@ conda run -n biopilot python -m pytest tests/ -v
 # 单个测试
 conda run -n biopilot python -m pytest tests/agent/test_agent.py::TestExecTool -v
 
-# 依赖服务栈（Milvus Standalone + MinIO）；biopilot 启动时会自动拉起，此命令用于手动管理
+# 依赖服务栈（Milvus Standalone + MinIO + MySQL）；biopilot 启动时会自动拉起，此命令用于手动管理
 docker compose up -d
 
 # 交互式 REPL（⚠️ 不能经 conda run：它不转发 stdin，REPL 会立即 EOF 退出）

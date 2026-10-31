@@ -154,7 +154,7 @@ class MessageManager:
             limit: 最多返回条数（None 表示全部）。
 
         Returns:
-            StoredMessage 列表，按 created_at 升序排列（同刻按 rowid 排序保证插入顺序）。
+            StoredMessage 列表，按 created_at 升序排列（同刻按 seq 排序保证插入顺序）。
         """
         rows = message_orm.select_messages_by_agent(self.db, agent_id, limit=limit)
         return [_row_to_schema(r) for r in rows]

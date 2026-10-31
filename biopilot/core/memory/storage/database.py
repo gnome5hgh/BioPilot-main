@@ -95,9 +95,6 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("messages", "session_id", "session_id VARCHAR(191) NULL"),
 )
 
-#: 默认 DSN（可用环境变量 BIOPILOT_MEMORY_MYSQL_DSN 覆盖）。
-_DEFAULT_DSN = "mysql://root@127.0.0.1:3306/biopilot"
-
 #: 连接池上限：覆盖「多线程子 agent 并发写记忆 + 事务钉住」的常规并发量。
 _POOL_SIZE = 8
 
@@ -155,7 +152,15 @@ class MemoryDB:
         注意：连接建立后自动执行 init_schema() 建表（幂等），并按
         _ADDITIVE_COLUMNS 补齐已有表的缺列。
         """
-        self.dsn = dsn or os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN") or _DEFAULT_DSN
+        # DSN 优先级：显式参数 → 环境变量（测试/本地覆盖通道）→ 报错。
+        # 运行时默认值由 config.runtime.memory_dsn 声明（装配层显式传入），
+        # 这里不设默认库，避免与 config 的默认值双写漂移。
+        self.dsn = dsn or os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")
+        if not self.dsn:
+            raise ValueError(
+                "未指定记忆库 DSN：装配层应传 config.runtime.memory_dsn，"
+                "或设置环境变量 BIOPILOT_MEMORY_MYSQL_DSN"
+                "（形如 mysql://root@127.0.0.1:3306/biopilot）")
         self._kwargs = _parse_dsn(self.dsn)
         self._pool: queue.LifoQueue = queue.LifoQueue()
         self._pool_size = pool_size
@@ -180,8 +185,13 @@ class MemoryDB:
             except queue.Empty:
                 with self._create_lock:
                     if self._created < self._pool_size:
+                        try:
+                            conn = self._new_conn()
+                        except Exception:
+                            self._created -= 1   # 建连失败必须回退计数，否则池位永久漏掉
+                            raise
                         self._created += 1
-                        return self._new_conn()
+                        return conn
                 conn = self._pool.get(timeout=30)
             try:
                 conn.ping(reconnect=False)
@@ -196,6 +206,13 @@ class MemoryDB:
                     self._created = max(0, self._created - 1)
 
     def _release(self, conn) -> None:
+        # 归还前复位会话状态：上一位借主异常退出可能留下未决事务，直接还池会把
+        # 脏状态（未提交的写、行锁）传给下一位借主。PyMySQL 的 rollback 对无事务
+        # 连接是廉价 no-op。
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         self._pool.put(conn)
 
     # ------------------------------------------------------------------ schema
@@ -211,12 +228,12 @@ class MemoryDB:
                 for stmt in _SCHEMA.split(";"):
                     if stmt.strip():
                         cur.execute(stmt)
-                self._migrate_additive_columns(cur)
+                self.migrate_additive_columns(cur)
             conn.commit()
         finally:
             self._release(conn)
 
-    def _migrate_additive_columns(self, cur=None) -> None:
+    def migrate_additive_columns(self, cur=None) -> None:
         """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等）。
 
         只做「加列」这一种变更：列已存在即跳过，可反复执行。表不存在时跳过而非
@@ -229,7 +246,7 @@ class MemoryDB:
             conn = self._checkout()
             try:
                 with conn.cursor() as c:
-                    self._migrate_additive_columns(c)
+                    self.migrate_additive_columns(c)
                 conn.commit()
             finally:
                 self._release(conn)
@@ -277,7 +294,11 @@ class MemoryDB:
             conn.rollback()
             raise
         else:
-            conn.commit()
+            try:
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         finally:
             self._pinned.conn = None
             self._pinned.depth = 0

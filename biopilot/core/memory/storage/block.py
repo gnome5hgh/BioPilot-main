@@ -80,8 +80,9 @@ def select_block_by_label(db: MemoryDB, label: str,
         - 若多个块具有相同 label（非预期情况），本函数只返回第一个（按插入序 seq）。
           调用方应保证 label 的唯一性。
     """
+    # MySQL 语法序：FOR UPDATE 必须在 ORDER BY 之后
     lock = " FOR UPDATE" if for_update else ""
-    cur = db.execute(f"SELECT * FROM blocks WHERE label=?{lock}", (label,))
+    cur = db.execute(f"SELECT * FROM blocks WHERE label=? ORDER BY seq{lock}", (label,))
     row = cur.fetchone()
     return dict(row) if row else None
 

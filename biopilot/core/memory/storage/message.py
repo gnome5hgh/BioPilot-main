@@ -6,7 +6,6 @@ services/message_manager.py 持有。
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 
 from biopilot.core.common.constants import MessageRole
@@ -24,10 +23,10 @@ def _now() -> str:
 
 
 def _row_to_dict(row) -> dict:
-    """将 sqlite3.Row 转为普通 dict（便于 ORM 层处理）。
+    """把一行查询结果拷成独立 dict（DictCursor 行本身就是 dict，这里防御性拷贝）。
 
     Args:
-        row: sqlite3.Row，一行查询结果（列名可访问）
+        row: dict，一行查询结果（列名可访问）
 
     Returns:
         该行的普通 dict（按列名取值）。

@@ -1,6 +1,6 @@
 """AgentManager：agent 生命周期 + refresh_memory（块变更后重编译 system prompt）。
 
-AgentState 持久化在 SQLite 的 agent_state 表——它是一行以 agent_id 为主键的
+AgentState 持久化在 agent_state 表——它是一行以 agent_id 为主键的
 JSON 快照，其中 message_ids 记录「当前 in-context 窗口的消息 id 列表」。
 单用户场景下 agent 表简化为按 agent_id 键控。
 """
@@ -53,8 +53,8 @@ class AgentManager:
                    "agent_id VARCHAR(64) PRIMARY KEY, name TEXT, description TEXT,"
                    "`system` MEDIUMTEXT, model TEXT, context_window_limit INTEGER,"
                    "message_ids MEDIUMTEXT, created_at VARCHAR(40))")
-        # 老库补列走统一增量迁移表（建表语句只管新库）。
-        db._migrate_additive_columns()
+        # 老库补列走 MemoryDB 的增量迁移（建表语句只管新库）。
+        db.migrate_additive_columns()
 
     def _row_to_state(self, row: dict) -> AgentState:
         """把 DB 行转回 AgentState：memory 从 block_manager 现读最新块动态构建。
