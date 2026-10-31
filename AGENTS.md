@@ -28,7 +28,8 @@ paperFlow-main/
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
 ├─ .paperflow/         # 运行时数据根 + 静态资产（skills/ intent/）
 ├─ .agents/skills/     # 给编码代理按需加载的 skill（与本仓运行时无关）
-├─ docs/               # 设计文档：adr/ learning/ research/ superpowers/
+├─ docs/               # 设计文档：adr/ learning/ research/
+├─ .scratch/           # 开发过程文档：spec/ticket（matt-pocock 本地约定，gitignored；历史 spec/plan 归档在 .scratch/archive/）
 ├─ tests/              # 测试套件
 ├─ scripts/            # 实验与标定脚本
 ├─ config.yaml         # 本地配置（gitignored），模板见 config.example.yaml
@@ -61,7 +62,7 @@ paperFlow-main/
 
 - 承载一个可运行的多 agent 学术研究流程助手：意图预处理、ReAct 编排、领域子 agent、RAG 检索、引用管理、记忆系统、终端交互。
 - 维护 agent 插件契约、工具的安全元数据与安全中间件链。
-- 维护设计文档体系：按模块划分的 ADR（正文恒为最新设计）、学习材料、实施期 spec/plan。
+- 维护设计文档体系：按模块划分的 ADR（正文恒为最新设计）与学习材料。
 - 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`.paperflow/skills/`。
 
 ## 核心协作逻辑
@@ -176,7 +177,7 @@ conda activate paperflow && paperflow     # 等价：python -m paperflow（同�
   - **修正史同样追加进 `docs/adr/修正记录.md`**（同一份文件，标注是 learning 的哪一篇）。不要另起一份 learning 修正记录。
   - **编号不回收、空缺须补齐**：删除或合并后重编号，并同步更新所有活文档的引用；历史文档里的旧编号不回改。
   - 文中引用只写指针（如「见 learning 04」）。
-- spec（`docs/superpowers/specs/`）与 plan（`docs/superpowers/plans/`）是**实施期文档**：实现过程中发现它与最终代码不一致，或当前改动影响上层接口，都要回修。
+- spec（`.scratch/<feature>/spec.md`）是**实施期文档**（本地 tracker 约定见 `docs/agents/issue-tracker.md`；2026-10-31 起 superpowers 退役、不再绑定 spec→plan 流程，历史 spec/plan 在 `.scratch/archive/`）：实现过程中发现它与最终代码不一致，或当前改动影响上层接口，都要回修。
 - **`docs/`、`scripts/`、`tests/` 都不入库**，所以文档漂移不会被 diff 顶出来，也没有 CI 替你拦：改完要主动核对受影响的文档。
 
 ## Routing
