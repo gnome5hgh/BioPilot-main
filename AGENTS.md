@@ -177,7 +177,7 @@ conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 e
   - **修正史同样追加进 `docs/adr/修正记录.md`**（同一份文件，标注是 learning 的哪一篇）。不要另起一份 learning 修正记录。
   - **编号不回收、空缺须补齐**：删除或合并后重编号，并同步更新所有活文档的引用；历史文档里的旧编号不回改。
   - 文中引用只写指针（如「见 learning 04」）。
-- spec（`.scratch/<feature>/spec.md`）是**实施期文档**（本地 tracker 约定见 `docs/agents/issue-tracker.md`；2026-10-31 起 superpowers 退役、不再绑定 spec→plan 流程，历史 spec/plan 在 `.scratch/archive/`）：实现过程中发现它与最终代码不一致，或当前改动影响上层接口，都要回修。
+- spec（`.scratch/<feature>/spec.md`）是**实施期文档**（本地 tracker 约定见 `docs/agents/issue-tracker.md`；历史 spec/plan 在 `.scratch/archive/`）：实现过程中发现它与最终代码不一致，或当前改动影响上层接口，都要回修。
 - **`docs/`、`scripts/`、`tests/` 都不入库**，所以文档漂移不会被 diff 顶出来，也没有 CI 替你拦：改完要主动核对受影响的文档。
 
 ## Routing
