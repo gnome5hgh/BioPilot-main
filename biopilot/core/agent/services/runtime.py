@@ -547,9 +547,11 @@ class Agent:
         同一会话（conversation_id）被两路并发触达（网页双开标签、网页与 REPL 同发）
         时，持 MySQL 命名锁 `run:{conversation_id}` 串行化：拿不到锁的一方按
         「错误一律降级为文本」红线返回「会话正在运行中」提示，绝不交错执行——
-        两个 run 交错会互相踩掉 in-context 窗口与消息落盘。锁覆盖 run 全生命周期
-        （含压缩与整合 flush）；崩溃时锁随连接自愈。锁机制不可用（无存储/纯 mock）
-        时跳过互斥——并发防护是可用性守卫，不是安全边界。
+        两个 run 交错会互相踩掉 in-context 窗口与消息落盘。锁覆盖 run 本体全
+        生命周期（含压缩）；收尾的整合 flush 由整合器自己的
+        `consolidation:{agent_id}` 锁保护（跨进程防双消费见工单 05）。崩溃时锁随
+        连接自愈；锁机制不可用（无存储/纯 mock/MySQL 抖动）时降级为无锁执行并记
+        警告——并发防护是可用性守卫，不是安全边界。
 
         调用方（CLI、Supervisor 的 SpawnSubAgentTool）只需要传入任务文本。
 
@@ -562,7 +564,13 @@ class Agent:
         from biopilot.core.memory.storage.named_lock import NamedLock
         lock = NamedLock(lock_dsn)
         lock_name = f"run:{self.conversation_id}"
-        acquired = await asyncio.to_thread(lock.acquire, lock_name, 0)
+        try:
+            acquired = await asyncio.to_thread(lock.acquire, lock_name, 0)
+        except Exception as e:
+            # 锁机制故障（MySQL 抖动）不拦任务：降级为无锁执行并留痕。
+            # 这是可用性守卫而非安全边界，放行不会破坏隔离或数据正确性。
+            logger.warning("会话运行锁获取失败，本轮无锁执行: %r", e)
+            return await self._run_react(task)
         if not acquired:
             return ("该会话正在运行中：上一个任务尚未结束，请等它完成后再发送新任务。")
         try:

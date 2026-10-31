@@ -10,9 +10,9 @@ GET_LOCK 是连接级锁：同一条连接获取与释放；连接断开（进�
 """
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
 import pymysql
+
+from biopilot.core.memory.storage.database import _parse_dsn
 
 __all__ = ["NamedLock"]
 
@@ -34,12 +34,10 @@ class NamedLock:
         self.dsn = dsn
 
     def _connect(self):
-        u = urlparse(self.dsn)
-        return pymysql.connect(
-            host=u.hostname or "127.0.0.1", port=u.port or 3306,
-            user=u.username or "root", password=u.password or "",
-            database=u.path.lstrip("/") or None, charset="utf8mb4",
-            autocommit=True)
+        kwargs = dict(_parse_dsn(self.dsn))
+        kwargs["database"] = kwargs["database"] or None
+        kwargs["autocommit"] = True
+        return pymysql.connect(**kwargs)
 
     def acquire(self, name: str, timeout: int = 0) -> bool:
         """获取命名锁（独占一条专用连接持有它）。
@@ -54,12 +52,15 @@ class NamedLock:
         Raises:
             pymysql.err.Error: MySQL 不可达等基础设施故障（调用方决定降级策略）。
         """
+        if getattr(self, "_conn", None) is not None:
+            raise RuntimeError(f"NamedLock 重复 acquire：已持有 {self._name!r}，"
+                               "先 release 或换新实例（否则会泄漏首条连接）")
         conn = self._connect()
         try:
             with conn.cursor() as cur:
                 # GET_LOCK 返回 1=成功 / 0=超时未得 / NULL=出错（如超时为负）
-                cur.execute("SELECT GET_LOCK(%s, %s)", (name, timeout))
-                got = cur.fetchone()[0]
+                cur.execute("SELECT GET_LOCK(%s, %s) AS got", (name, timeout))
+                got = cur.fetchone()["got"]
         except Exception:
             conn.close()
             raise

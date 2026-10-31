@@ -249,13 +249,14 @@ class MemoryConsolidator:
         编辑都没落盘时保留游标重试（连败达 _MAX_CONSECUTIVE_FAILURES 次才强制推进防
         死锁）；已有编辑落盘时照常推进——重放会产生重复写入。
         """
+        base = self._cursor
         new_msgs = self.message_manager.get_messages_by_agent_id(
             self.agent_state.agent_id)
 
         # 从游标处切出尚未整合的新消息。
         # 游标可能超前于当前总行数（如消息被清理或上次连败强制推进），此时切片为空，
         # 需校准游标，避免下次重复计算空区间。
-        new_msgs = new_msgs[self._cursor:]
+        new_msgs = new_msgs[base:]
         if not new_msgs:
             self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
             return
@@ -269,7 +270,8 @@ class MemoryConsolidator:
             logger.warning("整合编辑未通过校验，整批不写: %s", e)
             raise
         except Exception as e:
-            self._record_failure(f"LLM 抽取编辑指令失败: {e!r}")
+            self._record_failure(f"LLM 抽取编辑指令失败: {e!r}",
+                                 cursor_target=base + len(new_msgs))
             return
 
         # 阶段 2：逐条应用。单条失败只跳过该条，不让它带走同批其余编辑。
@@ -289,6 +291,9 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning("空分册清理失败: %s", e)
 
+        # 游标推进目标 = base + 本批条数：整合期间（持锁）新落盘的消息**不**计入，
+        # 留给下一批——推到实时行数会把未整合的新消息标成已消费（丢失）。
+        consumed_target = base + len(new_msgs)
         if failures and applied:
             # 已有编辑落盘：这批消息已被消费，**不再重放**（重放同一批编辑会在 add 上
             # 产生重复行）。失败如实写日志，游标照常推进。
@@ -297,11 +302,12 @@ class MemoryConsolidator:
         if not applied and (failures or not_found):
             # 一条都没写成功：这批消息还没被消费，保留游标下轮重试（连败达阈值才放弃）
             reasons = failures or [_describe_edit(edit) for edit in not_found]
-            self._record_failure(f"整合未落地任何编辑: {'；'.join(reasons)}")
+            self._record_failure(f"整合未落地任何编辑: {'；'.join(reasons)}",
+                                 cursor_target=base + len(new_msgs))
             return
 
-        # 推进游标到当前总行数（落库），并重置失败计数
-        self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
+        # 推进游标到本批末尾（落库），并重置失败计数
+        self._save_cursor(consumed_target)
         self._failures = 0
 
     async def _extract_batch(self, prompt: str) -> MemoryEditBatch:
@@ -323,7 +329,7 @@ class MemoryConsolidator:
             self._validate_edit(edit)
         return batch
 
-    def _record_failure(self, reason: str) -> None:
+    def _record_failure(self, reason: str, cursor_target: int) -> None:
         """记一次**未落盘任何编辑**的整批失败：日志 + 连败计数；达阈值强制推进游标。
 
         只在「一条编辑都没写进块」时调用——此时重试是安全的，所以保留游标让下一轮
@@ -340,7 +346,7 @@ class MemoryConsolidator:
             # 计数归零：放弃的这一批到此为止，下一批内容应当重新获得完整的重试额度。
             logger.warning("整合连续失败 %d 次，跳过这批消息推进游标",
                            self._failures)
-            self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
+            self._save_cursor(cursor_target)
             self._failures = 0
 
     def _existing_memory(self) -> list:
