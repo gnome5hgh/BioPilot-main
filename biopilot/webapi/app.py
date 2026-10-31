@@ -300,6 +300,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
         return StreamingResponse(stream_chat(), media_type="text/event-stream")
 
+    _paper_endpoints(app)
     return app
 
 
@@ -338,3 +339,39 @@ def run_server(config: WebConfig | None = None) -> None:
 def os_env(key: str, default: str | None) -> str | None:
     import os
     return os.environ.get(key, default)
+
+
+def _paper_endpoints(app: FastAPI) -> None:
+    """论文目录端点（工单 16）：登记/列表/删除，元数据在 papers 表。"""
+    from biopilot.tools.papers import register_paper, list_papers, remove_paper
+
+    @app.post("/papers/{paper_id}")
+    async def papers_register(
+        paper_id: str, body: dict,
+        x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        register_paper(db, x_user_id, paper_id,
+                       (body or {}).get("title", ""),
+                       (body or {}).get("oss_key", ""),
+                       int((body or {}).get("size_bytes", 0)))
+        return {"status": "ok"}
+
+    @app.get("/papers")
+    async def papers_list(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        return {"papers": list_papers(_shared_db(), x_user_id)}
+
+    @app.delete("/papers/{paper_id}")
+    async def papers_delete(
+        paper_id: str, x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        oss_key = remove_paper(_shared_db(), x_user_id, paper_id)
+        if oss_key is None:
+            raise HTTPException(status_code=404, detail="论文不存在")
+        return {"status": "ok", "oss_key": oss_key}

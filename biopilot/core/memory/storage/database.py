@@ -100,6 +100,21 @@ CREATE TABLE IF NOT EXISTS audit_event (
     KEY idx_audit_session (session_id, created_at)
 );
 
+-- papers 表：用户论文目录元数据（原文在 MinIO users/<uid>/papers/，行级 user_id 隔离）
+CREATE TABLE IF NOT EXISTS papers (
+    id VARCHAR(64) NOT NULL,             -- 论文唯一标识
+    user_id VARCHAR(191) NOT NULL,       -- 归属用户
+    title VARCHAR(500) NOT NULL,         -- 标题（解析器出口；宁空勿错）
+    oss_key VARCHAR(500) NOT NULL,       -- MinIO 对象键
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    indexed INTEGER NOT NULL DEFAULT 0,  -- RAG 索引状态（0=未索引）
+    created_at VARCHAR(40) NOT NULL,
+    seq BIGINT NOT NULL AUTO_INCREMENT,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_papers_seq (seq),
+    KEY idx_papers_user (user_id)
+);
+
 -- messages 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识

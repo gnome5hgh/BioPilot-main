@@ -33,7 +33,7 @@ class RAGService:
         _embedder/_reranker/_vector_store/_milvus_available/_bm25/_indexer/_retriever/_rewriter: 惰性组件槽位（None 表示未构造，首次访问经双重检查加锁构造）
     """
 
-    def __init__(self, config: BioPilotConfig):
+    def __init__(self, config: BioPilotConfig, user_domain: str = "local"):
         """初始化门面：先把所有组件槽位置空，首次访问才惰性构造。
 
         除 chunker（纯逻辑、构造无副作用）外，编码器/重排器/向量库/BM25 都走
@@ -43,6 +43,7 @@ class RAGService:
             config: 全局配置对象，包含工作区路径、模型名等。
         """
         self.config = config
+        self.user_domain = user_domain
         # 可重入锁，保护整个索引/检索流程，确保并发下状态一致
         self.lock = threading.RLock()
 
@@ -130,7 +131,10 @@ class RAGService:
                     try:
                         self._vector_store = VectorStore(
                             self.config.rag.storage.uri, dim,
-                            collection_name=self.config.rag.storage.collection,
+                            collection_name=(
+                                self.config.rag.storage.collection
+                                + ("" if self.user_domain == "local"
+                                   else f"_{self.user_domain}")),
                             batch_size=self.config.rag.storage.batch_size,
                             read_timeout=self.config.rag.storage.timeout,
                             write_timeout=self.config.rag.storage.write_timeout,
