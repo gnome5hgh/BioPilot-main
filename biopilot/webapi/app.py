@@ -202,7 +202,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 agents.pop(stale_key, None)
                 agent_last_used.pop(stale_key, None)
 
-        key = (x_user_id, conversation_id)
+        key = (x_user_id, conversation_id, user_models.get(x_user_id))
         if key not in agents:
             built = agent_factory(x_user_id, conversation_id,
                                   _confirm_callback(x_user_id, conversation_id),
@@ -324,6 +324,8 @@ async def _default_agent_factory(user_id: str, conversation_id: str):
 
 #: 全部活跃会话的整合队列（on_shutdown 时统一 flush）
 _queues: list = []
+#: 会话级模型选择（user -> model 名；None 用默认主模型）
+user_models: dict[str, str | None] = {}
 
 
 def run_server(config: WebConfig | None = None) -> None:

@@ -10,6 +10,7 @@
 """
 import re
 from dataclasses import dataclass, field, fields
+from pydantic import Field
 from typing import Literal
 
 
@@ -141,6 +142,9 @@ class RuntimeConfig:
     #: 记忆/会话真相源的 MySQL 连接串（Python 侧 blocks/block_history/messages；
     #: 测试经 BIOPILOT_MEMORY_MYSQL_DSN 覆盖到 biopilot_test 库）
     memory_dsn: str = "mysql://root@127.0.0.1:3306/biopilot"
+    #: 多模型条目（名称/端点/key/费率展示值）；会话内切换下一次 run 生效。
+    #: 空列表表示未配置多模型——模型选择器退化为只展示当前主模型。
+    models: list[dict] = field(default_factory=list)
 
     #: Agent 插件扫描目录，默认扫描项目根下的 agents/
     agents_dir: str = "agents"
