@@ -30,6 +30,7 @@ class AuditEntry:
         trace_id: str，一次 Agent.run() 的唯一追踪 ID（W3C 128-bit，32 hex）
         session_id: str，会话标识（按对话线程分组）
         agent_type: str，发起调用的 Agent 类型
+        user_id: str | None，归属用户（行级隔离域；事件归属取证用）
         tool_name: str，被调用工具名（非工具事件为空）
         risk_level: str，工具风险档位（未知工具或非工具事件为 "unknown"/""）
         input: Any，脱敏后的调用参数（凭证类键替换为 "***"，路径类保留原值）

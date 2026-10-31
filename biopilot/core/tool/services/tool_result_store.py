@@ -197,17 +197,18 @@ class ToolResultStore:
             return None
 
     def _local_path(self, user_id: str, session_id: str, tool_call_id: str) -> Path:
-        """返回本地回退路径。
+        """返回本地回退路径（与对象键同构的 users/<uid>/ 命名空间）。
 
         Args:
+            user_id: 归属用户（本地回退同样按用户分域）。
             session_id: 会话标识。
             tool_call_id: 工具调用 ID。
 
         Returns:
             本地文件路径。
         """
-        return self._local_dir / _safe_component(session_id) / (
-            f"{_safe_component(tool_call_id)}.txt")
+        return (self._local_dir / _safe_component(user_id)
+                / _safe_component(session_id) / f"{_safe_component(tool_call_id)}.txt")
 
 
 def make_tool_result_store(config) -> ToolResultStore:

@@ -18,7 +18,6 @@ class ToolContext:
     Attributes:
         trace_id: str，本次 run 的唯一追踪 ID（聚合一次任务的所有工具调用）
         session_id: str，会话标识（跨多次 run 保持一致）
-        user_id: str | None，归属用户（行级隔离；审计与外置键命名空间用）
         agent_type: str，当前 Agent 类型（如 supervisor/paper-agent）
         tool: Tool | None，当前执行的 Tool；None 表示未知工具（幻觉或注入）
         tool_name: str，工具名（tool 为 None 时仍可记录）
@@ -39,6 +38,7 @@ class ToolContext:
         escalations: list[tuple[str, str | None]]，其他中间件登记的升级因
                      （主因, 作用域值），由 PolicyEngine 统一消费后弹一次确认
         approval_outcome: str | None，审批最终结果（user_confirmed/user_denied/auto_denied）
+        user_id: str | None，归属用户（执行 agent 的隔离域；审计归属与外置键命名空间用）
         approval_decided_span_id: str | None，审批决策事件的 span ID（审计回溯用）
     """
 
