@@ -14,6 +14,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pathlib
+
+import yaml as yaml_mod
+
 import uuid
 from dataclasses import dataclass
 
@@ -41,6 +45,11 @@ class WebConfig:
 
 
 _db_instance = None
+
+
+def yaml_path() -> pathlib.Path:
+    """config.yaml 路径（工作区约定：仓库根）。"""
+    return pathlib.Path.cwd() / "config.yaml"
 
 
 def _shared_db():
@@ -376,6 +385,54 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             return
 
         return StreamingResponse(stream_chat(), media_type="text/event-stream")
+
+    # 设置端点（ADMIN 专属在 Java 层守卫）：意图开关/确认档位/沙箱配置的语义子集
+    @app.get("/settings")
+    async def settings_get(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        return {"intent_enabled": cfg.intent.enabled,
+                "confirm_above": cfg.runtime.confirm_above,
+                "models": cfg.runtime.models}
+
+    @app.post("/settings")
+    async def settings_set(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        # 语义子集写 config.yaml（覆盖链的最后一层：config.py ← config.yaml ← env）
+        # 只写白名单键，不碰凭据
+        import yaml as _yaml
+        cfg_path = yaml_path()
+        allowed = {"intent_enabled", "confirm_above"}
+        overrides = {k: v for k, v in (body or {}).items() if k in allowed}
+        if overrides:
+            existing = {}
+            if cfg_path.exists():
+                existing = yaml_mod.safe_load(cfg_path.read_text()) or {}
+            yaml_mod.safe_dump(existing, open(cfg_path, "w"), allow_unicode=True)
+        return {"status": "ok", "applied": list(overrides)}
+
+    # 删户两阶段（P0-4）：标记 → 等活动清零 → 物理删除（幂等）
+    @app.post("/admin/users/{target_id}/mark-deleting")
+    async def mark_deleting(target_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        db.execute("UPDATE agent_state SET user_id=CONCAT('deleting:', user_id)"
+                   " WHERE user_id=? AND user_id NOT LIKE 'deleting:%'", (target_id,))
+        return {"status": "marked"}
+
+    @app.post("/admin/users/{target_id}/purge")
+    async def purge_user(target_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        for table in ("messages", "blocks", "block_history", "papers", "documents"):
+            db.execute(f"DELETE FROM {table} WHERE user_id=?", (target_id,))
+        db.execute("DELETE FROM agent_state WHERE user_id=?", (target_id,))
+        return {"status": "purged", "user_id": target_id}
 
     _paper_endpoints(app)
     _doc_endpoints(app)

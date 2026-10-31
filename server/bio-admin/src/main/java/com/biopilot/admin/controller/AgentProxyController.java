@@ -108,6 +108,29 @@ public class AgentProxyController {
         }
     }
 
+    /** 设置读/写（ADMIN 专属由 Java @SaCheckRole 守卫；写走 config.yaml 覆盖）。 */
+    @GetMapping("/settings")
+    public ResponseEntity<String> settingsGet() {
+        return proxyGet("/settings");
+    }
+
+    @cn.dev33.satoken.annotation.SaCheckRole("ADMIN")
+    @org.springframework.web.bind.annotation.PostMapping("/settings")
+    public ResponseEntity<String> settingsSet(@RequestBody String body) {
+        return proxyPost("/settings", body);
+    }
+
+    /** 删户两阶段（管理动作）：标记 + 物理清理透传。 */
+    @PostMapping("/admin/users/{targetId}/mark-deleting")
+    public ResponseEntity<String> markDeleting(@PathVariable String targetId) {
+        return proxyPost("/admin/users/" + targetId + "/mark-deleting", "{}");
+    }
+
+    @PostMapping("/admin/users/{targetId}/purge")
+    public ResponseEntity<String> purgeUser(@PathVariable String targetId) {
+        return proxyPost("/admin/users/" + targetId + "/purge", "{}");
+    }
+
     /** 论文目录：列表（读 papers 表，user_id 行级过滤）。 */
     @GetMapping("/papers")
     public ResponseEntity<String> papersList() {

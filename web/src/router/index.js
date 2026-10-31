@@ -16,6 +16,7 @@ const routes = [
       { path: 'docs', component: () => import('../views/DocEditorView.vue') },
       { path: 'literature', component: () => import('../views/LiteratureView.vue') },
       { path: 'terminal', component: () => import('../views/TerminalView.vue') },
+      { path: 'settings', component: () => import('../views/SettingsView.vue') },
     ],
   },
 ]
