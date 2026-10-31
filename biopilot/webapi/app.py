@@ -88,6 +88,12 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="BioPilot Agent Adapter", docs_url=None, redoc_url=None)
     agents: dict[tuple[str, str], object] = {}
+    #: 全局 LLM 在途并发闸（多用户总闸：单学生的批量派发占不满全部外部资源）
+    llm_gate = asyncio.Semaphore(getattr(config, "llm_max_concurrency", 8))
+    #: 单用户活跃 run 计数（防单用户占满并发）
+    user_runs: dict[str, int] = {}
+    #: agent 最后使用时刻（idle 驱逐依据）
+    agent_last_used: dict[tuple[str, str], float] = {}
     #: 进行中的确认等待：(user_id, conversation_id, req_id) -> Future[bool]
     pending_confirms: dict[tuple[str, str, str], asyncio.Future] = {}
     #: 正在 run 的会话流队列（确认帧投到对应请求的流里）
@@ -121,7 +127,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             return await asyncio.wait_for(fut, timeout=config.confirm_timeout_seconds)
         except asyncio.TimeoutError:
             logger.warning("确认等待超时（%ss），按拒绝处理: %s",
-                           config.confirm_timeout_seconds, req)
+                           getattr(config, "confirm_timeout_seconds", 300.0), req)
             return False
         finally:
             pending_confirms.pop((user_id, conversation_id, req_id), None)
@@ -188,6 +194,14 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         if not task or not conversation_id:
             raise HTTPException(status_code=422, detail="task 与 conversation_id 必填")
 
+        # 空闲驱逐：超过阈值的 agent 实例丢弃（下一请求从 DB 重建，回归安全）
+        import time as _time
+        now = _time.monotonic()
+        for stale_key, last in list(agent_last_used.items()):
+            if now - last > getattr(config, "agent_idle_evict_seconds", 1800.0) and stale_key in agents:
+                agents.pop(stale_key, None)
+                agent_last_used.pop(stale_key, None)
+
         key = (x_user_id, conversation_id)
         if key not in agents:
             built = agent_factory(x_user_id, conversation_id,
@@ -196,6 +210,12 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             # 工厂可为同步或异步（真实装配是 async，测试替身是同步 lambda）
             agents[key] = await built if asyncio.iscoroutine(built) else built
         agent = agents[key]
+        agent_last_used[key] = now
+        # 单用户并发配额：超限即拒绝（fail-closed，不排队饿死其他用户）
+        if user_runs.get(x_user_id, 0) >= getattr(config, "per_user_run_limit", 3):
+            raise HTTPException(
+                status_code=429,
+                detail="该账号并发任务已达上限，请等待进行中的任务完成")
 
         async def stream_chat():
             queue: asyncio.Queue = asyncio.Queue()
