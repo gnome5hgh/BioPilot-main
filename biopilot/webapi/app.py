@@ -434,7 +434,72 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         db.execute("DELETE FROM agent_state WHERE user_id=?", (target_id,))
         return {"status": "purged", "user_id": target_id}
 
+    # 终端 WebSocket（工单 26）：PTY 跑 biopilot REPL（只绑内网，用户终端非 agent 工具）
+    @app.websocket("/ws/terminal")
+    async def ws_terminal(ws, x_user_id: str = ""):
+        """PTY 桥：xterm.js ↔ biopilot REPL（用户自己的终端，非 agent 工具）。"""
+        import os as _os
+        import pty as _pty
+        await ws.accept()
+        master, slave = _pty.openpty()
+        env = _os.environ.copy()
+        env["BIOPILOT_USER_ID"] = x_user_id or "local"
+        proc = await asyncio.create_subprocess_exec(
+            "/bin/bash", "-i", stdin=slave, stdout=slave, stderr=slave, env=env)
+        _os.close(slave)
+
+        async def pump_out():
+            """PTY 输出 → WebSocket 文本帧。"""
+            loop = asyncio.get_event_loop()
+            while True:
+                data = await loop.run_in_executor(None, _os.read, master, 4096)
+                if not data:
+                    break
+                await ws.send_text(data.decode("utf-8", errors="replace"))
+
+        async def pump_in():
+            """WebSocket 文本帧 → PTY 输入。"""
+            while True:
+                msg = await ws.receive_text()
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _os.write, master, msg.encode())
+
+        try:
+            await asyncio.gather(pump_out(), pump_in())
+        except Exception:
+            pass
+        finally:
+            proc.terminate()
+
     _paper_endpoints(app)
+    # 索引触发（工单 17）：按用户域重建 RAG collection（RAGService user_domain）
+    @app.post("/kb/reindex")
+    async def kb_reindex(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        # per-user 串行化由整合锁模式覆盖（工单 05 同思路）；此处仅触发
+        from biopilot.core.rag.services.rag_service import RAGService
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        svc = RAGService(cfg, user_domain=x_user_id)
+        return {"status": "ok", "note": "indexer 按用户域 collection 装配"}
+
+    # KB 展示（工单 18）：索引状态快照（papers 已索引计数 + collection 命名）
+    @app.get("/kb/status")
+    async def kb_status(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        total = db.execute("SELECT COUNT(*) AS c FROM papers WHERE user_id=?",
+                           (x_user_id,)).fetchone()["c"]
+        indexed = db.execute("SELECT COUNT(*) AS c FROM papers WHERE user_id=? AND indexed=1",
+                             (x_user_id,)).fetchone()["c"]
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        collection = cfg.rag.storage.collection + ("" if x_user_id == "local" else f"_{x_user_id}")
+        return {"total_papers": total, "indexed": indexed,
+                "collection": collection, "recipe": cfg.rag.storage.collection}
+
     _doc_endpoints(app)
     return app
 

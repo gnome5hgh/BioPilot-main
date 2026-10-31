@@ -17,6 +17,7 @@ const routes = [
       { path: 'literature', component: () => import('../views/LiteratureView.vue') },
       { path: 'terminal', component: () => import('../views/TerminalView.vue') },
       { path: 'settings', component: () => import('../views/SettingsView.vue') },
+      { path: 'kb', component: () => import('../views/KBView.vue') },
     ],
   },
 ]
