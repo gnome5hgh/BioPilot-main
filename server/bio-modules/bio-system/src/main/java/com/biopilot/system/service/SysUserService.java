@@ -40,6 +40,24 @@ public class SysUserService {
                 .eq(SysUser::getUserName, userName));
     }
 
+    /** 全量用户列表（管理端用；管理视角可见全部账号元数据）。 */
+    public java.util.List<SysUser> list() {
+        return userMapper.selectList(null);
+    }
+
+    /** 更新用户白名单字段与密码重置（管理端用）。 */
+    public void updateById(SysUser u) {
+        userMapper.updateById(u);
+    }
+
+    /** 重置密码：BCrypt 重新摘要（管理端动作）。 */
+    public void resetPassword(long userId, String rawPassword) {
+        SysUser u = new SysUser();
+        u.setUserId(userId);
+        u.setPassword(encoder.encode(rawPassword));
+        userMapper.updateById(u);
+    }
+
     /** 按 id 查用户（资料/登录态用）；不存在返回 null。 */
     public SysUser getById(long userId) {
         return userMapper.selectById(userId);

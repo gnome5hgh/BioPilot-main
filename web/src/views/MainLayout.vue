@@ -10,6 +10,7 @@
         <div class="nav-item" :class="{ active: $route.path === '/' }" @click="$router.push('/')">新建任务</div>
         <div class="nav-item" :class="{ active: $route.path === '/store' }" @click="$router.push('/store')">专家 · 技能 · APP</div>
         <div class="nav-item" :class="{ active: $route.path === '/scheduled' }" @click="$router.push('/scheduled')">定时任务</div>
+        <div class="nav-item" v-if="auth.role === 'ADMIN'" :class="{ active: $route.path === '/admin' }" @click="$router.push('/admin')">管理端</div>
       </nav>
       <div class="user-footer">
         <div class="avatar">{{ initial }}</div>

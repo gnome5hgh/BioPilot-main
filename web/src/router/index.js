@@ -11,6 +11,7 @@ const routes = [
       { path: '', component: () => import('../views/ChatView.vue') },
       { path: 'store', component: () => import('../views/StoreView.vue') },
       { path: 'scheduled', component: () => import('../views/ScheduledView.vue') },
+      { path: 'admin', component: () => import('../views/AdminView.vue') },
     ],
   },
 ]
