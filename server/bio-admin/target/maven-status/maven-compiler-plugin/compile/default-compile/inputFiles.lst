@@ -1,3 +1,8 @@
 /Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/BioPilotApplication.java
+/Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/config/MybatisPlusConfig.java
 /Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/config/SaTokenConfigure.java
+/Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/config/SaTokenExceptionAdvice.java
+/Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/config/StpInterfaceImpl.java
+/Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/controller/AdminGuardController.java
+/Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/controller/AuthController.java
 /Users/gnomeshgh/Code/AgentProject/paperFlow-main/server/bio-admin/src/main/java/com/biopilot/admin/controller/HealthController.java

@@ -2,11 +2,14 @@ package com.biopilot.admin.config;
 
 import cn.dev33.satoken.context.SaHolder;
 import cn.dev33.satoken.filter.SaServletFilter;
+import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.stp.StpUtil;
 import com.biopilot.common.core.R;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /** Sa-Token 全局过滤器：放行健康检查与登录/注册，其余接口要求登录。
 
@@ -14,9 +17,15 @@ import org.springframework.context.annotation.Configuration;
     NotLoginException 由 error 回调统一转 401 JSON，不再走 error page 二次异常。
 */
 @Configuration
-public class SaTokenConfigure {
+public class SaTokenConfigure implements WebMvcConfigurer {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        // 注解解析器（@SaCheckRole 等）：路由登录检查在下面的过滤器里，这里只管注解
+        registry.addInterceptor(new SaInterceptor());
+    }
 
     @Bean
     public SaServletFilter saTokenFilter() {
@@ -33,7 +42,7 @@ public class SaTokenConfigure {
                         // 响应头不可写时仍回 body（由过滤器兜底输出）
                     }
                     try {
-                        return objectMapper.writeValueAsString(R.fail(e.getMessage()));
+                        return objectMapper.writeValueAsString(new R<>(401, e.getMessage(), null));
                     } catch (Exception jsonError) {
                         return R.fail(e.getMessage()).getMsg();
                     }

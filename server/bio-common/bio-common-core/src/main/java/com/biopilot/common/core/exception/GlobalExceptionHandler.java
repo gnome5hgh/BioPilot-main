@@ -13,6 +13,8 @@ public class GlobalExceptionHandler {
         return R.fail(e.getMessage());
     }
 
+
+
     @ExceptionHandler(Exception.class)
     public R<Void> handleUnknown(Exception e) {
         return R.fail("系统繁忙，请稍后重试");

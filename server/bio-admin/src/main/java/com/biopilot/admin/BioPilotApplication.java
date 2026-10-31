@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /** BioPilot 服务端启动入口（扫描 system 模块的 Mapper）。 */
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.biopilot")
 @MapperScan("com.biopilot.system.mapper")
 public class BioPilotApplication {
 

@@ -40,6 +40,11 @@ public class SysUserService {
                 .eq(SysUser::getUserName, userName));
     }
 
+    /** 按 id 查用户（资料/登录态用）；不存在返回 null。 */
+    public SysUser getById(long userId) {
+        return userMapper.selectById(userId);
+    }
+
     /** 密码校验（BCrypt 比对）。 */
     public boolean checkPassword(SysUser u, String rawPassword) {
         return encoder.matches(rawPassword, u.getPassword());

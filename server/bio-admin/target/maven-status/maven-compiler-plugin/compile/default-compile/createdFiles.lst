@@ -1,3 +1,9 @@
+com/biopilot/admin/config/StpInterfaceImpl.class
+com/biopilot/admin/config/MybatisPlusConfig.class
+com/biopilot/admin/config/MybatisPlusConfig$TenantLineHandler.class
+com/biopilot/admin/controller/AuthController.class
+com/biopilot/admin/config/SaTokenExceptionAdvice.class
+com/biopilot/admin/controller/AdminGuardController.class
+com/biopilot/admin/controller/HealthController.class
 com/biopilot/admin/BioPilotApplication.class
 com/biopilot/admin/config/SaTokenConfigure.class
-com/biopilot/admin/controller/HealthController.class

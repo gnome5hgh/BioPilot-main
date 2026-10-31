@@ -18,6 +18,12 @@
       <groupId>cn.dev33</groupId>
       <artifactId>sa-token-spring-boot3-starter</artifactId>
     </dependency>
+    <!-- 租户插件（TenantLineInnerInterceptor/TenantLineHandler）3.5.9 起拆到独立模块 -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-jsqlparser</artifactId>
+      <version>${mybatis-plus.version}</version>
+    </dependency>
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
