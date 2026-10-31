@@ -97,6 +97,19 @@ def _select_resume_session(agent_manager: AgentManager, io) -> str | None:
     return None
 
 
+async def assemble_web_session(user_id: str, conversation_id: str):
+    """Web 适配层的会话装配（工单 11 接入：按用户域构建 Agent）。
+
+    Args:
+        user_id: 归属用户（SpringBoot 内网调用携带，即真相）。
+        conversation_id: 会话标识（对话窗口与落盘键控）。
+
+    Raises:
+        NotImplementedError: 工单 11 前未接入——适配层测试经 agent_factory 注入替身。
+    """
+    raise NotImplementedError("工单 11：web 会话装配待接入（工单 10 经 factory 注入测试替身）")
+
+
 def main(argv: list[str] | None = None) -> int | None:
     """装配全部依赖并启动 REPL。
 
@@ -138,9 +151,20 @@ def main(argv: list[str] | None = None) -> int | None:
     parser.add_argument("--resume", nargs="?", const="", default=None,
                         metavar="SESSION_ID",
                         help="恢复历史会话；不带 id 则列出历史会话供选择")
+    parser.add_argument("--web", action="store_true", dest="web",
+                        help="启动 Web 适配层（本地 HTTP/SSE 服务）而非 REPL")
     parser.add_argument("--skip-bootstrap", action="store_true",
                         help="跳过依赖服务（Milvus）启动预检")
     args = parser.parse_args(argv)
+    if getattr(args, "web", False):
+        # Web 适配层：SSE 服务（工单 10）。DSN 经环境变量或 --resume 前的 config 读出。
+        from biopilot.webapi import run_server, WebConfig
+        import os as _os
+        run_server(WebConfig(
+            host=_os.environ.get("BIOPILOT_WEB_HOST", "127.0.0.1"),
+            port=int(_os.environ.get("BIOPILOT_WEB_PORT", "8300")),
+            memory_dsn=_os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")))
+        return 0
 
     config = BioPilotConfig.from_env()
     # MCP 客户端平台：config.mcp_servers 非空才启动（后台循环 + 非阻塞预取）。
