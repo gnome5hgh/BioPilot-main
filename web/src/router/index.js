@@ -13,6 +13,9 @@ const routes = [
       { path: 'scheduled', component: () => import('../views/ScheduledView.vue') },
       { path: 'admin', component: () => import('../views/AdminView.vue') },
       { path: 'papers', component: () => import('../views/PapersView.vue') },
+      { path: 'docs', component: () => import('../views/DocEditorView.vue') },
+      { path: 'literature', component: () => import('../views/LiteratureView.vue') },
+      { path: 'terminal', component: () => import('../views/TerminalView.vue') },
     ],
   },
 ]

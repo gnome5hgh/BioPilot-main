@@ -115,6 +115,20 @@ CREATE TABLE IF NOT EXISTS papers (
     KEY idx_papers_user (user_id)
 );
 
+-- documents 表：文档编辑器产物（markdown 存 OSS，内容在行内 TEXT 工单 19）
+CREATE TABLE IF NOT EXISTS documents (
+    id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(191) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    content MEDIUMTEXT NULL,
+    oss_key VARCHAR(500) NULL,
+    updated_at VARCHAR(40) NOT NULL,
+    seq BIGINT NOT NULL AUTO_INCREMENT,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_documents_seq (seq),
+    KEY idx_documents_user (user_id)
+);
+
 -- messages 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识

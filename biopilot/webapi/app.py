@@ -378,6 +378,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         return StreamingResponse(stream_chat(), media_type="text/event-stream")
 
     _paper_endpoints(app)
+    _doc_endpoints(app)
     return app
 
 
@@ -454,3 +455,85 @@ def _paper_endpoints(app: FastAPI) -> None:
         if oss_key is None:
             raise HTTPException(status_code=404, detail="论文不存在")
         return {"status": "ok", "oss_key": oss_key}
+
+
+def _doc_endpoints(app: FastAPI) -> None:
+    """文档编辑器端点（工单 19）：markdown 文档的 CRUD（内容行存，OSS 留同步口）。"""
+    from biopilot.core.memory.storage.database import MemoryDB as _MDB
+
+    @app.get("/documents")
+    async def documents_list(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        rows = db.execute("SELECT id, name, updated_at FROM documents"
+                          " WHERE user_id=? ORDER BY seq DESC", (x_user_id,)).fetchall()
+        return {"documents": [dict(r) for r in rows]}
+
+    @app.post("/documents")
+    async def documents_create(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from datetime import datetime, timezone
+        db = _shared_db()
+        doc_id = uuid.uuid4().hex
+        name = (body or {}).get("name", "新文档.md")
+        content = (body or {}).get("content", "")
+        db.execute("INSERT INTO documents (id, user_id, name, content, updated_at)"
+                   " VALUES (?,?,?,?,?)",
+                   (doc_id, x_user_id, name, content,
+                    datetime.now(timezone.utc).isoformat()))
+        return {"status": "ok", "id": doc_id}
+
+    @app.get("/documents/{doc_id}")
+    async def documents_get(doc_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        row = db.execute("SELECT id, name, content, updated_at FROM documents"
+                         " WHERE id=? AND user_id=?", (doc_id, x_user_id)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        return dict(row)
+
+    @app.put("/documents/{doc_id}")
+    async def documents_save(
+        doc_id: str, body: dict, x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from datetime import datetime, timezone
+        db = _shared_db()
+        db.execute("UPDATE documents SET content=?, updated_at=? WHERE id=? AND user_id=?",
+                   ((body or {}).get("content", ""), datetime.now(timezone.utc).isoformat(),
+                    doc_id, x_user_id))
+        return {"status": "ok"}
+
+    @app.get("/literature/search")
+    async def literature_search(
+        q: str = "", x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """文献搜索（PubMed E-utilities，AI 搜索走 agent 主链路）。"""
+        if not x_user_id or not q.strip():
+            return {"results": []}
+        import httpx as _httpx
+        try:
+            async with _httpx.AsyncClient(timeout=10) as hc:
+                r = await hc.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                                 params={"db": "pubmed", "term": q, "retmax": 10,
+                                         "retmode": "json"})
+                ids = r.json().get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                return {"results": []}
+            async with _httpx.AsyncClient(timeout=10) as hc:
+                r = await hc.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                                 params={"db": "pubmed", "id": ",".join(ids),
+                                         "retmode": "json"})
+                result = r.json().get("result", {})
+            out = [{"id": uid, "title": v.get("title", ""),
+                    "journal": v.get("source", ""), "pubdate": v.get("pubdate", "")}
+                   for uid, v in result.items() if uid != "uids"]
+            return {"results": out}
+        except Exception as e:
+            logger.warning("PubMed 搜索失败: %r", e)
+            return {"results": [], "error": str(e)}

@@ -60,6 +60,54 @@ public class AgentProxyController {
         }
     }
 
+    /** 文档编辑器：列表/读/存（documents 表 user_id 行级隔离）。 */
+    @GetMapping("/documents")
+    public ResponseEntity<String> docsList() {
+        return proxyGet("/documents");
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/documents")
+    public ResponseEntity<String> docsCreate(@RequestBody String body) {
+        return proxyPost("/documents", body);
+    }
+
+    @GetMapping("/documents/{docId}")
+    public ResponseEntity<String> docsGet(@PathVariable String docId) {
+        return proxyGet("/documents/" + docId);
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/documents/{docId}")
+    public ResponseEntity<String> docsSave(@PathVariable String docId, @RequestBody String body) {
+        return proxyPost("/documents/" + docId, body);
+    }
+
+    /** 文献搜索（PubMed 直查透传）。 */
+    @GetMapping("/literature/search")
+    public ResponseEntity<String> literatureSearch(@org.springframework.web.bind.annotation.RequestParam String q) {
+        return proxyGet("/literature/search?q=" + java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private ResponseEntity<String> proxyPost(String path, String body) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + path))
+                .header("Content-Type", "application/json")
+                .header("X-User-Id", String.valueOf(userId))
+                .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
     /** 论文目录：列表（读 papers 表，user_id 行级过滤）。 */
     @GetMapping("/papers")
     public ResponseEntity<String> papersList() {
