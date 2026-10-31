@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BioPilot 服务端父 POM：分层照搬 cde-base（cde-common 通用件 / cde-modules 业务域 / cde-admin 启动装配），
+     模块前缀换 bio-*。裁剪清单见 .scratch/biopilot-lab-platform/notes/07-springboot-scope.md。 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.7</version>
+    <relativePath/>
+  </parent>
+  <groupId>com.biopilot</groupId>
+  <artifactId>biopilot-server</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <modules>
+    <module>bio-common/bio-common-core</module>
+    <module>bio-modules/bio-system</module>
+    <module>bio-admin</module>
+  </modules>
+  <properties>
+    <java.version>21</java.version>
+    <mybatis-plus.version>3.5.14</mybatis-plus.version>
+    <sa-token.version>1.44.0</sa-token.version>
+  </properties>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.baomidou</groupId>
+        <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        <version>${mybatis-plus.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>cn.dev33</groupId>
+        <artifactId>sa-token-spring-boot3-starter</artifactId>
+        <version>${sa-token.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-system</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>

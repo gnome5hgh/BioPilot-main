@@ -1,0 +1,5 @@
+com/biopilot/system/mapper/SysRoleMapper.class
+com/biopilot/system/domain/SysUser.class
+com/biopilot/system/domain/SysRole.class
+com/biopilot/system/mapper/SysUserMapper.class
+com/biopilot/system/service/SysUserService.class
