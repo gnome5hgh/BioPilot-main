@@ -18,6 +18,7 @@ class ToolContext:
     Attributes:
         trace_id: str，本次 run 的唯一追踪 ID（聚合一次任务的所有工具调用）
         session_id: str，会话标识（跨多次 run 保持一致）
+        user_id: str | None，归属用户（行级隔离；审计与外置键命名空间用）
         agent_type: str，当前 Agent 类型（如 supervisor/paper-agent）
         tool: Tool | None，当前执行的 Tool；None 表示未知工具（幻觉或注入）
         tool_name: str，工具名（tool 为 None 时仍可记录）
@@ -78,5 +79,6 @@ class ToolContext:
     # 内容防护的结论（违规明细、语义判定结论）——只留痕，不参与策略决策
     content_findings: list[dict] = field(default_factory=list)
     approval_outcome: ApprovalOutcome | None = None  # 审批最终结果（ApprovalOutcome 的取值）
+    user_id: str | None = None             # 归属用户（执行 agent 的隔离域，审计/外置键用）
     approval_decided_span_id: str | None = None  # 审批决策事件的 span ID（用于审计回溯）
 

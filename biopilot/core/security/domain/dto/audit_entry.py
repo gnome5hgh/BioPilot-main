@@ -78,6 +78,8 @@ class AuditEntry:
     input: Any = None
     #: 父跨度 ID，用于构建调用树。若为 None 则表示当前跨度是根节点。
     parent_span_id: str | None = None
+    #: 归属用户（行级隔离域）；None 兼容旧事件/未装配场景。
+    user_id: str | None = None
     #: ReAct 循环轮次索引，从 0 开始计数。用于定位该事件发生在第几轮推理中。
     turn: int = 0
     #: 事件开始时间的 ISO 格式时间戳。

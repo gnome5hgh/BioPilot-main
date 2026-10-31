@@ -44,6 +44,7 @@ class AgentState(BaseModel):
 
     # ---------- 标识与元数据 ----------
     agent_id: str                                    # 唯一标识符（主键）
+    user_id: str = "local"                           # 归属用户（行级隔离；REPL 本地用户为 "local"）
     name: str | None = None                          # 可读名称（可选）
     description: str | None = None                  # 描述（可选，用于展示/索引）
     system: str | None = None                       # 系统提示词（可选，覆盖默认）

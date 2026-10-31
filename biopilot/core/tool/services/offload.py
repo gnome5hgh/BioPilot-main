@@ -21,12 +21,12 @@ def make_tool_result_offloader(store, settings):
         settings: ToolResultArchiveConfig，阈值与预览长度。
 
     Returns:
-        可调用对象 ``(tool_name, tool_call_id, session_id, result, tool=None)``，
+        可调用对象 ``(tool_name, tool_call_id, session_id, result, tool=None, user_id=None)``，
         返回可能被替换成指针的 ToolResult。
     """
 
     def offload(tool_name: str, tool_call_id: str, session_id: str,
-                result: ToolResult, tool=None) -> ToolResult:
+                result: ToolResult, tool=None, user_id: str | None = None) -> ToolResult:
         """按阈值决定是否外置一条工具结果。
 
         Args:
@@ -34,6 +34,7 @@ def make_tool_result_offloader(store, settings):
             tool_call_id: 工具调用 ID。
             session_id: 会话标识。
             result: 原始 ToolResult。
+            user_id: 归属用户（外置键命名空间；None 时退回会话域）。
             tool: Tool | None，用它的 max_result_size_chars 覆写阈值。
 
         Returns:
@@ -49,7 +50,7 @@ def make_tool_result_offloader(store, settings):
         threshold = min(per_tool if per_tool is not None else ceiling, ceiling)
         if len(text) <= threshold:
             return result
-        stored = store.put(session_id, tool_call_id, text)
+        stored = store.put(user_id or "local", session_id, tool_call_id, text)
         if stored is None:
             return ToolResult(
                 text=(text[:threshold]

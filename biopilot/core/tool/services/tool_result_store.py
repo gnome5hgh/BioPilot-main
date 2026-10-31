@@ -37,7 +37,7 @@ def _safe_component(value: str) -> str:
     return safe.strip(".") or "unknown"
 
 
-def session_key_prefix(session_id: str) -> str:
+def session_key_prefix(user_id: str, session_id: str) -> str:
     """返回某会话工具结果的对象键前缀。
 
     Args:
@@ -46,10 +46,10 @@ def session_key_prefix(session_id: str) -> str:
     Returns:
         ``sessions/<safe-session>/tool-results/``。
     """
-    return f"sessions/{_safe_component(session_id)}/tool-results/"
+    return f"users/{_safe_component(user_id)}/sessions/{_safe_component(session_id)}/tool-results/"
 
 
-def object_key(session_id: str, tool_call_id: str) -> str:
+def object_key(user_id: str, session_id: str, tool_call_id: str) -> str:
     """返回工具结果在对象存储里的键。
 
     Args:
@@ -59,7 +59,7 @@ def object_key(session_id: str, tool_call_id: str) -> str:
     Returns:
         确定性对象键（同一会话同一调用始终相同）。
     """
-    return f"{session_key_prefix(session_id)}{_safe_component(tool_call_id)}.txt"
+    return f"{session_key_prefix(user_id, session_id)}{_safe_component(tool_call_id)}.txt"
 
 
 class ToolResultStore:
@@ -121,7 +121,7 @@ class ToolResultStore:
                 logger.warning("工具结果对象存储不可用，回退本地: %r", exc)
                 return None
 
-    def put(self, session_id: str, tool_call_id: str, text: str
+    def put(self, user_id: str, session_id: str, tool_call_id: str, text: str
             ) -> tuple[str, str] | None:
         """写入工具结果原文。
 
@@ -134,7 +134,7 @@ class ToolResultStore:
             (archive_key, local_path)；MinIO 成功时 archive_key 非空、local_path 为空；
             回退本地时相反；两者都失败返回 None。
         """
-        key = object_key(session_id, tool_call_id)
+        key = object_key(user_id, session_id, tool_call_id)
         client = self._get_client()
         if client is not None:
             try:
@@ -142,11 +142,11 @@ class ToolResultStore:
                 client.put_object(
                     self._bucket, key, BytesIO(data), len(data),
                     content_type="text/plain; charset=utf-8")
-                return key, str(self._local_path(session_id, tool_call_id))
+                return key, str(self._local_path(user_id, session_id, tool_call_id))
             except Exception as exc:
                 self._failed_at = time.monotonic()
                 logger.warning("工具结果写 MinIO 失败，回退本地: %r", exc)
-        local_path = self._local_path(session_id, tool_call_id)
+        local_path = self._local_path(user_id, session_id, tool_call_id)
         try:
             local_path.parent.mkdir(parents=True, exist_ok=True)
             local_path.write_text(text, encoding="utf-8")
@@ -155,7 +155,7 @@ class ToolResultStore:
             logger.warning("工具结果写本地失败: %r", exc)
             return None
 
-    def get(self, session_id: str, tool_call_id: str) -> str | None:
+    def get(self, user_id: str, session_id: str, tool_call_id: str) -> str | None:
         """按会话与 tool_call_id 取回原文（先 MinIO，后本地）。
 
         Args:
@@ -165,11 +165,11 @@ class ToolResultStore:
         Returns:
             原文；未找到或存储不可用时为 None。
         """
-        text = self.get_key(object_key(session_id, tool_call_id))
+        text = self.get_key(object_key(user_id, session_id, tool_call_id))
         if text is not None:
             return text
         try:
-            return self._local_path(session_id, tool_call_id).read_text(encoding="utf-8")
+            return self._local_path(user_id, session_id, tool_call_id).read_text(encoding="utf-8")
         except OSError:
             return None
 
@@ -196,7 +196,7 @@ class ToolResultStore:
             logger.debug("工具结果 MinIO 读取未命中: %r", exc)
             return None
 
-    def _local_path(self, session_id: str, tool_call_id: str) -> Path:
+    def _local_path(self, user_id: str, session_id: str, tool_call_id: str) -> Path:
         """返回本地回退路径。
 
         Args:

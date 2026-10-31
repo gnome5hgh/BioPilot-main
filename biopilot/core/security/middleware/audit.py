@@ -298,6 +298,7 @@ class AuditMiddleware(SecurityMiddleware):
             span_id=span_id,
             trace_id=ctx.trace_id,
             session_id=ctx.session_id,
+            user_id=ctx.user_id,
             agent_type=ctx.agent_type,
             tool_name=ctx.tool_name,
             risk_level=ctx.tool.risk_level if ctx.tool else "unknown",
@@ -335,6 +336,7 @@ class AuditMiddleware(SecurityMiddleware):
                 span_id=ctx.span_id,
                 trace_id=ctx.trace_id,
                 session_id=ctx.session_id,
+                user_id=ctx.user_id,
                 agent_type=ctx.agent_type,
                 tool_name=ctx.tool_name,
                 risk_level=ctx.tool.risk_level if ctx.tool else "unknown",
@@ -355,6 +357,7 @@ class AuditMiddleware(SecurityMiddleware):
             span_id=ctx.span_id,
             trace_id=ctx.trace_id,
             session_id=ctx.session_id,
+            user_id=ctx.user_id,
             agent_type=ctx.agent_type,
             tool_name=ctx.tool_name,
             risk_level=ctx.tool.risk_level if ctx.tool else "unknown",
@@ -401,6 +404,7 @@ class AuditMiddleware(SecurityMiddleware):
             span_id=uuid.uuid4().hex[:16],
             trace_id=ctx.trace_id,
             session_id=ctx.session_id,
+            user_id=ctx.user_id,
             agent_type=ctx.agent_type,
             tool_name=ctx.tool_name,
             risk_level=ctx.tool.risk_level if ctx.tool else "unknown",
@@ -425,6 +429,7 @@ class AuditMiddleware(SecurityMiddleware):
         self._write_event(entry)
 
     def record_agent_start(self, *, trace_id, session_id, agent_type, task,
+                           user_id: str | None = None,
                            agent_version=None, model=None, provider=None) -> None:
         """记录一次 agent 起跑（原始任务文本 + 配置版本 + 模型），同步方法。
 
@@ -447,6 +452,7 @@ class AuditMiddleware(SecurityMiddleware):
         now = datetime.now().isoformat()
         entry = AuditEntry(
             event_type="agent_started",
+            user_id=user_id,
             span_id=uuid.uuid4().hex[:16],
             trace_id=trace_id, session_id=session_id, agent_type=agent_type,
             tool_name="", risk_level="", input={},
@@ -460,6 +466,7 @@ class AuditMiddleware(SecurityMiddleware):
         self._write_event(entry)
 
     def record_llm_call(self, *, trace_id, session_id, agent_type, turn, model,
+                        user_id: str | None = None,
                         input_tokens, output_tokens,
                         started_at, duration_ms, finish_reason,
                         response_model=None, provider=None) -> None:
@@ -495,6 +502,7 @@ class AuditMiddleware(SecurityMiddleware):
 
         entry = AuditEntry(
             event_type="llm_call",
+            user_id=user_id,
             span_id=uuid.uuid4().hex[:16],
             trace_id=trace_id, session_id=session_id, agent_type=agent_type,
             tool_name="", risk_level="", input={},

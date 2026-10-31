@@ -75,7 +75,7 @@ def _select_resume_session(agent_manager: AgentManager, io) -> str | None:
 
     选择方式：输入菜单编号，或直接粘贴会话 id。非法输入返回 None 并打印原因。
     """
-    sessions = agent_manager.list_sessions(limit=10)
+    sessions = agent_manager.list_sessions(limit=10, user_id="local")
     if not sessions:
         print("没有可恢复的历史会话。")
         return None
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # 记忆工具（SQL 按 agent_id 键控）与 MemoryConsolidator 都挂在它下面，三者对不上
     # 会各自读到空数据。
     db = MemoryDB(config.runtime.memory_dsn)
-    block_manager = BlockManager(db)
+    block_manager = BlockManager(db, user_id="local")
     block_manager.migrate_legacy_labels()   # 旧 human/persona label 一次性迁移为 profile/assistant（幂等）
     block_manager.purge_removed_blocks()    # 已下线功能的块（历史清单）一次性清除（幂等）
     block_manager.ensure_default_blocks()   # 首启播种默认 profile/assistant 核心记忆块
@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> int | None:
     else:
         session_id = uuid.uuid4().hex[:8]
         # 无参启动保持新会话；检测到历史会话时提示可恢复（不自动询问）
-        last = agent_manager.list_sessions(limit=1)
+        last = agent_manager.list_sessions(limit=1, user_id="local")
         if last and last[0]["message_count"] > 0:
             preview = last[0]["preview"] or "（无预览）"
             resume_hint = f"检测到上次会话（{preview}），biopilot --resume 可恢复"
@@ -257,7 +257,7 @@ def main(argv: list[str] | None = None) -> int | None:
     if args.resume is not None:
         agent_state = agent_manager.get_agent(session_id)
     else:
-        agent_state = agent_manager.create_agent(session_id)
+        agent_state = agent_manager.create_agent(session_id, user_id="local")
 
     # 会话恢复的历史回放：--resume 恢复的是模型上下文，屏幕上
     # 否则不留任何痕迹，用户会以为恢复失败。这里把**同一个** in-context 窗口投影成
@@ -288,6 +288,7 @@ def main(argv: list[str] | None = None) -> int | None:
 
     set_memory_context(MemoryToolsContext(
         agent_id=session_id,
+        user_id="local",
         block_manager=block_manager,
         message_manager=message_manager,
         tool_result_store=tool_result_store,
@@ -365,6 +366,7 @@ def main(argv: list[str] | None = None) -> int | None:
         intent_service=intent_service,
         confirm_callback=_make_confirm_callback(io, renderer, center),
         session_id=session_id,
+        user_id="local",
     )
     consolidator = MemoryConsolidator(
         agent_state, block_manager, message_manager,

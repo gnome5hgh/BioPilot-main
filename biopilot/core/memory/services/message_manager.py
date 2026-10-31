@@ -88,6 +88,7 @@ def _row_to_schema(row: dict) -> StoredMessage:
     import json
     return StoredMessage(
         id=row["id"], session_id=row.get("session_id") or row.get("agent_id"),
+        user_id=row.get("user_id"),
         role=MessageRole(row["role"]), content=row["content"],
         tool_calls=json.loads(row["tool_calls"]) if row["tool_calls"] else [],
         tool_call_id=row["tool_call_id"], step_id=row["step_id"],
@@ -116,7 +117,8 @@ class MessageManager:
         self.agent_manager = agent_manager  # 可选：读 AgentState.message_ids（in-context 窗口）
 
     def add_message(self, agent_id: str, wire: Message,
-                    session_id: str | None = None) -> StoredMessage:
+                    session_id: str | None = None,
+                    user_id: str | None = None) -> StoredMessage:
         """落盘一条消息并返回持久化版本（全部消息持久化的唯一漏斗）。
 
         信任边界：清洗代理码点（surrogateescape 残留）——messages 表严格 UTF-8
@@ -128,6 +130,8 @@ class MessageManager:
             agent_id: 所属 agent 标识（具体对话）。
             wire: LLM 层的原始消息。
             session_id: 会话分组标识；None 时回退为 agent_id（旧行为）。
+            user_id: 归属用户（行级隔离列）；引擎链路（ContextWindow）恒传，
+                直接调用方（测试预置等）缺省为 NULL。
 
         Returns:
             持久化后的 StoredMessage 对象（含生成的 id 和 created_at）。
@@ -142,7 +146,7 @@ class MessageManager:
         if meta is not None:
             wire = replace(wire, meta=_sanitize_response_meta(meta))
         m = _wire_to_schema(wire, session_id or agent_id)
-        message_orm.insert_message(self.db, agent_id, m)
+        message_orm.insert_message(self.db, agent_id, m, user_id=user_id)
         return m
 
     def get_messages_by_agent_id(self, agent_id: str,

@@ -49,12 +49,13 @@ class ReadToolResultTool(Tool):
         store = getattr(ctx, "tool_result_store", None)
         if store is None:
             return ToolResult(text="工具结果存储未装配")
+        uid = getattr(ctx, "user_id", None) or "local"
         if archive_key:
-            if not archive_key.startswith(session_key_prefix(ctx.agent_id)):
-                return ToolResult(text="archive_key 不属于当前会话")
+            if not archive_key.startswith(session_key_prefix(uid, ctx.agent_id)):
+                return ToolResult(text="archive_key 不属于当前用户会话")
             text = store.get_key(archive_key)
         elif tool_call_id:
-            text = store.get(ctx.agent_id, tool_call_id)
+            text = store.get(uid, ctx.agent_id, tool_call_id)
         else:
             return ToolResult(text="需要 tool_call_id 或 archive_key")
         if text is None:

@@ -66,7 +66,7 @@ class ContextWindow:
     """
 
     def __init__(self, message_manager=None, agent_manager=None, session_id: str = "",
-                 agent_id: str | None = None):
+                 agent_id: str | None = None, user_id: str = "local"):
         """
         Args:
             message_manager: MessageManager | None，对话落盘与窗口回放；None 时
@@ -80,6 +80,7 @@ class ContextWindow:
         self._am = agent_manager
         self._session_id = session_id
         self._agent_id = agent_id or session_id
+        self._user_id = user_id
         self.messages: list[Message] = []
         self.ids: list[str] = []
 
@@ -134,7 +135,8 @@ class ContextWindow:
         if isinstance(msgs, Message):
             msgs = [msgs]
         added = [self._mm.add_message(
-            self._agent_id, m, session_id=self._session_id).id for m in msgs]
+            self._agent_id, m, session_id=self._session_id,
+            user_id=self._user_id).id for m in msgs]
         if self._am is None:
             return
         for mid in added:
@@ -173,7 +175,8 @@ class ContextWindow:
             mid = old_id_by_msg.get(id(m))
             if mid is None:
                 mid = self._mm.add_message(
-                    self._agent_id, m, session_id=self._session_id).id
+                    self._agent_id, m, session_id=self._session_id,
+                    user_id=self._user_id).id
             new_ids.append(mid)
         self.messages = new_window
         self.ids = new_ids
@@ -213,7 +216,8 @@ class ContextWindow:
                     new_ids.append(
                         self._mm.add_message(
                             self._agent_id, synth,
-                            session_id=self._session_id).id)
+                            session_id=self._session_id,
+                            user_id=self._user_id).id)
                     new_msgs.append(synth)
         if changed:
             self.messages = new_msgs

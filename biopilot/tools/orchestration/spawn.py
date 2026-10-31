@@ -692,6 +692,8 @@ class SpawnSubAgentTool(Tool):
                 session_id=parent.session_id,
                 # 子 agent 与父共享 session_id（同一会话可检索），但各自独立 conversation_id，
                 # 消息互不污染窗口；传入 message_manager 让子 agent 轨迹落盘。
+                # user_id 显式继承父值：同一次派发始终在同一用户的隔离域内。
+                user_id=getattr(parent, "user_id", "local"),
                 conversation_id=(
                     f"{parent.session_id}:{agent_type}:{uuid.uuid4().hex[:8]}"),
                 message_manager=getattr(parent, "message_manager", None),

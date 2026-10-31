@@ -35,6 +35,7 @@ _SCHEMA = """
 -- blocks 表：核心记忆块存储（业务主表）
 CREATE TABLE IF NOT EXISTS blocks (
     id VARCHAR(64) NOT NULL,            -- 块唯一标识
+    user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
     label VARCHAR(191) NOT NULL,        -- 业务标签（如 "assistant", "profile"）
     value MEDIUMTEXT NOT NULL,          -- 块内容（文本）
     `limit` INTEGER NOT NULL DEFAULT 2000, -- 字符长度上限
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS blocks (
 -- block_history 表：块历史快照（撤销/重做链）
 CREATE TABLE IF NOT EXISTS block_history (
     id BIGINT NOT NULL AUTO_INCREMENT,  -- 自增主键（排序依据）
+    user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
     block_id VARCHAR(64) NOT NULL,      -- 对应的块 ID
     label VARCHAR(191) NOT NULL,        -- 快照时的标签
     value MEDIUMTEXT NOT NULL,          -- 快照时的内容
@@ -68,6 +70,7 @@ CREATE TABLE IF NOT EXISTS block_history (
 -- messages 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识
+    user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
     agent_id VARCHAR(191) NOT NULL,      -- 所属 agent（具体对话）
     session_id VARCHAR(191) NULL,        -- 会话分组（同一会话的 supervisor 与子 agent）
     role VARCHAR(20) NOT NULL,           -- system/user/assistant/tool
@@ -93,6 +96,13 @@ CREATE TABLE IF NOT EXISTS messages (
 _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("messages", "meta", "meta MEDIUMTEXT NULL"),
     ("messages", "session_id", "session_id VARCHAR(191) NULL"),
+    # user_id：多用户行级隔离（工单 04）。存量行（单用户时代）落 'local'。
+    ("messages", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    ("blocks", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    ("block_history", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    # agent_state 由 AgentManager 自建（不在 _SCHEMA 管辖）；此处登记使存量库在
+    # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
+    ("agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
 )
 
 #: 连接池上限：覆盖「多线程子 agent 并发写记忆 + 事务钉住」的常规并发量。

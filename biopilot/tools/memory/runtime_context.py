@@ -18,12 +18,14 @@ class MemoryToolsContext:
 
     Attributes:
         agent_id: str，归属会话标识（消息检索/落盘按它键控）
+        user_id: str，归属用户（外置键命名空间与行级隔离域）
         block_manager: BlockManager，块 CRUD 服务句柄
         message_manager: MessageManager，对话落盘与检索句柄
         tool_result_store: object | None，大工具结果存档（read_tool_result 用）
     """
 
     agent_id: str = ""
+    user_id: str = "local"
     block_manager: object = None
     message_manager: object = None
     tool_result_store: object = None

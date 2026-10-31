@@ -165,6 +165,7 @@ class Agent:
         intent_service: "IntentService | None" = None,
         session_id: str | None = None,
         conversation_id: str | None = None,
+        user_id: str = "local",   # 归属用户（行级隔离）；REPL 默认本地，spawn 显式继承父值
         memory=None,                # Memory | None
         agent_manager=None,         # AgentManager | None
         block_manager=None,         # BlockManager | None
@@ -288,10 +289,12 @@ class Agent:
         #: in-context 窗口：本会话要发给模型的那批消息 + 它们在 messages 表里的 id。
         #: run() 每轮经它从 MessageManager 重新加载（跨轮消息经 SQL 回放，不在内存里
         #: 跨 run 累积）；消息与 id 的一致性由它内部保证，见 ContextWindow。
+        self.user_id = user_id
         self.window = ContextWindow(message_manager=message_manager,
                                     agent_manager=agent_manager,
                                     session_id=self.session_id,
-                                    agent_id=self.conversation_id)
+                                    agent_id=self.conversation_id,
+                                    user_id=user_id)
 
         #: 当前 run 的追踪 ID，每次 run 开始时重新生成，注入 ToolContext
         self._trace_id: str | None = None
@@ -323,6 +326,7 @@ class Agent:
             instance_id=self._instance_id,
             has_human_confirm=self._has_human_confirm,
             offloader=self.offloader,
+            user_id=self.user_id,
         )
 
         # opt-in 注入：仅对声明 needs_parent 的工具注入父引用。
@@ -828,7 +832,8 @@ class Agent:
         """
         fields = dict(data)
         fields.update(trace_id=self._trace_id, session_id=self.session_id,
-                      agent_type=self.agent_type, turn=turn)
+                      agent_type=self.agent_type, turn=turn,
+                      user_id=self.user_id)
         for mw in self.security_middleware:
             record = getattr(mw, "record_llm_call", None)
             if record is not None:
@@ -848,7 +853,7 @@ class Agent:
         provider = getattr(self.llm, "provider", None)
         fields = dict(
             trace_id=self._trace_id, session_id=self.session_id,
-            agent_type=self.agent_type, task=task,
+            agent_type=self.agent_type, task=task, user_id=self.user_id,
             agent_version=self._agent_version,
             model=model if isinstance(model, str) else None,
             provider=provider if isinstance(provider, str) else None,

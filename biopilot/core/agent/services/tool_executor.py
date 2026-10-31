@@ -94,7 +94,7 @@ class ToolExecutor:
 
     Attributes:
         _middleware: list[SecurityMiddleware]，before 顺序 / after 逆序
-        _agent_type / _session_id: str，写进 ToolContext 供审计聚合
+        _agent_type / _session_id / _user_id: str，写进 ToolContext 供审计聚合
         _instance_id: str，本实例标识（同路径写占用的持有者判定）
         _has_human_confirm: bool，是否有真实人工确认回调（区分 user_denied /
             auto_denied）——按构造标志而非回调身份判断，因为 spawn 会包装回调
@@ -102,7 +102,7 @@ class ToolExecutor:
 
     def __init__(self, *, middleware, agent_type: str, session_id: str,
                  instance_id: str, has_human_confirm: bool,
-                 offloader=None):
+                 offloader=None, user_id: str | None = None):
         """
         Args:
             middleware: list，安全中间件链
@@ -115,6 +115,7 @@ class ToolExecutor:
         self._middleware = middleware
         self._agent_type = agent_type
         self._session_id = session_id
+        self._user_id = user_id
         self._instance_id = instance_id
         self._has_human_confirm = has_human_confirm
         self._offloader = offloader
@@ -199,6 +200,7 @@ class ToolExecutor:
         ctx = ToolContext(
             trace_id=trace_id,
             session_id=self._session_id,
+            user_id=getattr(self, "_user_id", None),
             agent_type=self._agent_type,
             tool=tool,
             tool_name=name,
@@ -391,7 +393,7 @@ class ToolExecutor:
             try:
                 ctx.result = await asyncio.to_thread(
                     self._offloader, ctx.tool_name, ctx.tool_call_id,
-                    ctx.session_id, ctx.result, tool)
+                    ctx.session_id, ctx.result, tool, ctx.user_id)
             except Exception as e:
                 print(f"[tool offload] failed: {e}", file=sys.stderr)
         # 完成摘要（写/编辑工具）不再单独发事件：并入调用方 finally 收口的

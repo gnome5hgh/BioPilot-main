@@ -34,7 +34,8 @@ def _row_to_dict(row) -> dict:
     return dict(row)
 
 
-def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage) -> None:
+def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage,
+                   user_id: str | None = None) -> None:
     """插入一条消息行：content 只存字符串（list/dict 内容序列化为 JSON），
     tool_calls / meta 序列化为 JSON，created_at 缺省取当前时间。
 
@@ -53,10 +54,12 @@ def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage) -> None:
         - created_at 若未显式设置，则使用当前 UTC 时间。
     """
     db.execute(
-        "INSERT INTO messages (id, agent_id, session_id, role, content, tool_calls,"
+        "INSERT INTO messages (id, agent_id, user_id, session_id, role, content, tool_calls,"
         " tool_call_id, step_id, run_id, otid, meta, created_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (m.id, agent_id, m.session_id, m.role.value,
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        # user_id=None（测试预置等直接调用）按列默认值 'local' 归一；
+        # 引擎链路（ContextWindow）恒传真实归属。
+        (m.id, agent_id, user_id or "local", m.session_id, m.role.value,
          # 若 content 是 list/dict，转为 JSON 字符串；否则原样保留
          json.dumps(m.content, ensure_ascii=False)
          if isinstance(m.content, (list, dict)) else m.content,

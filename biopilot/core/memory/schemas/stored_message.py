@@ -50,6 +50,8 @@ class StoredMessage(BaseModel):
     # 由 ORM 层在插入时使用，不作为业务主键（实际上确实是主键）
     id: str = Field(default_factory=lambda: f"message-{uuid.uuid4().hex}")
 
+    #: 归属用户（行级隔离列）；测试预置直调可能为 NULL。
+    user_id: str | None = None
     #: 会话分组：同一会话的 supervisor 与子 agent 共享；旧行可能为 NULL，读取方回退 agent_id。
     session_id: str | None = None
 
