@@ -11,6 +11,7 @@ import java.time.Duration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,6 +46,58 @@ public class AgentProxyController {
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
+    /** 论文目录：列表（读 papers 表，user_id 行级过滤）。 */
+    @GetMapping("/papers")
+    public ResponseEntity<String> papersList() {
+        return proxyGet("/papers");
+    }
+
+    /** 论文登记（元数据落库，原文由上传方先行落 OSS）。 */
+    @PostMapping("/papers/{paperId}")
+    public ResponseEntity<String> papersRegister(@PathVariable String paperId,
+                                                 @RequestBody String body) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + "/papers/" + paperId))
+                .header("Content-Type", "application/json")
+                .header("X-User-Id", String.valueOf(userId))
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
+    /** 论文删除（行→对象删除方向由 Python 侧返回 oss_key）。 */
+    @org.springframework.web.bind.annotation.DeleteMapping("/papers/{paperId}")
+    public ResponseEntity<String> papersDelete(@PathVariable String paperId) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + "/papers/" + paperId))
+                .header("X-User-Id", String.valueOf(userId))
+                .DELETE()
                 .build();
         try {
             HttpResponse<String> resp = client.send(upstream,

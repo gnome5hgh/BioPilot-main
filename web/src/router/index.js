@@ -12,6 +12,7 @@ const routes = [
       { path: 'store', component: () => import('../views/StoreView.vue') },
       { path: 'scheduled', component: () => import('../views/ScheduledView.vue') },
       { path: 'admin', component: () => import('../views/AdminView.vue') },
+      { path: 'papers', component: () => import('../views/PapersView.vue') },
     ],
   },
 ]
