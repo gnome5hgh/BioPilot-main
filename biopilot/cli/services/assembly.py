@@ -111,7 +111,8 @@ class WebSession:
 
 
 async def assemble_web_session(user_id: str, conversation_id: str,
-                               config=None, confirm_callback=None) -> WebSession:
+                               config=None, confirm_callback=None,
+                               project_id: str | None = None) -> WebSession:
     """Web 适配层的会话装配：与 main() 同一套对象图，无终端 IO。
 
     与 main() 的三处差异（业务层替换的边界内）：
@@ -125,6 +126,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
         config: BioPilotConfig；None 时 from_env。
         confirm_callback: async (ConfirmRequired) -> bool 的确认回调；None 时
             fail-safe 拒绝（Web 适配层传入 SSE 往返实现）。
+        project_id: 归属项目（仅新会话生效；已有会话不挪组）。
 
     Returns:
         WebSession（agent + consolidation_queue）。
@@ -163,7 +165,8 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     try:
         agent_state = agent_manager.get_agent(conversation_id)
     except KeyError:
-        agent_state = agent_manager.create_agent(conversation_id, user_id=user_id)
+        agent_state = agent_manager.create_agent(conversation_id, user_id=user_id,
+                                                 project_id=project_id)
 
     llm = LLMClient(config.llm)
     agents_dir = (config.runtime.agents_dir if Path(config.runtime.agents_dir).is_dir()

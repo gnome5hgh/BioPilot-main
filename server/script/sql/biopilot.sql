@@ -47,3 +47,14 @@ CREATE TABLE IF NOT EXISTS sys_login_log (
     PRIMARY KEY (id),
     KEY idx_login_log_user (user_id, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='登录日志表';
+
+CREATE TABLE IF NOT EXISTS biopilot_project (
+    project_id    VARCHAR(64)  NOT NULL COMMENT '项目ID',
+    user_id       VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
+    name          VARCHAR(50)  NOT NULL COMMENT '项目名称',
+    billing_group VARCHAR(64)  NULL COMMENT '计费组（原型字段，保留无逻辑）',
+    description   VARCHAR(100) NULL COMMENT '简介',
+    create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id),
+    KEY idx_project_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目表';

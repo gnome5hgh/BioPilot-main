@@ -40,6 +40,36 @@ class WebConfig:
     confirm_timeout_seconds: float = 300.0
 
 
+_db_instance = None
+
+
+def _shared_db():
+    """适配层共享的 MemoryDB（懒建；标题更新等轻量 SQL 用）。"""
+    global _db_instance
+    if _db_instance is None:
+        from biopilot.core.memory.storage.database import MemoryDB
+        _db_instance = MemoryDB()
+    return _db_instance
+
+
+async def _autotitle(user_id: str, conversation_id: str, task: str) -> None:
+    """首条任务生成会话标题：name 为空才设（不覆盖手动改名），取任务前 20 字。
+
+    标题失败只记日志——它是对话的可读性增强，不影响主流程。
+    """
+    try:
+        db = _shared_db()
+        row = db.execute(
+            "SELECT name FROM agent_state WHERE agent_id=? AND user_id=?",
+            (conversation_id, user_id)).fetchone()
+        if row is not None and row["name"] is None:
+            title = task.strip().replace("\n", " ")[:20]
+            db.execute("UPDATE agent_state SET name=? WHERE agent_id=? AND user_id=?",
+                       (title, conversation_id, user_id))
+    except Exception as e:      # pragma: no cover
+        logger.warning("会话标题生成失败: %r", e)
+
+
 def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     """创建 FastAPI 应用。
 
@@ -154,13 +184,15 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         task = (body or {}).get("task", "").strip()
         conversation_id = (body or {}).get("conversation_id", "").strip()
+        project_id = (body or {}).get("project_id") or None
         if not task or not conversation_id:
             raise HTTPException(status_code=422, detail="task 与 conversation_id 必填")
 
         key = (x_user_id, conversation_id)
         if key not in agents:
             built = agent_factory(x_user_id, conversation_id,
-                                  _confirm_callback(x_user_id, conversation_id))
+                                  _confirm_callback(x_user_id, conversation_id),
+                                  project_id)
             # 工厂可为同步或异步（真实装配是 async，测试替身是同步 lambda）
             agents[key] = await built if asyncio.iscoroutine(built) else built
         agent = agents[key]
@@ -179,9 +211,11 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 })
 
             async def run_task() -> str:
-                return await agent.run(
+                answer = await agent.run(
                     task, stream_callback=on_event) if _accepts_stream(
                     agent.run) else await agent.run(task)
+                await _autotitle(x_user_id, conversation_id, task)
+                return answer
 
             async def watch_disconnect() -> None:
                 """客户端断开 → 取消 run（复用取消级联，与 REPL Ctrl-C 同路径）。"""

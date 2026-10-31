@@ -12,5 +12,6 @@
   <packaging>pom</packaging>
   <modules>
     <module>bio-system</module>
+    <module>bio-project</module>
   </modules>
 </project>

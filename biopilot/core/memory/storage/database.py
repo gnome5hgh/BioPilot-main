@@ -136,6 +136,7 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # agent_state 由 AgentManager 自建（不在 _SCHEMA 管辖）；此处登记使存量库在
     # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
     ("agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    ("agent_state", "project_id", "project_id VARCHAR(64) NULL"),
 )
 
 #: 连接池上限：覆盖「多线程子 agent 并发写记忆 + 事务钉住」的常规并发量。

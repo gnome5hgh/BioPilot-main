@@ -53,7 +53,8 @@ class AgentManager:
                    "agent_id VARCHAR(64) PRIMARY KEY, name TEXT, description TEXT,"
                    "`system` MEDIUMTEXT, model TEXT, context_window_limit INTEGER,"
                    "message_ids MEDIUMTEXT, created_at VARCHAR(40),"
-                   "user_id VARCHAR(191) NOT NULL DEFAULT 'local')")
+                   "user_id VARCHAR(191) NOT NULL DEFAULT 'local',"
+                   "project_id VARCHAR(64) NULL)")
         # 老库补列走 MemoryDB 的增量迁移（建表语句只管新库）。
         db.migrate_additive_columns()
 
@@ -83,10 +84,12 @@ class AgentManager:
             memory=Memory(blocks=self.block_manager.list_blocks()),
             created_at=row["created_at"],
             user_id=row.get("user_id", "local"),
+            project_id=row.get("project_id"),
         )
 
     def create_agent(self, agent_id: str, *, user_id: str,
-                     name: str | None = None) -> AgentState:
+                     name: str | None = None,
+                     project_id: str | None = None) -> AgentState:
         """创建 agent（REPLACE INTO 幂等，按主键覆盖），初始 message_ids 为空列表。
 
         Args:
@@ -102,11 +105,14 @@ class AgentManager:
         """
         if not user_id:
             raise ValueError("create_agent 需要 user_id（多用户行级隔离的键，缺省即拒绝）")
+        # project_id 经实例属性传递（REPLACE 需要它；None=未分组）
+        self._create_project_id = project_id
         self.db.execute(
-            "REPLACE INTO agent_state (agent_id, user_id, name, message_ids, created_at)"
-            " VALUES (?,?,?,?,?)",
+            "REPLACE INTO agent_state (agent_id, user_id, name, message_ids, created_at,"
+            " project_id) VALUES (?,?,?,?,?,?)",
             (agent_id, user_id, name, json.dumps([]),
-             datetime.now(timezone.utc).isoformat()))
+             datetime.now(timezone.utc).isoformat(), self._create_project_id))
+        self._create_project_id = None
         return self.get_agent(agent_id)
 
     def get_agent(self, agent_id: str) -> AgentState:
@@ -174,7 +180,8 @@ class AgentManager:
         """
         st = self.get_agent(agent_id)
         st.memory = Memory(blocks=self.block_manager.list_blocks())
-    def list_sessions(self, limit: int = 10, *, user_id: str) -> list[dict]:
+    def list_sessions(self, limit: int = 10, *, user_id: str,
+                      project_id: str | None = None) -> list[dict]:
         """列出该用户的历史会话（新→旧），供会话恢复菜单展示。
 
         Args:
@@ -192,9 +199,15 @@ class AgentManager:
         """
         from biopilot.core.memory.storage.message import count_messages
 
-        rows = [dict(r) for r in self.db.execute(
-            "SELECT agent_id, created_at FROM agent_state WHERE user_id=?"
-            " ORDER BY created_at DESC, agent_id LIMIT ?", (user_id, limit)).fetchall()]
+        if project_id is not None:
+            rows = [dict(r) for r in self.db.execute(
+                "SELECT agent_id, created_at FROM agent_state"
+                " WHERE user_id=? AND project_id=?"
+                " ORDER BY created_at DESC, agent_id LIMIT ?", (user_id, project_id, limit)).fetchall()]
+        else:
+            rows = [dict(r) for r in self.db.execute(
+                "SELECT agent_id, created_at FROM agent_state WHERE user_id=?"
+                " ORDER BY created_at DESC, agent_id LIMIT ?", (user_id, limit)).fetchall()]
         sessions = []
         for r in rows:
             agent_id = r["agent_id"]
