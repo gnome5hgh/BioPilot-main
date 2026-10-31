@@ -169,6 +169,43 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         fut.set_result(approved)
         return {"status": "ok"}
 
+    @app.get("/store/experts")
+    async def store_experts(x_user_id: str | None = Header(default=None)) -> dict:
+        """专家列表：读 agents 插件真数据（名称/描述/版本）。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.core.agent import AgentRegistry
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        agents_dir = (cfg.runtime.agents_dir
+                      if Path(cfg.runtime.agents_dir).is_dir()
+                      else str(Path(__file__).resolve().parents[2] / "agents"))
+        registry = AgentRegistry(agents_dir)
+        experts = []
+        for name in registry.list_agents():
+            c = registry.get_config(name)
+            experts.append({"name": name, "description": c.system_prompt[:120],
+                            "tools_count": len(c.tools)})
+        return {"experts": experts}
+
+    @app.get("/store/skills")
+    async def store_skills(x_user_id: str | None = Header(default=None)) -> dict:
+        """技能列表：.biopilot/skills 真数据（名称/版本/描述/启用态）。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.core.skills import SkillRegistry, load_lock
+        pf_dir = Path.cwd() / ".biopilot"
+        lock = load_lock(pf_dir) if (pf_dir / "skills.lock.json").exists() else {}
+        reg = SkillRegistry(str(pf_dir / "skills") if (pf_dir / "skills").is_dir() else None,
+                            disabled={n for n, e in lock.items() if not e.get("enabled", True)})
+        skills = [{"name": n,
+                   "version": reg.get_skill(n).version if reg.get_skill(n) else "",
+                   "description": (reg.get_skill(n).description[:120]
+                                   if reg.get_skill(n) else ""),
+                   "enabled": lock.get(n, {}).get("enabled", True)}
+                  for n in reg.list_skills()]
+        return {"skills": skills}
+
     @app.post("/chat/stream")
     async def chat_stream(
         request: Request,
