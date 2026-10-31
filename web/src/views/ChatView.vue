@@ -27,6 +27,9 @@
 // 真实流式链路接入后替换。
 import { ref } from 'vue'
 
+// 会话标识：本次进入页面生成一个（跨用户撞名面由 uuid 消除）
+const conversationId = crypto.randomUUID()
+
 const caps = [
   { name: '生信分析', example: '示例：帮我整理单细胞 QC 的标准流程要点' },
   { name: '文献解析', example: '示例：帮我总结一篇论文的核心观点与图表结论' },
@@ -44,12 +47,53 @@ function fillExample() {
   input.value = caps.value[curCap.value].example.replace(/^示例：/, '')
 }
 
-function send() {
-  // SSE 流接入前为占位反馈（保持可点性，不做禁用态）
+async function send() {
   if (!input.value.trim() || busy.value) return
-  messages.value.push({ role: 'user', text: input.value })
-  messages.value.push({ role: 'assistant', text: '（演示）对话链路接入后此处为流式回答。' })
+  const task = input.value
   input.value = ''
+  messages.value.push({ role: 'user', text: task })
+  const reply = { role: 'assistant', text: '' }
+  messages.value.push(reply)
+  busy.value = true
+  try {
+    const resp = await fetch('/api/agent/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'satoken': localStorage.getItem('biopilot_token') || '',
+        'X-Conversation-Id': conversationId,
+      },
+      body: JSON.stringify({ task, conversation_id: conversationId }),
+    })
+    if (!resp.ok || !resp.body) {
+      reply.text = `对话失败（HTTP ${resp.status}）`
+      return
+    }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let idx
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx)
+        buf = buf.slice(idx + 2)
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data: ')) continue
+          const evt = JSON.parse(line.slice(6))
+          if (evt.type === 'token') reply.text += evt.text
+          else if (evt.type === 'done' && evt.text) reply.text = evt.text
+          else if (evt.type === 'error') reply.text = `出错：${evt.text}`
+        }
+      }
+    }
+  } catch (e) {
+    reply.text = `对话失败：${e.message}`
+  } finally {
+    busy.value = false
+  }
 }
 </script>
 
