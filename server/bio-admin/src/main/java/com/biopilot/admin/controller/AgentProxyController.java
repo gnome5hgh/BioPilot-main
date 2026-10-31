@@ -34,6 +34,29 @@ public class AgentProxyController {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
+    /** 确认决定回传：透传到适配层 /chat/confirm（唤醒等待中的 run）。 */
+    @PostMapping("/chat/confirm")
+    public ResponseEntity<String> chatConfirm(@RequestBody String body) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + "/chat/confirm"))
+                .header("Content-Type", "application/json")
+                .header("X-User-Id", String.valueOf(userId))
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<StreamingResponseBody> chatStream(
             @RequestBody String body, HttpServletRequest request) {

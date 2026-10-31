@@ -36,6 +36,8 @@ class WebConfig:
     host: str = "127.0.0.1"
     port: int = 8300
     memory_dsn: str | None = None
+    # 确认等待上限（秒）：超时视为拒绝，计时在这里完成（不依赖 SSE 连接存活）
+    confirm_timeout_seconds: float = 300.0
 
 
 def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
@@ -56,6 +58,50 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="BioPilot Agent Adapter", docs_url=None, redoc_url=None)
     agents: dict[tuple[str, str], object] = {}
+    #: 进行中的确认等待：(user_id, conversation_id, req_id) -> Future[bool]
+    pending_confirms: dict[tuple[str, str, str], asyncio.Future] = {}
+    #: 正在 run 的会话流队列（确认帧投到对应请求的流里）
+    active_queues: dict[tuple[str, str], asyncio.Queue] = {}
+
+    async def _handle_confirm(user_id: str, conversation_id: str, req) -> bool:
+        """把确认请求推给浏览器并等待决定；超时/无活动流按拒绝处理。
+
+        Args:
+            user_id: 归属用户。
+            conversation_id: 会话标识。
+            req: ConfirmRequired（策略引擎产出）。
+
+        Returns:
+            True=用户批准；False=拒绝/超时/无活动流。
+        """
+        queue = active_queues.get((user_id, conversation_id))
+        if queue is None:
+            logger.warning("确认请求无活动流可投递，按拒绝处理: %s", req)
+            return False
+        req_id = uuid.uuid4().hex
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        pending_confirms[(user_id, conversation_id, req_id)] = fut
+        await queue.put({
+            "type": "confirm",
+            "req_id": req_id,
+            "summary": getattr(req, "summary", "") or "",
+            "tool_name": getattr(req, "tool_name", "") or "",
+        })
+        try:
+            return await asyncio.wait_for(fut, timeout=config.confirm_timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.warning("确认等待超时（%ss），按拒绝处理: %s",
+                           config.confirm_timeout_seconds, req)
+            return False
+        finally:
+            pending_confirms.pop((user_id, conversation_id, req_id), None)
+
+    def _confirm_callback(user_id: str, conversation_id: str):
+        """构造绑定会话的确认回调（传给会话装配）。"""
+
+        async def callback(req) -> bool:
+            return await _handle_confirm(user_id, conversation_id, req)
+        return callback
 
     @app.on_event("shutdown")
     async def _flush_consolidations() -> None:
@@ -69,6 +115,22 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
+        return {"status": "ok"}
+
+    @app.post("/chat/confirm")
+    async def chat_confirm(
+        body: dict,
+        x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """回传确认决定（approved=true/false），唤醒等待中的 run。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        req_id = (body or {}).get("req_id", "")
+        approved = bool((body or {}).get("approved", False))
+        fut = pending_confirms.get((x_user_id, (body or {}).get("conversation_id", ""), req_id))
+        if fut is None or fut.done():
+            raise HTTPException(status_code=404, detail="确认请求不存在或已结算")
+        fut.set_result(approved)
         return {"status": "ok"}
 
     @app.post("/chat/stream")
@@ -97,13 +159,16 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
         key = (x_user_id, conversation_id)
         if key not in agents:
-            built = agent_factory(x_user_id, conversation_id)
+            built = agent_factory(x_user_id, conversation_id,
+                                  _confirm_callback(x_user_id, conversation_id))
             # 工厂可为同步或异步（真实装配是 async，测试替身是同步 lambda）
             agents[key] = await built if asyncio.iscoroutine(built) else built
         agent = agents[key]
 
-        async def event_stream():
+        async def stream_chat():
             queue: asyncio.Queue = asyncio.Queue()
+            # 注册活动流：确认请求投递到这里（无活动流时确认按拒绝处理）
+            active_queues[(x_user_id, conversation_id)] = queue
 
             def on_event(event) -> None:
                 # stream_callback 是同步回调（Agent 线程内直接调）：线程安全投递
@@ -169,11 +234,17 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                         # 错误一律降级为文本（红线）：error 帧说明原因，done 帧恒发收尾
                         yield f"data: {json.dumps({'type': 'error', 'text': str(e)}, ensure_ascii=False)}\n\n"
                         yield f"data: {json.dumps({'type': 'done', 'errored': True}, ensure_ascii=False)}\n\n"
+                    finally:
+                        active_queues.pop((x_user_id, conversation_id), None)
 
             async for chunk in drain():
                 yield chunk
 
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
+            # 流结束清活动队列（此后确认请求无投递目标 → 按拒绝处理）
+            active_queues.pop((x_user_id, conversation_id), None)
+            return
+
+        return StreamingResponse(stream_chat(), media_type="text/event-stream")
 
     return app
 

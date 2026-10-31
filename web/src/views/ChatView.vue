@@ -86,6 +86,10 @@ async function send() {
           if (evt.type === 'token') reply.text += evt.text
           else if (evt.type === 'done' && evt.text) reply.text = evt.text
           else if (evt.type === 'error') reply.text = `出错：${evt.text}`
+          else if (evt.type === 'confirm') {
+            reply.text = `待确认：${evt.summary || evt.tool_name}`
+            approve(evt.req_id)
+          }
         }
       }
     }
@@ -94,6 +98,18 @@ async function send() {
   } finally {
     busy.value = false
   }
+}
+
+// 确认回传：批准=true / 拒绝=false；服务端计时，超时未回传视为拒绝
+async function approve(reqId, approved = true) {
+  await fetch('/api/agent/chat/confirm', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'satoken': localStorage.getItem('biopilot_token') || '',
+    },
+    body: JSON.stringify({ req_id: reqId, conversation_id: conversationId, approved }),
+  })
 }
 </script>
 

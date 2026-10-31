@@ -111,7 +111,7 @@ class WebSession:
 
 
 async def assemble_web_session(user_id: str, conversation_id: str,
-                               config=None) -> WebSession:
+                               config=None, confirm_callback=None) -> WebSession:
     """Web 适配层的会话装配：与 main() 同一套对象图，无终端 IO。
 
     与 main() 的三处差异（业务层替换的边界内）：
@@ -123,6 +123,8 @@ async def assemble_web_session(user_id: str, conversation_id: str,
         user_id: 归属用户（SpringBoot 内网调用携带，即真相）。
         conversation_id: 会话标识（窗口与落盘键控；不存在则创建）。
         config: BioPilotConfig；None 时 from_env。
+        confirm_callback: async (ConfirmRequired) -> bool 的确认回调；None 时
+            fail-safe 拒绝（Web 适配层传入 SSE 往返实现）。
 
     Returns:
         WebSession（agent + consolidation_queue）。
@@ -241,10 +243,11 @@ async def assemble_web_session(user_id: str, conversation_id: str,
                 taxonomy=taxonomy, judge=judge,
                 history_messages=config.intent.history_messages)
 
-    async def _web_confirm_callback(req) -> bool:
-        # fail-safe 拒绝：Web 确认通道接好后替换为 SSE 事件往返
-        logger.warning("确认请求被 fail-safe 拒绝（Web 确认通道未接）：%s", req)
+    async def _fail_safe_confirm(req) -> bool:
+        # 无确认回调时的兜底：拒绝（确认永不静默放行）
+        logger.warning("确认请求无回调，fail-safe 拒绝：%s", req)
         return False
+    _web_confirm_callback = confirm_callback or _fail_safe_confirm
 
     agent = Agent(
         llm=llm, agent_registry=registry, agent_type="supervisor",
