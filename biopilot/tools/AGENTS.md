@@ -18,8 +18,8 @@
 - `citations/` — 引用工具（只装配给 `citation-agent`）
 - `rag/` — 检索、看图、入库、全量收敛、索引体检（只装配给 `rag-agent`）
 - `vision/` — 图表提取与看图分析
-- `memory/` — 记忆写入/管理工具集（8 件，只装配给 `memory-agent`）
-- `recall/` — 只读召回包（`conversation_search` + `read_tool_result`，装配给所有 agent）
+- `memory/` — 记忆读写/管理工具集（9 件，只装配给 `memory-agent`）
+- `recall/` — 只读召回包（`read_tool_result`，装配给所有 agent）
 - `orchestration/` — 子 agent 派发（唯一的调度工具）
 - `skills/` — 加载 skill 正文与资源
 - `common/` — 装配工厂与共享 HTTP 基础设施

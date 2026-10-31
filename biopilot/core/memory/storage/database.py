@@ -124,7 +124,21 @@ class MemoryDB:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_session"
             " ON messages(session_id, created_at)")
+        self._drop_legacy_fts()
         self._conn.commit()
+
+    def _drop_legacy_fts(self) -> None:
+        """一次性清理已退役的 FTS5 遗产（虚表与同步触发器），幂等。
+
+        对话检索工具退役后全文索引无消费方；旧库里的 messages_fts 与触发器若
+        不删，每条消息写入仍在维护幽灵索引。新库为 no-op。
+        """
+        self._conn.executescript("""
+        DROP TRIGGER IF EXISTS messages_fts_ai;
+        DROP TRIGGER IF EXISTS messages_fts_ad;
+        DROP TRIGGER IF EXISTS messages_fts_au;
+        DROP TABLE IF EXISTS messages_fts;
+        """)
 
     def _migrate_additive_columns(self) -> None:
         """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等，仅供 init_schema 调用）。

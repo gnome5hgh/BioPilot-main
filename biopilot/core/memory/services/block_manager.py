@@ -187,7 +187,7 @@ class BlockManager:
         return created
 
     def purge_removed_blocks(self) -> list[str]:
-        """删除已下线功能的块（幂等）：这些块的写入者已退役，留着只会出现在索引里误导模型。
+        """删除已下线功能的块（幂等）：这些块的写入者已退役，留着只会误导模型。
 
         Returns:
             实际删除的 label 列表（无删除时为空）。

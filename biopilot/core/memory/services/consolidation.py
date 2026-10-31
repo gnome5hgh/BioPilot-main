@@ -247,10 +247,6 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning("空分册清理失败: %s", e)
 
-        # 若 block_manager 支持 git，则提交变更
-        if hasattr(self.block_manager, '_commit') and callable(self.block_manager._commit):
-            self.block_manager._commit(f"consolidation: {len(new_msgs)} 条消息")
-
         if failures and applied:
             # 已有编辑落盘：这批消息已被消费，**不再重放**（重放同一批编辑会在 add 上
             # 产生重复行）。失败如实写日志，游标照常推进。

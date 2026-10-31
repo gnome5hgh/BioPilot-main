@@ -20,6 +20,7 @@ from biopilot.tools.memory.blocks.memory_rethink import MemoryRethinkTool
 from biopilot.tools.memory.blocks.memory_finish_edits import MemoryFinishEditsTool
 from biopilot.tools.memory.blocks.memory import MemoryTool
 from biopilot.tools.memory.blocks.memory_apply_patch import MemoryApplyPatchTool
+from biopilot.tools.memory.blocks.memory_read import MemoryReadTool
 from biopilot.tools.memory.paper_lists.unread_list_add import UnreadListAddTool
 from biopilot.tools.memory.paper_lists.unread_list_remove import UnreadListRemoveTool
 
@@ -30,10 +31,11 @@ __all__ = [
     "UnreadListRemoveTool",
 ]
 
-#: 8 个记忆写入/管理工具类的装配清单（顺序即 get_memory_tools 返回顺序）
+#: 9 个记忆写入/管理工具类的装配清单（顺序即 get_memory_tools 返回顺序）
 _TOOL_CLASSES = [
     MemoryReplaceTool, MemoryInsertTool, MemoryRethinkTool, MemoryFinishEditsTool,
-    MemoryTool, MemoryApplyPatchTool, UnreadListAddTool, UnreadListRemoveTool,
+    MemoryTool, MemoryApplyPatchTool, MemoryReadTool, UnreadListAddTool,
+    UnreadListRemoveTool,
 ]
 
 _tools: list[Tool] | None = None

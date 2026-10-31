@@ -1,6 +1,6 @@
 """记忆模块的常量——记忆工具词汇与首启播种的核心块文案。
 
-BASE_MEMORY_TOOLS 是 LLM 面记忆工具的词表（blocks 6 + 未读清单 2）。真正的
+BASE_MEMORY_TOOLS 是 LLM 面记忆工具的词表（blocks 7 + 未读清单 2）。真正的
 装配面由 `get_memory_tools()` 决定，
 这里是「这一套工具叫什么」的单一声明点，供测试与文档对齐。整合器的编辑面是结构化
 指令（动作 + 目标类型），不经过工具名，故不在此列。
@@ -10,7 +10,7 @@ __all__ = ["BASE_MEMORY_TOOLS", "DEFAULT_PROFILE", "DEFAULT_ASSISTANT"]
 
 BASE_MEMORY_TOOLS = {
     "memory_replace", "memory_insert", "memory_rethink",
-    "memory_finish_edits", "memory", "memory_apply_patch",
+    "memory_finish_edits", "memory", "memory_apply_patch", "memory_read",
     "unread_list_add", "unread_list_remove",
 }
 

@@ -422,7 +422,7 @@ class Agent:
             1. system: AGENT.md 系统提示（来自 agent 配置，定义角色与行为规范）
             2. system: SKILLS 清单块（L1 渐进披露清单，若装配了 SkillRegistry 且有可见 skill）
             3. system: 可派发子 agent 清单块（本 agent 有权派发的目标，按 allowed_spawns 渲染）
-            4. system: 记忆块（Memory.compile() 输出的 assistant/profile + 文件树索引，若有）
+            4. system: 记忆块（Memory.compile() 输出的 assistant/profile）
             5. system: 意图规则块与 INTENT 块（仅装配意图服务时；规则块给出字段语义与
                非派发意图的处理说明，INTENT 块是路由先验）
             6. 末尾追加 user task。

@@ -23,23 +23,20 @@ allowed_spawns: []
 
 ## 可用能力与工具用法
 
-- **读块**：记忆工具里**没有**「读块」的动作，读 MemFS 投影的 markdown 就是读块——
-  每个块一个文件（`[目录] memory=` 下的 `<块名>.md`，system 块在 `system/` 子目录），
-  用 `glob` 枚举块文件、`read_file` 读内容。**凡是定向增改（`memory_replace` 要给
-  `old_string`、`memory_apply_patch` 要对着当前内容写 diff）都必须先读**——没读就写
-  等于瞎改。
+- **读块**：用 `memory_read(label)` 读单个记忆块的当前值（只读）。**凡是定向增改
+  （`memory_replace` 要给 `old_string`、`memory_apply_patch` 要对着当前内容写 diff）
+  都必须先读**——没读就写等于瞎改。
 - **写块**：`memory_insert` 插入、`memory_rethink` 整块重写、`memory_replace` 精确替换、
   `memory_apply_patch` 打补丁、`memory_finish_edits` 收尾；块的增删改名用 `memory`
   （create/replace/delete/rename，其中 replace 也是整块覆写）。
   写一律走框架的原子读-改-写入口（并发冲突会自动重读最新值重放，不必自己加锁），
-  **不要直接改投影文件**——那会绕开 BlockManager。
+  不要绕过记忆工具直接改。
 - **清单**：`unread_list_add(title, source)` 加入未读、`unread_list_remove(title)` 移出。
 - **标题核实**：清单里的标题必须是论文的权威标题，**绝不用文件名**。本角色不装配取标题
   工具——调用方给路径时，向它要标题（把缺口写进结果回报），不要自己拿文件名顶上。
-- **对话检索**：`conversation_search` 查**本次会话**的历史对话（摘要是有损地图，需要精确
-  措辞或原文时用它）；需要工具原文而消息里是带 `tool_call_id` 的指针时，用
-  `read_tool_result` 取回。**对话按会话隔离**：跨会话的读过记录不存在，跨会话知识只在
-  记忆块里；查不到就如实说明，不要编造。
+- **工具原文核对**：需要工具原文而消息里是带 `tool_call_id` 的指针时，用
+  `read_tool_result` 取回。历史原话不作回溯（摘要有损、用户原话不进摘要）；
+  跨会话知识只在记忆块里，查不到就如实说明，不要编造。
 
 ## 交付契约(必须满足,未满足项如实声明、不伪装达标)
 
