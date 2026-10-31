@@ -18,7 +18,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** S3 缝：真实 HTTP（随机端口容器）走注册/登录/登出/角色隔离全链（工单 08）。
+/** 真实 HTTP（随机端口容器）走注册/登录/登出/角色隔离全链。
 
     连 biopilot_test 库（测试 properties 覆盖 DSN）；每个用例后清 sys_user 与
     登录日志，用例互不可见。
@@ -117,7 +117,7 @@ class AuthFlowTest {
         System.out.println("[debug] denied=" + denied.getBody() + " status=" + denied.getStatusCode());
         assertThat(denied.getStatusCode().value()).isEqualTo(403);
 
-        // 提升为 ADMIN（直接改库，角色分配接口属工单 24）
+        // 提升为 ADMIN（直接改库；角色分配的管理接口在管理端展开）
         jdbc.execute("UPDATE sys_user SET role='ADMIN' WHERE user_name='student3'");
         String adminToken = loginAndGetToken("student3", "secret123");
         ResponseEntity<Map> allowed = rest.exchange("/admin/api/roles", HttpMethod.GET,

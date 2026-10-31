@@ -4,7 +4,7 @@
     <div class="tabs">
       <button v-for="t in tabs" :key="t" :class="{ active: cur === t }" @click="cur = t">{{ t }}</button>
     </div>
-    <div class="empty">商店页数据接入在工单 20（专家=agents 真数据 / 技能=skills / APP 静态）。</div>
+    <div class="empty">商店页数据接入中（专家=agents / 技能=skills / APP 静态占位）。</div>
   </div>
 </template>
 

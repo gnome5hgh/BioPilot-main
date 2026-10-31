@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS block_history (
     KEY idx_block_history_block (block_id)
 );
 
--- consolidation_cursor 表：整合消费权游标（跨进程认领，工单 05）
+-- consolidation_cursor 表：整合消费权游标（跨进程认领；行存在即已消费到该位置）
 -- 行存在即「该 agent 已消费到 cursor 条」；行不存在时按 messages 行数初次回填。
 CREATE TABLE IF NOT EXISTS consolidation_cursor (
     agent_id VARCHAR(191) NOT NULL,     -- 归属 agent（主键，与 messages.agent_id 同宽）
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS consolidation_cursor (
     PRIMARY KEY (agent_id)
 );
 
--- audit_event 表：安全审计事件（insert-only，工单 06；核心列供查询，payload 存全量取证）
+-- audit_event 表：安全审计事件（insert-only；核心列供查询，payload 存全量取证）
 CREATE TABLE IF NOT EXISTS audit_event (
     id BIGINT NOT NULL AUTO_INCREMENT,
     user_id VARCHAR(191) NULL,
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS messages (
 _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("messages", "meta", "meta MEDIUMTEXT NULL"),
     ("messages", "session_id", "session_id VARCHAR(191) NULL"),
-    # user_id：多用户行级隔离（工单 04）。存量行（单用户时代）落 'local'。
+    # user_id：多用户行级隔离。存量行（单用户时代）落 'local'。
     ("messages", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
     ("blocks", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
     ("block_history", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),

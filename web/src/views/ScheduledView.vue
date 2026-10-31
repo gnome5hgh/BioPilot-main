@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <h2>定时任务</h2>
-    <div class="empty">暂无定时任务（外围壳：工单 13 定占位口径）。</div>
+    <div class="empty">暂无定时任务。</div>
   </div>
 </template>
 

@@ -34,7 +34,7 @@ public class MybatisPlusConfig {
 
         @Override
         public net.sf.jsqlparser.expression.Expression getTenantId() {
-            // 信任边界：登录态里的 user_id 即真相（工单 04 的 D16 约定）
+            // 信任边界：登录态里的 user_id 即真相，这里不做二次鉴权
             return new LongValue(Long.parseLong(StpUtil.getLoginIdAsString()));
         }
 

@@ -5,7 +5,7 @@
 import asyncio
 import sys
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from rich.console import Console
@@ -97,17 +97,179 @@ def _select_resume_session(agent_manager: AgentManager, io) -> str | None:
     return None
 
 
-async def assemble_web_session(user_id: str, conversation_id: str):
-    """Web 适配层的会话装配（工单 11 接入：按用户域构建 Agent）。
+@dataclass
+class WebSession:
+    """web 会话装配产物（适配层持有：run 用 Agent，收尾用整合队列）。
+
+    Attributes:
+        agent: 装配完成的 supervisor。
+        consolidation_queue: 每轮收尾的整合队列（跑在适配层事件循环上）。
+    """
+
+    agent: object
+    consolidation_queue: object
+
+
+async def assemble_web_session(user_id: str, conversation_id: str,
+                               config=None) -> WebSession:
+    """Web 适配层的会话装配：与 main() 同一套对象图，无终端 IO。
+
+    与 main() 的三处差异（业务层替换的边界内）：
+        - 用户域按 user_id（适配层透传，内网带入即真相）；REPL 恒 "local"。
+        - 确认回调 fail-safe 拒绝（Web 确认通道接好后替换为真实往返）。
+        - 服务预检跳过（compose 服务由部署层保证；不可达按软依赖降级）。
 
     Args:
         user_id: 归属用户（SpringBoot 内网调用携带，即真相）。
-        conversation_id: 会话标识（对话窗口与落盘键控）。
+        conversation_id: 会话标识（窗口与落盘键控；不存在则创建）。
+        config: BioPilotConfig；None 时 from_env。
 
-    Raises:
-        NotImplementedError: 工单 11 前未接入——适配层测试经 agent_factory 注入替身。
+    Returns:
+        WebSession（agent + consolidation_queue）。
     """
-    raise NotImplementedError("工单 11：web 会话装配待接入（工单 10 经 factory 注入测试替身）")
+    import asyncio as _asyncio
+    import uuid as _uuid
+
+    from biopilot.core.agent import Agent
+    from biopilot.core.llm import LLMClient, StructuredOutput
+    from biopilot.core.llm.skills import LoadSkillTool, SkillRegistry, load_lock
+    from biopilot.core.memory.schemas.memory import Memory
+    from biopilot.core.memory.services.agent_manager import AgentManager
+    from biopilot.core.memory.services.block_manager import BlockManager
+    from biopilot.core.memory.services.consolidation import MemoryConsolidator
+    from biopilot.core.memory.services.consolidation_queue import ConsolidationQueue
+    from biopilot.core.memory.services.message_manager import MessageManager
+    from biopilot.core.memory.storage.database import MemoryDB
+    from biopilot.core.security.middleware.audit import AuditMiddleware
+    from biopilot.core.security.middleware.command_guard import CommandGuardMiddleware
+    from biopilot.core.security.middleware.content_guard import ContentGuardMiddleware
+    from biopilot.core.security.middleware.policy_engine import PolicyEngineMiddleware
+    from biopilot.core.security.middleware.workspace_policy import WorkspacePolicyMiddleware
+
+    config = config or BioPilotConfig.from_env()
+
+    db = MemoryDB(config.runtime.memory_dsn)
+    block_manager = BlockManager(db, user_id=user_id)
+    block_manager.migrate_legacy_labels()
+    block_manager.purge_removed_blocks()
+    block_manager.ensure_default_blocks()
+    message_manager = MessageManager(db)
+    agent_manager = AgentManager(db, block_manager, message_manager)
+    message_manager.agent_manager = agent_manager
+
+    # 会话：存在则复用（--resume 语义），不存在则创建
+    try:
+        agent_state = agent_manager.get_agent(conversation_id)
+    except KeyError:
+        agent_state = agent_manager.create_agent(conversation_id, user_id=user_id)
+
+    llm = LLMClient(config.llm)
+    agents_dir = (config.runtime.agents_dir if Path(config.runtime.agents_dir).is_dir()
+                  else str(Path(__file__).resolve().parents[3] / "agents"))
+    registry = AgentRegistry(agents_dir)
+
+    _pf_dir = Path.cwd() / ".biopilot"
+    _skills_dir = _pf_dir / "skills"
+    _disabled = {n for n, e in load_lock(_pf_dir).items() if not e.get("enabled", True)}
+    skill_registry = SkillRegistry(
+        str(_skills_dir) if _skills_dir.is_dir() else None, disabled=_disabled)
+    _load_skill_tool = LoadSkillTool(skill_registry)
+    from biopilot.core.mcp.services.client import McpClientManager
+    mcp_manager = McpClientManager(config.mcp_servers)
+    if config.mcp_servers:
+        mcp_manager.start()
+    for _agent_type in registry.list_agents():
+        _cfg = registry.get_config(_agent_type)
+        _cfg.tools = merge_tools(
+            ("agent", _cfg.tools),
+            ("skill", skill_registry.get_tools_for(_agent_type)),
+            ("framework", [_load_skill_tool]),
+            ("mcp", collect_mcp_agent_tools(_agent_type, config.mcp_servers, mcp_manager)),
+        )
+        apply_pre_approval(_cfg.tools, _approved_tools(config))
+
+    structured = StructuredOutput(llm)
+    summary_structured = None
+    if config.compaction.summary_model_name:
+        from dataclasses import dataclass, replace as _replace
+        summary_llm = LLMClient(_replace(config.llm, model=config.compaction.summary_model_name))
+        summary_structured = StructuredOutput(summary_llm)
+
+    tool_result_store = make_tool_result_store(config)
+    tool_result_offloader = make_tool_result_offloader(
+        tool_result_store, config.compaction.tool_results)
+
+    set_memory_context(MemoryToolsContext(
+        agent_id=conversation_id,
+        user_id=user_id,
+        block_manager=block_manager,
+        message_manager=message_manager,
+        tool_result_store=tool_result_store,
+    ))
+
+    middlewares = [
+        AuditMiddleware(db=db),
+        WorkspacePolicyMiddleware(workspace=config.runtime.workspace,
+                                  write_roots=declared_roots(config)),
+        ContentGuardMiddleware(classifier=build_classifier(config)),
+        CommandGuardMiddleware(),
+        PolicyEngineMiddleware(confirm_above=config.runtime.confirm_above),
+    ]
+
+    # 意图层（可选）：web 路径与 REPL 同策略——判定服务不可达则整层不装配
+    intent_service = None
+    if config.intent.enabled:
+        from biopilot.core.intent.services.intent import IntentService
+        from biopilot.core.intent.services.jev import JevClient, JevUnavailable
+        from biopilot.core.intent.services.taxonomy import load_taxonomy, TaxonomyError
+        try:
+            taxonomy = load_taxonomy()
+        except TaxonomyError as exc:
+            raise RuntimeError(f"意图识别已启用，但知识库装载失败：{exc}") from exc
+        judge = JevClient(config.intent.jev.base_url, config.intent.jev.api_key,
+                          config.intent.jev.model,
+                          timeout=config.intent.jev.timeout,
+                          max_retries=config.intent.jev.max_retries,
+                          zero_data_retention=config.intent.jev.zero_data_retention,
+                          only_provider=config.intent.jev.only_provider)
+        try:
+            _asyncio.run(judge.probe())
+        except JevUnavailable as exc:
+            logger.warning("意图判定服务不可用，web 会话走纯 ReAct: %s", exc.reason)
+        else:
+            intent_service = IntentService(
+                taxonomy=taxonomy, judge=judge,
+                history_messages=config.intent.history_messages)
+
+    async def _web_confirm_callback(req) -> bool:
+        # fail-safe 拒绝：Web 确认通道接好后替换为 SSE 事件往返
+        logger.warning("确认请求被 fail-safe 拒绝（Web 确认通道未接）：%s", req)
+        return False
+
+    agent = Agent(
+        llm=llm, agent_registry=registry, agent_type="supervisor",
+        skill_registry=skill_registry,
+        memory=agent_state.memory,
+        agent_manager=agent_manager, block_manager=block_manager,
+        message_manager=message_manager,
+        compaction=config.compaction,
+        structured=structured,
+        summary_structured=summary_structured,
+        offloader=tool_result_offloader,
+        security_middleware=middlewares,
+        intent_service=intent_service,
+        confirm_callback=_web_confirm_callback,
+        session_id=conversation_id,
+        user_id=user_id,
+    )
+    consolidator = MemoryConsolidator(
+        agent_state, block_manager, message_manager,
+        structured, enable=config.memory.consolidation_enabled)
+    consolidation_queue = ConsolidationQueue(
+        consolidator, conversation_id,
+        debounce_seconds=config.memory.debounce_seconds,
+        max_delay_seconds=config.memory.max_delay_seconds)
+    return WebSession(agent=agent, consolidation_queue=consolidation_queue)
 
 
 def main(argv: list[str] | None = None) -> int | None:
@@ -157,7 +319,7 @@ def main(argv: list[str] | None = None) -> int | None:
                         help="跳过依赖服务（Milvus）启动预检")
     args = parser.parse_args(argv)
     if getattr(args, "web", False):
-        # Web 适配层：SSE 服务（工单 10）。DSN 经环境变量或 --resume 前的 config 读出。
+        # Web 适配层：SSE 服务。DSN 经环境变量读取。
         from biopilot.webapi import run_server, WebConfig
         import os as _os
         run_server(WebConfig(

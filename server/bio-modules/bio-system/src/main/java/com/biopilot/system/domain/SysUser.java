@@ -15,9 +15,9 @@ public class SysUser {
     private String password;
     /** 昵称/显示名（学生实名或花名）。 */
     private String nickName;
-    /** 归属角色：admin / user（两档角色，见工单 08）。 */
+    /** 归属角色键：ADMIN / USER（两档）。 */
     private String role;
-    /** 状态：0=正常 1=停用（DELETING 走工单 25 的两阶段流程）。 */
+    /** 状态：0=正常 1=停用（删除走两阶段流程：先标记，物理删除延后）。 */
     private String status;
     private LocalDateTime createTime;
 

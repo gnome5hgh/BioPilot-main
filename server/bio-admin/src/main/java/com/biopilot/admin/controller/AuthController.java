@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 认证接口：注册 / 登录 / 登出 / 当前用户资料（工单 08）。 */
+/** 认证接口：注册 / 登录 / 登出 / 当前用户资料。 */
 @RestController
 public class AuthController {
 

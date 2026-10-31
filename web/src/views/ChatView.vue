@@ -23,8 +23,8 @@
 </template>
 
 <script setup>
-// 对话闭环（工单 11）：SSE 经 SpringBoot 转发；当前阶段（工单 09）仅 UI 骨架，
-// send 为占位反馈——接真实流在工单 11。
+// 对话闭环：SSE 经 SpringBoot 转发到 Python 适配层；当前 send 为占位反馈，
+// 真实流式链路接入后替换。
 import { ref } from 'vue'
 
 const caps = [
@@ -45,10 +45,10 @@ function fillExample() {
 }
 
 function send() {
-  // 工单 11 接 SSE 流；当前为占位反馈（外围壳口径：UI 一致动作占位）
+  // SSE 流接入前为占位反馈（保持可点性，不做禁用态）
   if (!input.value.trim() || busy.value) return
   messages.value.push({ role: 'user', text: input.value })
-  messages.value.push({ role: 'assistant', text: '（演示）对话链路将在工单 11 接入。' })
+  messages.value.push({ role: 'assistant', text: '（演示）对话链路接入后此处为流式回答。' })
   input.value = ''
 }
 </script>

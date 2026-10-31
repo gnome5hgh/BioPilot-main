@@ -1,4 +1,4 @@
-"""FastAPI 应用工厂：对话 SSE 流 + 健康检查（工单 10）。
+"""FastAPI 应用工厂：对话 SSE 流 + 健康检查。
 
 SSE 桥接约定：
     - 事件帧：``data: {"type": "token"|"tool"|"round"|"done"|"error", ...}``
@@ -6,7 +6,7 @@ SSE 桥接约定：
     - 客户端断开（Request.is_disconnected）→ 取消 run（复用 Agent 的取消级联，
       与 REPL Ctrl-C 同路径），不留悬挂任务占会话运行锁。
 
-装配策略（工单 11 前的过渡形态）：进程内字典按 (user_id, conversation_id) 缓存
+装配策略：进程内字典按 (user_id, conversation_id) 缓存
 Agent 实例，工厂函数 ``agent_factory`` 可注入替换（测试用 fake Agent 直打 S1 缝）。
 """
 from __future__ import annotations
@@ -56,6 +56,16 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="BioPilot Agent Adapter", docs_url=None, redoc_url=None)
     agents: dict[tuple[str, str], object] = {}
+
+    @app.on_event("shutdown")
+    async def _flush_consolidations() -> None:
+        """停服时把活跃会话的整合队列 flush（游标推进走 DB 锁，多进程安全）。"""
+        for q in _queues:
+            try:
+                await q.flush()
+            except Exception as e:      # pragma: no cover
+                logger.warning("停服整合 flush 失败（游标由 DB 兜底）: %r", e)
+        _queues.clear()
 
     @app.get("/health")
     async def health() -> dict:
@@ -178,9 +188,16 @@ def _accepts_stream(run_callable) -> bool:
 
 
 async def _default_agent_factory(user_id: str, conversation_id: str):
-    """真实装配：委托 assembly 的会话装配（工单 11 展开会话级 bundle 管理）。"""
+    """真实装配：委托 assembly 的 web 会话装配（与 REPL 同一套对象图）。"""
     from biopilot.cli.services.assembly import assemble_web_session
-    return await assemble_web_session(user_id, conversation_id)
+    session = await assemble_web_session(user_id, conversation_id)
+    # 整合队列挂到全局收尾集合：停服时 flush（游标推进走 DB 锁，多进程安全）
+    _queues.append(session.consolidation_queue)
+    return session.agent
+
+
+#: 全部活跃会话的整合队列（on_shutdown 时统一 flush）
+_queues: list = []
 
 
 def run_server(config: WebConfig | None = None) -> None:

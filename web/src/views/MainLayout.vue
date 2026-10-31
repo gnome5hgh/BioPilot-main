@@ -1,6 +1,6 @@
 <template>
   <div class="app">
-    <!-- 左栏：导航 + 项目 + 任务（结构照 genpilot 原型；项目/会话列表接工单 13） -->
+    <!-- 左栏：导航 + 项目 + 任务列表（结构照 genpilot 原型；列表数据随项目/会话模块接入） -->
     <aside class="sidebar">
       <div class="brand-row">
         <span class="brand">BioPilot</span>

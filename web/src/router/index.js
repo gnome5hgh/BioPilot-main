@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../api/auth'
 
-// 路由守卫：未登录访问受保护页 → 跳登录（工单 09 验收项）
+// 路由守卫：未登录访问受保护页 → 跳登录
 const routes = [
   { path: '/login', component: () => import('../views/LoginView.vue') },
   {
