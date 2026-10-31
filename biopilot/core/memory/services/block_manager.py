@@ -225,8 +225,8 @@ class BlockManager:
             ConcurrentUpdateError: 读取后写入前版本被其他写者推进（CAS 拒绝）。
         """
         with self.db.transaction():
-            # 读取当前块并校验不变式
-            row = block_orm.select_block_by_label(self.db, label)
+            # 读取当前块并校验不变式（FOR UPDATE 行锁：锁到事务退出，防并发写者插队）
+            row = block_orm.select_block_by_label(self.db, label, for_update=True)
             if row is None:
                 raise KeyError(f"block {label} not found")
             if row["read_only"]:
@@ -268,7 +268,7 @@ class BlockManager:
         for _ in range(_CAS_MAX_RETRIES):
             try:
                 with self.db.transaction():
-                    row = block_orm.select_block_by_label(self.db, label)
+                    row = block_orm.select_block_by_label(self.db, label, for_update=True)
                     if row is None:
                         raise KeyError(f"block {label} not found")
                     if row["read_only"]:

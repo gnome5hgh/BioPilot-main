@@ -70,7 +70,7 @@ def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage) -> None:
 
 def select_messages_by_agent(db: MemoryDB, agent_id: str,
                              limit: int | None = None) -> list[dict]:
-    """按 agent 取消息，按 created_at 升序（同刻用 rowid 保插入序）；limit 可选。
+    """按 agent 取消息，按 created_at 升序（同刻用 seq 保插入序）；limit 可选。
 
     Args:
         db: 数据库连接。
@@ -82,9 +82,9 @@ def select_messages_by_agent(db: MemoryDB, agent_id: str,
 
     排序细节：
         - 主排序 created_at（字符串 ISO 时间可字典序比较）。
-        - 辅助排序 rowid（隐含的物理插入顺序）确保同一时刻消息顺序稳定。
+        - 辅助排序 seq（自增插入序）确保同一时刻消息顺序稳定。
     """
-    sql = "SELECT * FROM messages WHERE agent_id=? ORDER BY created_at, rowid"
+    sql = "SELECT * FROM messages WHERE agent_id=? ORDER BY created_at, seq"
     params: list = [agent_id]
     if limit is not None:
         sql += " LIMIT ?"
@@ -134,10 +134,10 @@ def select_messages_by_session(db: MemoryDB, session_id: str,
         limit: 可选返回条数上限。
 
     Returns:
-        消息行 dict 列表，按 created_at、rowid 升序。
+        消息行 dict 列表，按 created_at、seq 升序。
     """
     sql = ("SELECT * FROM messages WHERE COALESCE(session_id, agent_id)=?"
-           " ORDER BY created_at, rowid")
+           " ORDER BY created_at, seq")
     params: list = [session_id]
     if limit is not None:
         sql += " LIMIT ?"
@@ -155,5 +155,5 @@ def count_messages(db: MemoryDB, agent_id: str) -> int:
     Returns:
         消息总条数（包括所有历史消息，即使已被压缩移出窗口，因为物理行未删除）。
     """
-    cur = db.execute("SELECT COUNT(*) FROM messages WHERE agent_id=?", (agent_id,))
-    return cur.fetchone()[0]
+    cur = db.execute("SELECT COUNT(*) AS c FROM messages WHERE agent_id=?", (agent_id,))
+    return cur.fetchone()["c"]

@@ -1,17 +1,30 @@
-"""SQLite 连接与建表（sqlite3 标准库，零新增依赖）。
+"""MySQL 连接与建表（PyMySQL，连接池）。
 
-整库唯一连接单例：check_same_thread=False 允许多线程共享一条连接 + 一把
-可重入锁串行化所有写事务——同轮多个并发子 agent 各自线程写记忆时不会互踩。
-单条读写下锁后立即 commit；需要「读旧值 → 算新值 → 写回」的原子序列走
-transaction()，整段持锁、只在最外层退出时提交。持久化只有「一张表一个主键、
-一次写一条」的量级，裸 sqlite3 足够，不需要 ORM 层。
+多用户真相源（与 server 侧业务表同一 MySQL 实例）：读写走小型连接池，每个操作
+借还连接；「读旧值 → 算新值 → 写回」的原子序列走 transaction()——它把一条连接
+钉在本线程，事务内所有语句共用该连接，退出时统一 commit / rollback。行级并发
+正确性由 InnoDB 行锁承担：块管理器的读-改-写在事务内用 SELECT ... FOR UPDATE
+锁行，CAS（WHERE version=?）兜底防绕过入口的写者。
+
+适配约定（让 ORM 层的 SQLite 血统 SQL 少改）：
+    - execute/executemany 把 `?` 占位符透明转换为 PyMySQL 的 `%s`。
+    - 连接用 DictCursor，查询结果是 dict，`row["col"]` 与 `dict(row)` 都成立。
+    - 插入顺序用每表自增 `seq` 列表达（MySQL 没有 rowid）。
+
+Schema 变更约定：建表用 CREATE TABLE IF NOT EXISTS（幂等）；给**已有表**加列
+必须登记 _ADDITIVE_COLUMNS，init_schema 每次构建时比对 information_schema 补齐。
 """
+
 from __future__ import annotations
 
-import sqlite3
+import os
+import queue
 import threading
 from contextlib import contextmanager
-from pathlib import Path
+from urllib.parse import urlparse
+
+import pymysql
+import pymysql.cursors
 
 __all__ = ["MemoryDB"]
 
@@ -21,193 +34,329 @@ __all__ = ["MemoryDB"]
 _SCHEMA = """
 -- blocks 表：核心记忆块存储（业务主表）
 CREATE TABLE IF NOT EXISTS blocks (
-    id TEXT PRIMARY KEY,                -- 块唯一标识
-    label TEXT NOT NULL,                -- 业务标签（如 "assistant", "profile"）
-    value TEXT NOT NULL,                -- 块内容（文本）
-    "limit" INTEGER NOT NULL DEFAULT 2000, -- 字符长度上限
-    description TEXT,                   -- 可读描述
-    metadata_ TEXT,                     -- 扩展元数据（JSON 字符串）
+    id VARCHAR(64) NOT NULL,            -- 块唯一标识
+    label VARCHAR(191) NOT NULL,        -- 业务标签（如 "assistant", "profile"）
+    value MEDIUMTEXT NOT NULL,          -- 块内容（文本）
+    `limit` INTEGER NOT NULL DEFAULT 2000, -- 字符长度上限
+    description TEXT NULL,              -- 可读描述
+    metadata_ TEXT NULL,                -- 扩展元数据（JSON 字符串）
     read_only INTEGER NOT NULL DEFAULT 0, -- 只读标志（0=可写，1=只读）
     version INTEGER NOT NULL DEFAULT 1,   -- 乐观锁版本号（单调递增）
-    created_at TEXT NOT NULL,           -- 创建时间（ISO 字符串）
-    updated_at TEXT NOT NULL            -- 最后更新时间（ISO 字符串）
+    created_at VARCHAR(40) NOT NULL,    -- 创建时间（ISO 字符串，字典序即可比较）
+    updated_at VARCHAR(40) NOT NULL,    -- 最后更新时间（ISO 字符串）
+    seq BIGINT NOT NULL AUTO_INCREMENT, -- 插入序（替代 SQLite rowid）
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_blocks_seq (seq),
+    KEY idx_blocks_label (label)
 );
 
 -- block_history 表：块历史快照（撤销/重做链）
 CREATE TABLE IF NOT EXISTS block_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, -- 自增主键（排序依据）
-    block_id TEXT NOT NULL,              -- 对应的块 ID
-    label TEXT NOT NULL,                 -- 快照时的标签
-    value TEXT NOT NULL,                 -- 快照时的内容
-    "limit" INTEGER NOT NULL,            -- 快照时的字符上限
-    description TEXT,                    -- 快照时的描述
-    metadata_ TEXT,                      -- 快照时的元数据（JSON）
-    version INTEGER NOT NULL,            -- 快照时的版本号
-    checkpointed_at TEXT NOT NULL        -- 快照创建时间
+    id BIGINT NOT NULL AUTO_INCREMENT,  -- 自增主键（排序依据）
+    block_id VARCHAR(64) NOT NULL,      -- 对应的块 ID
+    label VARCHAR(191) NOT NULL,        -- 快照时的标签
+    value MEDIUMTEXT NOT NULL,          -- 快照时的内容
+    `limit` INTEGER NOT NULL,           -- 快照时的字符上限
+    description TEXT NULL,              -- 快照时的描述
+    metadata_ TEXT NULL,                -- 快照时的元数据（JSON）
+    version INTEGER NOT NULL,           -- 快照时的版本号
+    checkpointed_at VARCHAR(40) NOT NULL, -- 快照创建时间
+    PRIMARY KEY (id),
+    KEY idx_block_history_block (block_id)
 );
 
--- messages 表：对话消息持久化（Recall 数据源）
+-- messages 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,                 -- 消息唯一标识
-    agent_id TEXT NOT NULL,              -- 所属 agent（具体对话）
-    session_id TEXT,                     -- 会话分组（同一会话的 supervisor 与子 agent）
-    role TEXT NOT NULL,                  -- system/user/assistant/tool
-    content TEXT,                        -- 消息内容（纯文本，可为 NULL）
-    tool_calls TEXT,                     -- 工具调用列表（JSON 数组）
-    tool_call_id TEXT,                   -- 工具调用 ID（关联 tool 消息）
-    step_id TEXT,                        -- 工作流步骤标识
-    run_id TEXT,                         -- 运行标识
-    otid TEXT,                           -- 开放追踪 ID
-    meta TEXT,                           -- 响应信封（JSON：结束原因/token 用量/模型快照/思维链等）
-    created_at TEXT NOT NULL             -- 创建时间
+    id VARCHAR(64) NOT NULL,             -- 消息唯一标识
+    agent_id VARCHAR(191) NOT NULL,      -- 所属 agent（具体对话）
+    session_id VARCHAR(191) NULL,        -- 会话分组（同一会话的 supervisor 与子 agent）
+    role VARCHAR(20) NOT NULL,           -- system/user/assistant/tool
+    content MEDIUMTEXT NULL,             -- 消息内容（纯文本，可为 NULL）
+    tool_calls MEDIUMTEXT NULL,          -- 工具调用列表（JSON 数组）
+    tool_call_id VARCHAR(64) NULL,       -- 工具调用 ID（关联 tool 消息）
+    step_id VARCHAR(64) NULL,            -- 工作流步骤标识
+    run_id VARCHAR(64) NULL,             -- 运行标识
+    otid VARCHAR(64) NULL,               -- 开放追踪 ID
+    meta MEDIUMTEXT NULL,                -- 响应信封（JSON：结束原因/token 用量/模型快照/思维链等）
+    created_at VARCHAR(40) NOT NULL,     -- 创建时间
+    seq BIGINT NOT NULL AUTO_INCREMENT,  -- 插入序（替代 SQLite rowid）
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_messages_seq (seq),
+    KEY idx_messages_agent (agent_id, created_at),
+    KEY idx_messages_session (session_id, created_at)
 );
--- 复合索引：加速按 agent + 时间查询
-CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id, created_at);
 """
 
 # 增量列迁移清单：(表, 列名, 列定义)。建表脚本只能建出新库——已有库不会因为
 # _SCHEMA 多写一列就自动获得它，故给已有表**加列**时必须同时在这里登记一行，
-# init_schema 会按它比对并补齐。messages 只增不改，历史行新列为 NULL。
+# init_schema 会按它比对 information_schema 并补齐。messages 只增不改，历史行新列为 NULL。
 _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("messages", "meta", "meta TEXT"),
-    ("messages", "session_id", "session_id TEXT"),
+    ("messages", "meta", "meta MEDIUMTEXT NULL"),
+    ("messages", "session_id", "session_id VARCHAR(191) NULL"),
 )
+
+#: 默认 DSN（可用环境变量 BIOPILOT_MEMORY_MYSQL_DSN 覆盖）。
+_DEFAULT_DSN = "mysql://root@127.0.0.1:3306/biopilot"
+
+#: 连接池上限：覆盖「多线程子 agent 并发写记忆 + 事务钉住」的常规并发量。
+_POOL_SIZE = 8
+
+
+def _parse_dsn(dsn: str) -> dict:
+    """把 `mysql://user:password@host:port/dbname` 解析成 PyMySQL 连接参数。
+
+    Args:
+        dsn: DSN 字符串；密码可为空，库名不能省。
+
+    Returns:
+        pymysql.connect 的关键字参数字典（charset 固定 utf8mb4，DictCursor）。
+    """
+    u = urlparse(dsn)
+    if u.scheme != "mysql" or not u.path.lstrip("/"):
+        raise ValueError(f"memory_dsn 必须是 mysql://user:pass@host:port/db 形式：{dsn}")
+    return {
+        "host": u.hostname or "127.0.0.1",
+        "port": u.port or 3306,
+        "user": u.username or "root",
+        "password": u.password or "",
+        "database": u.path.lstrip("/"),
+        "charset": "utf8mb4",
+        "cursorclass": pymysql.cursors.DictCursor,
+        "autocommit": False,
+    }
 
 
 class MemoryDB:
-    """SQLite 连接单例：建库建表 + 线程安全的写事务。
+    """MySQL 连接池：建库建表 + 线程安全的事务。
 
     设计决策：
-        - 使用 check_same_thread=False 允许跨线程共享连接（多线程模型下，由应用层保证串行化）。
-        - 用可重入锁保护 execute/executemany/transaction，确保同一时间只有一个写事务执行。
-        - 非事务的单条操作立即 commit，保证持久化原子性；事务内的语句由最外层统一提交。
-        - 使用 sqlite3.Row 工厂，使查询结果支持列名访问（dict(row) 或 row["col"]）。
+        - 池中连接各自独立线程使用（PyMySQL 连接非线程安全，借还模型天然串行化单条连接）。
+        - transaction() 把一条连接钉在本线程（thread-local），事务内的 execute 全部
+          落在同一连接上；嵌套事务共享同一次提交，只有最外层退出才 commit / rollback。
+        - 事务外的单条操作借连接执行并立即 commit；查询结果由 PyMySQL 客户端缓冲，
+          连接归还后再 fetch 也安全。
+        - 行级并发正确性：读-改-写序列在事务内用 SELECT ... FOR UPDATE 锁行（调用方
+          职责），CAS 条件更新兜底；不再有进程级全局锁，多用户吞吐不受单库大锁限制。
 
     Attributes:
-        path: Path，数据库文件路径
-        _conn: sqlite3.Connection，整库唯一连接（check_same_thread=False，由锁串行化）
-        _lock: threading.RLock，可重入锁；transaction() 内会重入 execute，普通锁会自锁死
-        _tx_depth: int，事务嵌套深度；>0 时 execute 不自行提交，由最外层 transaction 统一提交
+        dsn: str，连接串（mysql://user:pass@host:port/db）
+        _pool: queue.LifoQueue，空闲连接池（懒建，上限 _POOL_SIZE）
+        _pinned: threading.local，事务钉住的连接（含嵌套深度）
+        _all_conns: list，池中创建过的全部连接（供测试观测，不做清理）
     """
 
-    def __init__(self, path: Path):
-        """建库：自动创建父目录，连接用 Row 工厂（orm 函数依赖列名取值）。
+    def __init__(self, dsn: str | None = None, pool_size: int = _POOL_SIZE):
+        """建池：DSN 缺省取环境变量 BIOPILOT_MEMORY_MYSQL_DSN，再缺省取本地默认库。
 
         Args:
-            path: 数据库文件路径（若目录不存在则自动创建）。
+            dsn: 连接串；None 时按 环境变量 → _DEFAULT_DSN 顺序取值。
+            pool_size: 连接池上限。
 
-        注意：连接建立后自动执行 init_schema() 建表（幂等）。
+        注意：连接建立后自动执行 init_schema() 建表（幂等），并按
+        _ADDITIVE_COLUMNS 补齐已有表的缺列。
         """
-        self.path = Path(path)
-        # 确保数据库文件所在目录存在
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # 创建连接，允许多线程共享（但需外部加锁串行化）
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        # 设置 Row 工厂，使查询结果可像字典一样访问
-        self._conn.row_factory = sqlite3.Row
-        # 可重入锁：transaction() 内部会继续调 execute()，普通锁会自锁死。
-        self._lock = threading.RLock()
-        #: 事务嵌套深度：>0 时 execute 不自行提交，由最外层 transaction 统一提交。
-        self._tx_depth = 0
+        self.dsn = dsn or os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN") or _DEFAULT_DSN
+        self._kwargs = _parse_dsn(self.dsn)
+        self._pool: queue.LifoQueue = queue.LifoQueue()
+        self._pool_size = pool_size
+        self._created = 0
+        self._create_lock = threading.Lock()
+        self._pinned = threading.local()
         self.init_schema()
 
+    # ------------------------------------------------------------------ 连接池
+    def _new_conn(self):
+        return pymysql.connect(**self._kwargs)
+
+    def _checkout(self):
+        """借一条连接：优先取池中空闲（先 ping 活性），池空且未满则新建，满了等待。
+
+        Returns:
+            可用的 pymysql 连接。
+        """
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+            except queue.Empty:
+                with self._create_lock:
+                    if self._created < self._pool_size:
+                        self._created += 1
+                        return self._new_conn()
+                conn = self._pool.get(timeout=30)
+            try:
+                conn.ping(reconnect=False)
+                return conn
+            except Exception:
+                # 死连接（服务重启/超时断开）：丢弃重建
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                with self._create_lock:
+                    self._created = max(0, self._created - 1)
+
+    def _release(self, conn) -> None:
+        self._pool.put(conn)
+
+    # ------------------------------------------------------------------ schema
     def init_schema(self) -> None:
         """建表（幂等）+ 给已有库补齐缺的增量列。
 
         注意：新增表/改列定义要同步更新 _SCHEMA；给**已有表**加列还要登记到
-        _ADDITIVE_COLUMNS，否则只影响新库，老库缺列会在读写时报 no such column。
+        _ADDITIVE_COLUMNS，否则只影响新库，老库缺列会在读写时报 Unknown column。
         """
-        self._conn.executescript(_SCHEMA)
-        self._migrate_additive_columns()
-        # 会话索引必须在补列之后建：老库的 session_id 是后加的，建表脚本里直接
-        # CREATE INDEX 会在补列前因 no such column 失败。
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_session"
-            " ON messages(session_id, created_at)")
-        self._drop_legacy_fts()
-        self._conn.commit()
+        conn = self._checkout()
+        try:
+            with conn.cursor() as cur:
+                for stmt in _SCHEMA.split(";"):
+                    if stmt.strip():
+                        cur.execute(stmt)
+                self._migrate_additive_columns(cur)
+            conn.commit()
+        finally:
+            self._release(conn)
 
-    def _drop_legacy_fts(self) -> None:
-        """一次性清理已退役的 FTS5 遗产（虚表与同步触发器），幂等。
+    def _migrate_additive_columns(self, cur=None) -> None:
+        """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等）。
 
-        对话检索工具退役后全文索引无消费方；旧库里的 messages_fts 与触发器若
-        不删，每条消息写入仍在维护幽灵索引。新库为 no-op。
+        只做「加列」这一种变更：列已存在即跳过，可反复执行。表不存在时跳过而非
+        建表——建表是 _SCHEMA 的职责。历史行的新列留 NULL，由读取方按缺省值处理。
+
+        Args:
+            cur: 游标；缺省时自借连接执行（外部调用方如 AgentManager 直接调用本方法）。
         """
-        self._conn.executescript("""
-        DROP TRIGGER IF EXISTS messages_fts_ai;
-        DROP TRIGGER IF EXISTS messages_fts_ad;
-        DROP TRIGGER IF EXISTS messages_fts_au;
-        DROP TABLE IF EXISTS messages_fts;
-        """)
-
-    def _migrate_additive_columns(self) -> None:
-        """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等，仅供 init_schema 调用）。
-
-        只做「加列」这一种变更：列已存在即跳过，可反复执行。表不存在（异常库文件）
-        时跳过而非建表——建表是 executescript 的职责。历史行的新列留 NULL，由读取方
-        按缺省值处理。
-        """
+        if cur is None:
+            conn = self._checkout()
+            try:
+                with conn.cursor() as c:
+                    self._migrate_additive_columns(c)
+                conn.commit()
+            finally:
+                self._release(conn)
+            return
         for table, column, ddl in _ADDITIVE_COLUMNS:
-            existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            cur.execute(
+                "SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+                " WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s",
+                (self._kwargs["database"], table))
+            existing = {r["COLUMN_NAME"] for r in cur.fetchall()}
             if existing and column not in existing:
-                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+    # ------------------------------------------------------------------ 事务
+    def _pinned_conn(self):
+        """取本线程事务钉住的连接；不在事务内返回 None。"""
+        return getattr(self._pinned, "conn", None)
 
     @contextmanager
     def transaction(self):
-        """把多条语句包成一次持锁的原子操作（读-改-写序列必须走这里）。
+        """把多条语句包成一次原子操作（读-改-写序列必须走这里）。
 
-        可重入：嵌套调用共享同一把锁与同一次提交，只有最外层退出时才 commit /
-        rollback。内部调 execute/executemany 不会提前提交，因此整段序列对外不可见。
+        连接钉住本线程：事务内所有 execute 落在同一连接；嵌套调用共享同一次
+        提交，只有最外层退出时才 commit / rollback。行锁（FOR UPDATE）随事务
+        持有到最外层退出，崩溃时随连接归还/断开释放。
 
         Yields:
-            底层 sqlite3 连接（供需要直接操作的调用方使用）。
+            钉住的 pymysql 连接（供需要直接操作的调用方使用）。
         """
-        with self._lock:
-            self._tx_depth += 1
+        if self._pinned_conn() is not None:
+            # 嵌套：复用外层事务
+            self._pinned.depth += 1
             try:
-                yield self._conn
-            except BaseException:
-                self._tx_depth -= 1
-                if self._tx_depth == 0:
-                    self._conn.rollback()
-                raise
-            else:
-                self._tx_depth -= 1
-                if self._tx_depth == 0:
-                    self._conn.commit()
+                yield self._pinned.conn
+            finally:
+                self._pinned.depth -= 1
+            return
+        conn = self._checkout()
+        self._pinned.conn = conn
+        self._pinned.depth = 1
+        try:
+            conn.begin()
+            yield conn
+        except BaseException:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        finally:
+            self._pinned.conn = None
+            self._pinned.depth = 0
+            self._release(conn)
 
-    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        """持锁执行单条 SQL；不在事务内时立即 commit（事务内由最外层统一提交）。
+    @property
+    def _tx_depth(self) -> int:
+        """事务嵌套深度（0 = 不在事务内）。兼容旧读取方。"""
+        conn = self._pinned_conn()
+        return getattr(self._pinned, "depth", 0) if conn is not None else 0
+
+    # ------------------------------------------------------------------ 执行
+    @staticmethod
+    def _to_mysql(sql: str) -> str:
+        """把 SQLite 血统的 `?` 占位符转换为 PyMySQL 的 `%s`。
+
+        约定：本仓 SQL 全部由代码拼装、字符串字面量不含 `?`，整体替换安全。
 
         Args:
-            sql: SQL 语句（支持参数化占位符 ?）。
+            sql: 原始 SQL。
+
+        Returns:
+            占位符已转换的 SQL。
+        """
+        return sql.replace("?", "%s")
+
+    def execute(self, sql: str, params: tuple = ()):
+        """执行单条 SQL；不在事务内时借连接立即 commit（事务内由最外层统一提交）。
+
+        Args:
+            sql: SQL 语句（`?` 占位符，内部透明转 `%s`）。
             params: 参数元组，默认为空。
 
         Returns:
-            sqlite3.Cursor 对象，可用于 fetch 结果。
+            pymysql 游标（DictCursor，结果可按列名访问），可用于 fetch。
 
         注意：
-            - 非事务调用立即 commit（读语句同样走此路径，加锁主要为简化并发模型）。
-            - 若在 transaction() 内调用，则不提交，由最外层退出时统一 commit/rollback。
-            - 若需批量操作，使用 executemany。
+            - 事务内使用钉住连接且不提交；事务外借池中连接、执行完立即 commit 并归还。
+            - PyMySQL 默认客户端缓冲全部结果行，连接归还后 fetch 仍可用。
         """
-        with self._lock:
-            cur = self._conn.execute(sql, params)
-            if self._tx_depth == 0:
-                self._conn.commit()
+        sql = self._to_mysql(sql)
+        conn = self._pinned_conn()
+        if conn is not None:
+            cur = conn.cursor()
+            cur.execute(sql, params)
             return cur
+        conn = self._checkout()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            conn.commit()
+            return cur
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            if self._pinned_conn() is None:
+                self._release(conn)
 
     def executemany(self, sql: str, seq: list[tuple]) -> None:
-        """持锁批量执行；不在事务内时立即 commit（事务内由最外层统一提交）。
+        """批量执行；不在事务内时借连接立即 commit（事务内由最外层统一提交）。
 
         Args:
-            sql: SQL 语句（参数化）。
+            sql: SQL 语句（`?` 占位符）。
             seq: 参数元组列表，每个元组对应一次执行。
 
-        适用场景：批量插入多条记录，减少事务开销。
-        注意：失败时整个批量操作会回滚（SQLite 默认在事务中执行 executemany）。
+        注意：失败时整个批量操作回滚（PyMySQL executemany 在单条语句内完成）。
         """
-        with self._lock:
-            self._conn.executemany(sql, seq)
-            if self._tx_depth == 0:
-                self._conn.commit()
+        sql = self._to_mysql(sql)
+        conn = self._pinned_conn()
+        if conn is not None:
+            conn.cursor().executemany(sql, seq)
+            return
+        conn = self._checkout()
+        try:
+            conn.cursor().executemany(sql, seq)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._release(conn)

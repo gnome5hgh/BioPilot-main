@@ -221,8 +221,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # AgentManager.create_agent 的 agent_id 与 Agent.session_id 必须一致——
     # 记忆工具（SQL 按 agent_id 键控）与 MemoryConsolidator 都挂在它下面，三者对不上
     # 会各自读到空数据。
-    memory_dir = Path(config.runtime.workspace) / "memory"
-    db = MemoryDB(memory_dir / "memory.db")
+    db = MemoryDB(config.runtime.memory_dsn)
     block_manager = BlockManager(db)
     block_manager.migrate_legacy_labels()   # 旧 human/persona label 一次性迁移为 profile/assistant（幂等）
     block_manager.purge_removed_blocks()    # 已下线功能的块（历史清单）一次性清除（幂等）

@@ -20,6 +20,7 @@ dependencies = [
     # 若要彻底避开，替代方案与实测代价见 ADR 0008 的「标题与书目」一节。
     "pdf2bib>=1.2",
     "rank_bm25>=0.2.2",
+    "pymysql>=1.1",
     "pymilvus[milvus-lite]>=2.4.2",
     # 图表原图的对象存储客户端（复用依赖栈里的 MinIO；见 rag/storage/image_store.py）
     "minio>=7.2",

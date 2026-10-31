@@ -138,6 +138,9 @@ class RuntimeConfig:
 
     #: 运行时数据根目录，存放 milvus、memory、audit 等（与用户级数据目录 .biopilot/ 同一处）
     workspace: str = ".biopilot"
+    #: 记忆/会话真相源的 MySQL 连接串（Python 侧 blocks/block_history/messages；
+    #: 测试经 BIOPILOT_MEMORY_MYSQL_DSN 覆盖到 biopilot_test 库）
+    memory_dsn: str = "mysql://root@127.0.0.1:3306/biopilot"
 
     #: Agent 插件扫描目录，默认扫描项目根下的 agents/
     agents_dir: str = "agents"

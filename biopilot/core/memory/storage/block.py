@@ -41,7 +41,7 @@ def insert_block(db: MemoryDB, b: Block, version: int = 1) -> None:
         - created_at 和 updated_at 自动取当前 UTC 时间。
     """
     db.execute(
-        "INSERT INTO blocks (id, label, value, \"limit\", description, metadata_,"
+        "INSERT INTO blocks (id, label, value, `limit`, description, metadata_,"
         " read_only, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (b.id, b.label, b.value, b.limit, b.description,
          json.dumps(b.metadata_, ensure_ascii=False), int(b.read_only), version,
@@ -63,21 +63,25 @@ def select_block(db: MemoryDB, block_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def select_block_by_label(db: MemoryDB, label: str) -> dict | None:
+def select_block_by_label(db: MemoryDB, label: str,
+                          for_update: bool = False) -> dict | None:
     """按 label 查块。label 无 UNIQUE 约束，这里取首个命中（调用方负责查重）。
 
     Args:
         db: 数据库连接。
         label: 块的标签名称。
+        for_update: 事务内加行锁（SELECT ... FOR UPDATE），供读-改-写序列锁行；
+            只允许在 transaction() 内使用。
 
     Returns:
         第一个匹配 label 的行 dict，若不存在则返回 None。
 
     边界条件：
-        - 若多个块具有相同 label（非预期情况），本函数只返回第一个（按 rowid 顺序）。
+        - 若多个块具有相同 label（非预期情况），本函数只返回第一个（按插入序 seq）。
           调用方应保证 label 的唯一性。
     """
-    cur = db.execute("SELECT * FROM blocks WHERE label=?", (label,))
+    lock = " FOR UPDATE" if for_update else ""
+    cur = db.execute(f"SELECT * FROM blocks WHERE label=?{lock}", (label,))
     row = cur.fetchone()
     return dict(row) if row else None
 
@@ -168,7 +172,7 @@ def checkpoint_block(db: MemoryDB, block_id: str, label: str, value: str,
         - 也可通过 BlockManager.checkpoint_block 手动调用（此时 version 常为 0）。
     """
     db.execute(
-        "INSERT INTO block_history (block_id, label, value, \"limit\", description,"
+        "INSERT INTO block_history (block_id, label, value, `limit`, description,"
         " metadata_, version, checkpointed_at) VALUES (?,?,?,?,?,?,?,?)",
         (block_id, label, value, limit, description,
          json.dumps(metadata_, ensure_ascii=False), version, _now()))

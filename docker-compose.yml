@@ -74,6 +74,27 @@ services:
       minio:
         condition: service_healthy
 
+  mysql:
+    container_name: biopilot-mysql
+    image: mysql:8.4
+    # 记忆/会话真相源（Python 侧 blocks/block_history/messages 与 server 侧业务表同实例）。
+    # 只绑回环；root 空密码沿用本栈「回环内默认凭证」的既有口径（minio 同）。
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: biopilot
+    volumes:
+      - ./.biopilot/infra/mysql:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 networks:
   default:
     name: milvus

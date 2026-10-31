@@ -7,6 +7,7 @@ JSON 快照，其中 message_ids 记录「当前 in-context 窗口的消息 id �
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from biopilot.core.memory.storage.database import MemoryDB
 from biopilot.core.memory.schemas.agent import AgentState
@@ -47,10 +48,11 @@ class AgentManager:
         self.block_manager = block_manager
         self.message_manager = message_manager
         # 幂等建表：agent_id 为主键，message_ids 存储 JSON
+        # system 是 MySQL 8 保留字，列名一律反引号；agent_id 用 VARCHAR（TEXT 不能作主键）
         db.execute("CREATE TABLE IF NOT EXISTS agent_state ("
-                   "agent_id TEXT PRIMARY KEY, name TEXT, description TEXT,"
-                   "system TEXT, model TEXT, context_window_limit INTEGER,"
-                   "message_ids TEXT, created_at TEXT)")
+                   "agent_id VARCHAR(64) PRIMARY KEY, name TEXT, description TEXT,"
+                   "`system` MEDIUMTEXT, model TEXT, context_window_limit INTEGER,"
+                   "message_ids MEDIUMTEXT, created_at VARCHAR(40))")
         # 老库补列走统一增量迁移表（建表语句只管新库）。
         db._migrate_additive_columns()
 
@@ -82,7 +84,7 @@ class AgentManager:
         )
 
     def create_agent(self, agent_id: str, name: str | None = None) -> AgentState:
-        """创建 agent（INSERT OR REPLACE 幂等），初始 message_ids 为空列表。
+        """创建 agent（REPLACE INTO 幂等，按主键覆盖），初始 message_ids 为空列表。
 
         Args:
             agent_id: 唯一标识符。
@@ -94,9 +96,10 @@ class AgentManager:
         幂等性：若 agent_id 已存在，则覆盖（相当于重置）。
         """
         self.db.execute(
-            "INSERT OR REPLACE INTO agent_state (agent_id, name, message_ids, created_at)"
-            " VALUES (?,?,?, datetime('now'))",
-            (agent_id, name, json.dumps([])))
+            "REPLACE INTO agent_state (agent_id, name, message_ids, created_at)"
+            " VALUES (?,?,?,?)",
+            (agent_id, name, json.dumps([]),
+             datetime.now(timezone.utc).isoformat()))
         return self.get_agent(agent_id)
 
     def get_agent(self, agent_id: str) -> AgentState:
@@ -189,7 +192,7 @@ class AgentManager:
             agent_id = r["agent_id"]
             first_user = self.db.execute(
                 "SELECT content FROM messages WHERE agent_id=? AND role='user'"
-                " ORDER BY created_at, rowid LIMIT 1", (agent_id,)).fetchone()
+                " ORDER BY created_at, seq LIMIT 1", (agent_id,)).fetchone()
             preview = ""
             if first_user is not None and first_user["content"]:
                 preview = str(first_user["content"]).strip().replace("\n", " ")[:60]
