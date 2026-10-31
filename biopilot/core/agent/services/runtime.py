@@ -542,10 +542,39 @@ class Agent:
 
     async def run(self, task: str) -> str:
         """
-        执行 ReAct 循环，返回 LLM 的最终文本回答。
+        执行 ReAct 循环（跨进程会话运行互斥的入口），返回 LLM 的最终文本回答。
 
-        这是 Agent 的唯一公共入口。调用方（CLI、Supervisor 的 SpawnSubAgentTool）
-        只需要传入任务文本，等待返回结果。
+        同一会话（conversation_id）被两路并发触达（网页双开标签、网页与 REPL 同发）
+        时，持 MySQL 命名锁 `run:{conversation_id}` 串行化：拿不到锁的一方按
+        「错误一律降级为文本」红线返回「会话正在运行中」提示，绝不交错执行——
+        两个 run 交错会互相踩掉 in-context 窗口与消息落盘。锁覆盖 run 全生命周期
+        （含压缩与整合 flush）；崩溃时锁随连接自愈。锁机制不可用（无存储/纯 mock）
+        时跳过互斥——并发防护是可用性守卫，不是安全边界。
+
+        调用方（CLI、Supervisor 的 SpawnSubAgentTool）只需要传入任务文本。
+
+        Raises:
+            MaxTurnsExceeded: 超过 max_turns 轮仍未停止
+        """
+        lock_dsn = getattr(getattr(self.block_manager, "db", None), "dsn", None)
+        if not lock_dsn:
+            return await self._run_react(task)
+        from biopilot.core.memory.storage.named_lock import NamedLock
+        lock = NamedLock(lock_dsn)
+        lock_name = f"run:{self.conversation_id}"
+        acquired = await asyncio.to_thread(lock.acquire, lock_name, 0)
+        if not acquired:
+            return ("该会话正在运行中：上一个任务尚未结束，请等它完成后再发送新任务。")
+        try:
+            return await self._run_react(task)
+        finally:
+            await asyncio.to_thread(lock.release, lock_name)
+
+    async def _run_react(self, task: str) -> str:
+        """
+        执行 ReAct 循环本体（由 run() 在会话互斥锁内调用）。
+
+        调用方无需直接使用。
 
         Args:
             task: 用户任务文本（对于 Supervisor 是原始用户输入；对于 SubAgent 是 Supervisor 拆分后的子任务）

@@ -67,6 +67,15 @@ CREATE TABLE IF NOT EXISTS block_history (
     KEY idx_block_history_block (block_id)
 );
 
+-- consolidation_cursor 表：整合消费权游标（跨进程认领，工单 05）
+-- 行存在即「该 agent 已消费到 cursor 条」；行不存在时按 messages 行数初次回填。
+CREATE TABLE IF NOT EXISTS consolidation_cursor (
+    agent_id VARCHAR(64) NOT NULL,      -- 归属 agent（主键，一个整合器一行）
+    `cursor` BIGINT NOT NULL,           -- 已消费的消息数游标
+    updated_at VARCHAR(40) NOT NULL,    -- 最近推进时间
+    PRIMARY KEY (agent_id)
+);
+
 -- messages 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识

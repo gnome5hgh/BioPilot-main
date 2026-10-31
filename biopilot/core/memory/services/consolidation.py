@@ -16,12 +16,14 @@ LLM 输出不可信，指令先过全量预验证（一条不过则整批不写�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from biopilot.core.memory.common.errors import (
     BlockLimitExceeded, MemoryEditTargetNotFound, MemoryEditValidationError)
+from biopilot.core.memory.storage.named_lock import NamedLock
 from biopilot.core.memory.domain.dto.memory_edit import MemoryEdit
 from biopilot.core.memory.domain.dto.memory_edit_batch import MemoryEditBatch
 
@@ -133,9 +135,10 @@ def _edit_key(edit: MemoryEdit) -> tuple:
 class MemoryConsolidator:
     """记忆整合器：把每轮对话沉淀进记忆块。
 
-    触发是每轮一次（REPL 在本轮收尾调用）；进度由游标跟踪——游标值基于 messages
-    表行数推导（不从内存计数器恢复），因此进程重启后从正确位置自愈：不重复整合
-    已处理的消息、也不遗漏新增的消息。
+    触发是每轮一次（REPL 在本轮收尾调用）；进度由游标跟踪——游标落库
+    （consolidation_cursor 表），跨进程认领取 MySQL 命名锁：同一会话被 web 进程
+    与 REPL 进程同时触达时，只有持锁者消费（防双消费），对端本轮放弃。游标行
+    不存在时按 messages 行数初次回填（进程重启/首启自愈）。
 
     Attributes:
         agent_state: AgentState，提供 agent_id 供查询消息与推导游标
@@ -145,7 +148,7 @@ class MemoryConsolidator:
         enable: bool，总开关
         _running: bool，本次整合是否在执行中（防并发重叠）
         _failures: int，连续失败计数（达阈值强制推进游标，防死循环）
-        _cursor: int，已处理到的消息数游标（由 messages 表行数推导，进程重启可自愈）
+        _cursor: int，已处理到的消息数游标（工作副本；落库于 consolidation_cursor 表）
     """
 
     def __init__(self, agent_state, block_manager, message_manager,
@@ -170,9 +173,35 @@ class MemoryConsolidator:
         self.enable = enable
         self._running = False
         self._failures = 0
-        #: 已处理到的消息数量游标（基于 messages 表行数，从 DB 推导）
-        #: 语义是“下次从游标处开始整合”
-        self._cursor = self.message_manager.size(agent_state.agent_id) if message_manager else 0
+        #: 已处理到的消息数量游标（工作副本；真身落 consolidation_cursor 表，
+        #: consolidate() 入口在持锁状态下从 DB 水合——跨进程游标不靠内存）
+        self._cursor = 0
+        # 跨进程消费锁的连接串：取块管理器背后的 MemoryDB；缺失（纯 mock）时
+        # 退化为仅进程内互斥
+        self._lock_dsn = getattr(getattr(block_manager, "db", None), "dsn", None)
+
+    def _hydrate_cursor(self) -> None:
+        """持锁状态下从 DB 水合游标；行不存在按当前消息数初次回填（自愈语义）。"""
+        row = self.block_manager.db.execute(
+            "SELECT `cursor` FROM consolidation_cursor WHERE agent_id=?",
+            (self.agent_state.agent_id,)).fetchone()
+        if row is not None:
+            self._cursor = int(row["cursor"])
+            return
+        self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
+
+    def _save_cursor(self, value: int) -> None:
+        """推进游标并落库（属性与表同步更新；REPLACE 幂等）。
+
+        Args:
+            value: 新的游标值（该 agent 已消费的消息数）。
+        """
+        self._cursor = value
+        self.block_manager.db.execute(
+            "REPLACE INTO consolidation_cursor (agent_id, `cursor`, updated_at)"
+            " VALUES (?,?,?)",
+            (self.agent_state.agent_id, value,
+             datetime.now(timezone.utc).isoformat()))
 
     async def consolidate(self) -> None:
         """本轮收尾调用一次：有新消息就整合，没有就直接返回。
@@ -182,14 +211,27 @@ class MemoryConsolidator:
         """
         if not self.enable or self._running:
             return
-        size = self.message_manager.size(self.agent_state.agent_id)
-        if size <= self._cursor:
-            return                      # 本轮没有新增消息：不调 LLM
+        # 跨进程消费权：命名锁拿不到说明另一进程正在整合同一会话——本轮放弃
+        # （对端会推进游标；若对端崩溃，锁随连接自愈，游标行未推进 → 下轮重消费）。
+        lock = None
+        if self._lock_dsn:
+            lock = NamedLock(self._lock_dsn)
+            acquired = await asyncio.to_thread(
+                lock.acquire, f"consolidation:{self.agent_state.agent_id}", 0)
+            if not acquired:
+                return
         self._running = True
         try:
+            self._hydrate_cursor()
+            size = self.message_manager.size(self.agent_state.agent_id)
+            if size <= self._cursor:
+                return                  # 本轮没有新增消息：不调 LLM
             await self._run_once()
         finally:
             self._running = False
+            if lock is not None:
+                await asyncio.to_thread(
+                    lock.release, f"consolidation:{self.agent_state.agent_id}")
 
     async def _run_once(self) -> None:
         """读取新消息 → LLM 编辑指令 → 全量预验证 → 逐条应用 → 结算 → 推进游标。
@@ -215,7 +257,7 @@ class MemoryConsolidator:
         # 需校准游标，避免下次重复计算空区间。
         new_msgs = new_msgs[self._cursor:]
         if not new_msgs:
-            self._cursor = self.message_manager.size(self.agent_state.agent_id)
+            self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
             return
 
         prompt, refs = self._build_prompt(new_msgs)
@@ -258,8 +300,8 @@ class MemoryConsolidator:
             self._record_failure(f"整合未落地任何编辑: {'；'.join(reasons)}")
             return
 
-        # 推进游标到当前总行数，并重置失败计数
-        self._cursor = self.message_manager.size(self.agent_state.agent_id)
+        # 推进游标到当前总行数（落库），并重置失败计数
+        self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
         self._failures = 0
 
     async def _extract_batch(self, prompt: str) -> MemoryEditBatch:
@@ -298,7 +340,7 @@ class MemoryConsolidator:
             # 计数归零：放弃的这一批到此为止，下一批内容应当重新获得完整的重试额度。
             logger.warning("整合连续失败 %d 次，跳过这批消息推进游标",
                            self._failures)
-            self._cursor = self.message_manager.size(self.agent_state.agent_id)
+            self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
             self._failures = 0
 
     def _existing_memory(self) -> list:
