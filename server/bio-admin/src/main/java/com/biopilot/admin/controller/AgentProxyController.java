@@ -11,6 +11,8 @@ import java.time.Duration;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -43,6 +45,61 @@ public class AgentProxyController {
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
+    /** 商店/技能读接口透传（Python 侧读 agents/skills 真数据）。 */
+    @GetMapping("/store/experts")
+    public ResponseEntity<String> storeExperts() {
+        return proxyGet("/store/experts");
+    }
+
+    @GetMapping("/store/skills")
+    public ResponseEntity<String> storeSkills() {
+        return proxyGet("/store/skills");
+    }
+
+    /** 技能启停（管理动作）：透传切换请求。 */
+    @PostMapping("/store/skills/{name}/toggle")
+    public ResponseEntity<String> skillToggle(@PathVariable String name,
+                                              @RequestBody String body) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + "/store/skills/" + name + "/toggle"))
+                .header("Content-Type", "application/json")
+                .header("X-User-Id", String.valueOf(userId))
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
+    private ResponseEntity<String> proxyGet(String path) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + path))
+                .header("X-User-Id", String.valueOf(userId))
+                .GET()
                 .build();
         try {
             HttpResponse<String> resp = client.send(upstream,

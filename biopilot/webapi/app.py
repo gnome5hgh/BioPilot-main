@@ -188,6 +188,46 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                             "tools_count": len(c.tools)})
         return {"experts": experts}
 
+    @app.post("/store/skills/{name}/toggle")
+    async def skill_toggle(
+        name: str, body: dict, x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """技能启用/禁用：写 skills.lock.json（原子写+文件锁，fail-closed 校验）。
+
+        ADMIN 专属（管理动作）；enabled=false 时 registry 扫描期跳过该技能。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        enabled = bool((body or {}).get("enabled", True))
+
+        pf_dir = Path.cwd() / ".biopilot"
+        lock_path = pf_dir / "skills.lock.json"
+        # 原子写：临时文件 + os.replace（并发写不撕裂）
+        import fcntl
+        import os as _os
+        import tempfile
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fp = open(lock_path, "a+")
+        try:
+            fcntl.flock(lock_fp, fcntl.LOCK_EX)
+            import json as _json
+            lock = _json.loads(lock_fp.read_text()) if lock_path.stat().st_size > 0 else {}
+            entry = lock.get(name, {})
+            entry["enabled"] = enabled
+            if "version" not in entry:
+                entry["version"] = "0.0.0"
+            lock[name] = entry
+            fd, tmp = tempfile.mkstemp(dir=str(lock_path.parent))
+            with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                _json.dump(lock, f, ensure_ascii=False, indent=2)
+            _os.replace(tmp, lock_path)
+        finally:
+            fcntl.flock(lock_fp, fcntl.LOCK_UN)
+            lock_fp.close()
+        return {"status": "ok", "name": name, "enabled": enabled}
+
     @app.get("/store/skills")
     async def store_skills(x_user_id: str | None = Header(default=None)) -> dict:
         """技能列表：.biopilot/skills 真数据（名称/版本/描述/启用态）。"""
