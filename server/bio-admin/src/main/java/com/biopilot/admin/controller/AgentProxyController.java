@@ -33,8 +33,11 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 @RequestMapping("/agent")
 public class AgentProxyController {
 
-    /** 适配层地址：只允许回环/内网（与适配层监听约束同侧）。 */
-    private static final String ADAPTER_BASE = "http://127.0.0.1:8300";
+    /** 适配层地址：只允许回环/内网（与适配层监听约束同侧）。
+        容器部署经 biopilot.adapter-base 指向 compose 服务名（env 可覆盖）。 */
+    @org.springframework.beans.factory.annotation.Value(
+            "${biopilot.adapter-base:http://127.0.0.1:8300}")
+    private String adapterBase;
 
     private final com.biopilot.system.service.SysUserService sysUserService;
 
@@ -54,7 +57,7 @@ public class AgentProxyController {
     public ResponseEntity<String> chatConfirm(@RequestBody String body) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/chat/confirm"))
+                .uri(URI.create(adapterBase + "/chat/confirm"))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -102,7 +105,7 @@ public class AgentProxyController {
     private ResponseEntity<String> proxyPost(String path, String body) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + path))
+                .uri(URI.create(adapterBase + path))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
@@ -123,7 +126,7 @@ public class AgentProxyController {
     private ResponseEntity<String> proxyPut(String path, String body) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + path))
+                .uri(URI.create(adapterBase + path))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .PUT(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
@@ -164,7 +167,7 @@ public class AgentProxyController {
     public ResponseEntity<String> chatSessionDelete(@RequestParam String conversationId) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/chat/session?conversation_id="
+                .uri(URI.create(adapterBase + "/chat/session?conversation_id="
                         + java.net.URLEncoder.encode(conversationId, java.nio.charset.StandardCharsets.UTF_8)))
                 .header("X-User-Id", String.valueOf(userId))
                 .DELETE()
@@ -283,7 +286,7 @@ public class AgentProxyController {
                     .body("{\"code\":502,\"msg\":\"读取上传内容失败\"}");
         }
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/papers/upload"))
+                .uri(URI.create(adapterBase + "/papers/upload"))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
@@ -307,7 +310,7 @@ public class AgentProxyController {
                                                  @RequestBody String body) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/papers/" + paperId))
+                .uri(URI.create(adapterBase + "/papers/" + paperId))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -330,7 +333,7 @@ public class AgentProxyController {
     public ResponseEntity<String> papersDelete(@PathVariable String paperId) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/papers/" + paperId))
+                .uri(URI.create(adapterBase + "/papers/" + paperId))
                 .header("X-User-Id", String.valueOf(userId))
                 .DELETE()
                 .build();
@@ -360,7 +363,7 @@ public class AgentProxyController {
                                               @RequestBody String body) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/store/skills/" + name + "/toggle"))
+                .uri(URI.create(adapterBase + "/store/skills/" + name + "/toggle"))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
@@ -381,7 +384,7 @@ public class AgentProxyController {
     private ResponseEntity<String> proxyGet(String path) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + path))
+                .uri(URI.create(adapterBase + path))
                 .header("X-User-Id", String.valueOf(userId))
                 .GET()
                 .build();
@@ -405,7 +408,7 @@ public class AgentProxyController {
         String conversationId = request.getHeader("X-Conversation-Id");
 
         HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(ADAPTER_BASE + "/chat/stream"))
+                .uri(URI.create(adapterBase + "/chat/stream"))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .header("X-Conversation-Id", conversationId == null ? "" : conversationId)

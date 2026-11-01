@@ -160,6 +160,9 @@ conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 e
 # Web 平台一键启动（容器 + 适配层 + SpringBoot + 前端，含就绪探测与日志跟随）
 ./start.sh        # 停止：./stop.sh（容器与数据保留）；前端 http://localhost:5173
 
+# 部署形态（实验室服务器）：容器化整套平台（nginx:80 + server + webapi）
+docker compose --profile full up -d --build   # 只起基建则省略 --profile full
+
 # 服务端测试（bio-admin）
 cd server && mvn test -pl bio-admin
 ```

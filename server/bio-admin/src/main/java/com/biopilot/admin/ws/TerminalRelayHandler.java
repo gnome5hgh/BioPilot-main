@@ -25,13 +25,19 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 public class TerminalRelayHandler extends TextWebSocketHandler {
 
     private static final Logger log = LoggerFactory.getLogger(TerminalRelayHandler.class);
-    /** 适配层终端端点：只允许回环/内网（与适配层监听约束同侧）。 */
-    private static final URI ADAPTER_WS =
-            URI.create("ws://127.0.0.1:8300/ws/terminal");
+    /** 适配层终端端点：只允许回环/内网（与适配层监听约束同侧）。
+        容器部署经 biopilot.adapter-base 派生（env 可覆盖）。 */
+    @org.springframework.beans.factory.annotation.Value(
+            "${biopilot.adapter-base:http://127.0.0.1:8300}")
+    private String adapterBase;
 
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
+
+    private URI adapterWs() {
+        return URI.create(adapterBase.replaceFirst("^http", "ws") + "/ws/terminal");
+    }
     private final ConcurrentHashMap<WebSocketSession, WebSocket> upstreams =
             new ConcurrentHashMap<>();
 
@@ -71,7 +77,7 @@ public class TerminalRelayHandler extends TextWebSocketHandler {
         WebSocket upstream = client.newWebSocketBuilder()
                 .header("X-User-Id", userId)
                 .connectTimeout(Duration.ofSeconds(5))
-                .buildAsync(ADAPTER_WS, listener)
+                .buildAsync(adapterWs(), listener)
                 .join();
         upstreams.put(session, upstream);
     }

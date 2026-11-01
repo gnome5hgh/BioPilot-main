@@ -98,6 +98,48 @@ services:
       retries: 10
       start_period: 30s
 
+  # ---- 平台三件套（部署形态：--profile full 拉起；dev 只起基建） ----
+  webapi:
+    build: { context: ., dockerfile: docker/webapi.Dockerfile }
+    container_name: biopilot-webapi
+    profiles: ["full"]
+    # 信任边界：适配层只监听容器内网（不映射宿主端口），SpringBoot 内网调用
+    # 携带的 X-User-Id 即真相。Milvus/MinIO 主机名按 compose 服务名覆盖。
+    environment:
+      BIOPILOT_WEB_HOST: 0.0.0.0
+      BIOPILOT_MEMORY_MYSQL_DSN: mysql://root@mysql:3306/biopilot
+      BIOPILOT_RAG_STORAGE_URI: http://standalone:19530
+      BIOPILOT_RAG_STORAGE_MINIO_ENDPOINT: minio:9000
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.biopilot:/app/.biopilot
+      - ./agents:/app/agents:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      standalone:
+        condition: service_healthy
+
+  server:
+    build: { context: ., dockerfile: docker/server.Dockerfile }
+    container_name: biopilot-server
+    profiles: ["full"]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/biopilot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+      BIOPILOT_ADAPTERBASE: http://webapi:8300
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  web:
+    build: { context: ., dockerfile: docker/web.Dockerfile }
+    container_name: biopilot-web
+    profiles: ["full"]
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
 networks:
   default:
     name: milvus
