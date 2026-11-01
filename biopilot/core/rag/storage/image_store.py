@@ -49,6 +49,19 @@ class ImageStore(Protocol):
         """
         ...
 
+    def put_file(self, key: str, data: bytes, content_type: str) -> bool:
+        """存入一个任意类型的对象（论文 PDF 等非图片产物共用这个桶）。
+
+        Args:
+            key: 对象键。
+            data: 文件字节。
+            content_type: MIME 类型。
+
+        Returns:
+            bool: 是否存入成功。
+        """
+        ...
+
     def get(self, key: str) -> bytes | None:
         """按键取回一张图。
 
@@ -85,6 +98,10 @@ class NullImageStore:
 
     def put(self, key: str, data: bytes) -> bool:
         """什么都不做（开关关掉 = 明确不存图，不是失败）。"""
+        return False
+
+    def put_file(self, key: str, data: bytes, content_type: str) -> bool:
+        """空实现同样不存任何对象。"""
         return False
 
     def get(self, key: str) -> bytes | None:
@@ -169,6 +186,10 @@ class MinioImageStore:
         Returns:
             bool: 是否存入成功（失败只告警）。
         """
+        return self.put_file(key, data, _CONTENT_TYPE)
+
+    def put_file(self, key: str, data: bytes, content_type: str) -> bool:
+        """把一个对象存进 bucket（类型由调用方给定，论文上传与图片共用）。"""
         if not data:
             return False
         client = self._ensure_client()
@@ -176,10 +197,10 @@ class MinioImageStore:
             return False
         try:
             client.put_object(self._config.bucket, key, io.BytesIO(data),
-                              length=len(data), content_type=_CONTENT_TYPE)
+                              length=len(data), content_type=content_type)
             return True
         except Exception as e:
-            logger.warning("图表原图入库失败（%s）：%s", key, e)
+            logger.warning("对象入库失败（%s）：%s", key, e)
             return False
 
     def get(self, key: str) -> bytes | None:

@@ -2,6 +2,8 @@
 # 启动: docker compose up -d   验证: curl http://localhost:9091/healthz → OK
 # 数据卷统一收进 ./.biopilot/（运行时数据根，gitignore 已盖）：Milvus 走 ./.biopilot/infra/milvus/。
 # minio 除服务 milvus 外，还供 BioPilot 存图表原图（独立 bucket），故对宿主回环暴露 9000。
+# 显式项目名：否则取目录名（改名/克隆后 compose 项目会漂，容器归属与 down/up 对不上）。
+name: biopilot
 services:
   etcd:
     container_name: milvus-etcd

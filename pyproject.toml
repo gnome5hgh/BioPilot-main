@@ -22,6 +22,8 @@ dependencies = [
     "rank_bm25>=0.2.2",
     "pymysql>=1.1",
     "fastapi>=0.115",
+    # multipart 解析：论文上传端点的必需要求
+    "python-multipart>=0.0.20",
     "uvicorn>=0.30",
     "pymilvus[milvus-lite]>=2.4.2",
     # 图表原图的对象存储客户端（复用依赖栈里的 MinIO；见 rag/storage/image_store.py）

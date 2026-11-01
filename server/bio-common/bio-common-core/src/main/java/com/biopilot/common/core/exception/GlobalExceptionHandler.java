@@ -6,6 +6,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /** 全局异常兜底：业务异常转 R.fail，未知异常转通用失败文案（不泄内部细节）。 */
@@ -28,6 +29,12 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
     public R<Void> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
         return R.fail("请求方法不支持: " + e.getMessage());
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+    public R<Void> handleUploadTooLarge(MaxUploadSizeExceededException e) {
+        return R.fail("文件超过上传大小上限");
     }
 
     @ExceptionHandler(Exception.class)

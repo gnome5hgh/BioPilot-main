@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS papers (
     KEY idx_papers_user (user_id)
 );
 
--- documents 表：文档编辑器产物（markdown 存 OSS，内容在行内 TEXT 工单 19）
+-- documents 表：文档编辑器产物（markdown 存 OSS，内容在行内 TEXT）
 CREATE TABLE IF NOT EXISTS documents (
     id VARCHAR(64) NOT NULL,
     user_id VARCHAR(191) NOT NULL,

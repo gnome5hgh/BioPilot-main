@@ -1,7 +1,7 @@
 """用户论文目录的 HTTP 侧数据访问（供 SpringBoot 代理调用的 Python 内部 API）。
 
 论文原文存 MinIO（users/<uid>/papers/ 前缀），元数据行在 papers 表；RAG 索引
-从这些元数据行拉取（工单 17 的输入）。
+从这些元数据行拉取。
 """
 from __future__ import annotations
 

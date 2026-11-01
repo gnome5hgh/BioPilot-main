@@ -17,7 +17,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 /** Agent 对话代理：把登录用户的 SSE 请求转发到内网 Python 适配层。
@@ -33,7 +35,10 @@ public class AgentProxyController {
     /** 适配层地址：只允许回环/内网（与适配层监听约束同侧）。 */
     private static final String ADAPTER_BASE = "http://127.0.0.1:8300";
 
+    // 锁死 HTTP/1.1：默认的 h2c 升级头（Upgrade/HTTP2-Settings）会让 uvicorn 按协议
+    // 升级处理并吞掉请求体，所有带 body 的转发（对话/上传）都会变成空体
     private final HttpClient client = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
@@ -83,7 +88,7 @@ public class AgentProxyController {
 
     /** 文献搜索（PubMed 直查透传）。 */
     @GetMapping("/literature/search")
-    public ResponseEntity<String> literatureSearch(@org.springframework.web.bind.annotation.RequestParam String q) {
+    public ResponseEntity<String> literatureSearch(@RequestParam String q) {
         return proxyGet("/literature/search?q=" + java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8));
     }
 
@@ -135,6 +140,55 @@ public class AgentProxyController {
     @GetMapping("/papers")
     public ResponseEntity<String> papersList() {
         return proxyGet("/papers");
+    }
+
+    /** 论文上传（multipart 透传）：文件字节原样重组转发到适配层，归属头照传。 */
+    @PostMapping(value = "/papers/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<String> papersUpload(@RequestParam("file") MultipartFile file) {
+        long userId = StpUtil.getLoginIdAsLong();
+        String boundary = "----biopilot" + java.util.UUID.randomUUID();
+        // 文件名进 multipart 头：去引号与换行防头注入；中文等非 ASCII 原样走 UTF-8 字节
+        String original = file.getOriginalFilename() == null ? "paper.pdf"
+                : file.getOriginalFilename().replace("\"", "")
+                      .replace("\r", "").replace("\n", "");
+        String contentType = file.getContentType() == null
+                ? "application/pdf" : file.getContentType();
+        byte[] body;
+        try {
+            byte[] head = ("--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"file\"; filename=\""
+                    + original + "\"\r\n"
+                    + "Content-Type: " + contentType + "\r\n\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] fileBytes = file.getBytes();
+            byte[] tail = ("\r\n--" + boundary + "--\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            body = new byte[head.length + fileBytes.length + tail.length];
+            System.arraycopy(head, 0, body, 0, head.length);
+            System.arraycopy(fileBytes, 0, body, head.length, fileBytes.length);
+            System.arraycopy(tail, 0, body, head.length + fileBytes.length, tail.length);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"读取上传内容失败\"}");
+        }
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + "/papers/upload"))
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .header("X-User-Id", String.valueOf(userId))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
     }
 
     /** 论文登记（元数据落库，原文由上传方先行落 OSS）。 */

@@ -7,6 +7,11 @@ spring:
     username: root
     password: ""
     driver-class-name: com.mysql.cj.jdbc.Driver
+  # 论文 multipart 上传：默认 1MB 会把正常 PDF 全拒掉，上限与适配层侧 200MB 对齐
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 210MB
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

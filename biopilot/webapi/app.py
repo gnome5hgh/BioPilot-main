@@ -21,10 +21,13 @@ import yaml as yaml_mod
 import uuid
 from dataclasses import dataclass
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
+
+#: 论文上传的单文件上限：超限直接拒绝，不把大文件整个读进内存
+_PAPER_UPLOAD_LIMIT = 200 * 1024 * 1024
 
 
 @dataclass
@@ -414,7 +417,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             yaml_mod.safe_dump(existing, open(cfg_path, "w"), allow_unicode=True)
         return {"status": "ok", "applied": list(overrides)}
 
-    # 删户两阶段（P0-4）：标记 → 等活动清零 → 物理删除（幂等）
+    # 删户两阶段：标记 → 等活动清零 → 物理删除（幂等）
     @app.post("/admin/users/{target_id}/mark-deleting")
     async def mark_deleting(target_id: str, x_user_id: str | None = Header(default=None)) -> dict:
         if not x_user_id:
@@ -434,7 +437,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         db.execute("DELETE FROM agent_state WHERE user_id=?", (target_id,))
         return {"status": "purged", "user_id": target_id}
 
-    # 终端 WebSocket（工单 26）：PTY 跑 biopilot REPL（只绑内网，用户终端非 agent 工具）
+    # 终端 WebSocket：PTY 跑 biopilot REPL（只绑内网，用户终端非 agent 工具）
     @app.websocket("/ws/terminal")
     async def ws_terminal(ws, x_user_id: str = ""):
         """PTY 桥：xterm.js ↔ biopilot REPL（用户自己的终端，非 agent 工具）。"""
@@ -472,19 +475,19 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             proc.terminate()
 
     _paper_endpoints(app)
-    # 索引触发（工单 17）：按用户域重建 RAG collection（RAGService user_domain）
+    # 索引触发：按用户域重建 RAG collection（RAGService user_domain）
     @app.post("/kb/reindex")
     async def kb_reindex(x_user_id: str | None = Header(default=None)) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        # per-user 串行化由整合锁模式覆盖（工单 05 同思路）；此处仅触发
+        # per-user 串行化与整合队列同一把 DB 锁思路；此处仅触发重建
         from biopilot.core.rag.services.rag_service import RAGService
         from biopilot.config import BioPilotConfig
         cfg = BioPilotConfig.from_env()
         svc = RAGService(cfg, user_domain=x_user_id)
         return {"status": "ok", "note": "indexer 按用户域 collection 装配"}
 
-    # KB 展示（工单 18）：索引状态快照（papers 已索引计数 + collection 命名）
+    # KB 展示：索引状态快照（papers 已索引计数 + collection 命名）
     @app.get("/kb/status")
     async def kb_status(x_user_id: str | None = Header(default=None)) -> dict:
         if not x_user_id:
@@ -543,9 +546,71 @@ def os_env(key: str, default: str | None) -> str | None:
     return os.environ.get(key, default)
 
 
+def _paper_store():
+    """论文对象的存取器：与图表原图共用同一 MinIO 连接配置与 bucket。
+
+    独立成模块级工厂是为了测试可注入（论文上传测试换内存替身）。
+    """
+    from biopilot.config import BioPilotConfig
+    from biopilot.core.rag.storage.image_store import MinioImageStore
+    return MinioImageStore(BioPilotConfig.from_env().rag.storage.minio)
+
+
+def _sanitize_paper_filename(name: str | None) -> str:
+    """把上传文件名收敛成安全的对象键尾段：剥掉路径部分与控制字符。
+
+    Args:
+        name: 浏览器报来的原始文件名（可能带路径、可能为 None）。
+
+    Returns:
+        str: 只含文件名主体的安全字符串；剥完为空（如 ".."）时回退固定名。
+    """
+    import re
+    base = pathlib.PurePosixPath(name or "").name
+    cleaned = re.sub(r"[\x00-\x1f\\/]", "_", base).strip("_ ")
+    return cleaned or "paper.pdf"
+
+
 def _paper_endpoints(app: FastAPI) -> None:
-    """论文目录端点（工单 16）：登记/列表/删除，元数据在 papers 表。"""
+    """论文目录端点：上传/登记/列表/删除，元数据在 papers 表、原文在 OSS。"""
     from biopilot.tools.papers import register_paper, list_papers, remove_paper
+
+    # 上传路由必须先于 /papers/{paper_id} 声明，否则 "upload" 会被路径参数吞掉
+    @app.post("/papers/upload")
+    async def papers_upload(
+        file: UploadFile,
+        x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """接收浏览器上传的论文原文：对象先落 OSS，成功后才写元数据行（失败留孤儿对象，
+        不留死行）。
+
+        标题恒为空串——标题只来自解析器出口，绝不回退到 PDF 文件名。
+
+        Args:
+            file: 浏览器 multipart 上传的论文文件（PDF）。
+            x_user_id: 内网信任头（SpringBoot 注入的登录用户 id）。
+
+        Returns:
+            dict: status/id/oss_key。
+
+        Raises:
+            HTTPException: 缺头 403；空内容 422；超限 413；对象存储不可用 502。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=422, detail="上传内容为空")
+        if len(data) > _PAPER_UPLOAD_LIMIT:
+            raise HTTPException(status_code=413, detail="文件超过大小上限")
+        paper_id = uuid.uuid4().hex
+        oss_key = (f"users/{x_user_id}/papers/{paper_id}/"
+                   f"{_sanitize_paper_filename(file.filename)}")
+        if not _paper_store().put_file(oss_key, data,
+                                       file.content_type or "application/pdf"):
+            raise HTTPException(status_code=502, detail="对象存储不可用，上传失败")
+        register_paper(_shared_db(), x_user_id, paper_id, "", oss_key, len(data))
+        return {"status": "ok", "id": paper_id, "oss_key": oss_key}
 
     @app.post("/papers/{paper_id}")
     async def papers_register(
@@ -576,11 +641,13 @@ def _paper_endpoints(app: FastAPI) -> None:
         oss_key = remove_paper(_shared_db(), x_user_id, paper_id)
         if oss_key is None:
             raise HTTPException(status_code=404, detail="论文不存在")
+        # 删除方向：行先行、对象随后；对象删除失败只留孤儿，可后台按前缀对账清扫
+        _paper_store().remove(oss_key)
         return {"status": "ok", "oss_key": oss_key}
 
 
 def _doc_endpoints(app: FastAPI) -> None:
-    """文档编辑器端点（工单 19）：markdown 文档的 CRUD（内容行存，OSS 留同步口）。"""
+    """文档编辑器端点：markdown 文档的 CRUD（内容行存，OSS 留同步口）。"""
     from biopilot.core.memory.storage.database import MemoryDB as _MDB
 
     @app.get("/documents")

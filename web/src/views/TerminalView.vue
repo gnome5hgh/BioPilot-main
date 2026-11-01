@@ -1,12 +1,12 @@
 <template>
   <div class="term">
-    <div class="note">终端视图：连接本地 PTY 跑 biopilot REPL（WebSocket 端点在适配层，工单 26）。</div>
+    <div class="note">终端视图：连接本地 PTY 跑 biopilot REPL（WebSocket 端点在适配层）。</div>
     <div class="term-body" ref="termBox"></div>
   </div>
 </template>
 
 <script setup>
-// xterm.js + WebSocket 桥接在工单 26 接入；当前为视图占位
+// xterm.js + WebSocket 桥接待接；当前为视图占位
 const termBox = ref(null)
 </script>
 
