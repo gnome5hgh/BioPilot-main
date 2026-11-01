@@ -88,11 +88,19 @@
                  accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
                  @change="uploadFiles" />
           <button class="attach-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
+          <button class="attach-btn" title="引用论文目录中的论文" @click="togglePaperPick">📄</button>
+          <select v-if="paperPickOpen" class="model-select" @change="pickPaper($event)">
+            <option value="" disabled selected>选择论文…</option>
+            <option v-for="p in papers" :key="p.id" :value="p.id">
+              {{ p.name || p.id.slice(0, 8) }}{{ p.indexed ? '（已索引）' : '' }}
+            </option>
+          </select>
           <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
             <option v-for="m in models" :key="m.name" :value="m.name">{{ m.name }}</option>
           </select>
           <span class="hint">Enter 发送 · Shift+Enter 换行 · 产物经安全确认后落库</span>
-          <button class="send" :disabled="busy" @click="send">{{ busy ? '…' : '发送' }}</button>
+          <button class="send" :class="{ stop: busy }" @click="busy ? stopStreaming() : send()"
+                  :title="busy ? '中断回答' : '发送'">{{ busy ? '■' : '↑' }}</button>
         </div>
       </div>
     </section>
@@ -396,6 +404,12 @@ function scrollBottom() {
   if (msgsBox.value) msgsBox.value.scrollTop = msgsBox.value.scrollHeight
 }
 
+let abortController = null
+
+function stopStreaming() {
+  if (abortController) abortController.abort()
+}
+
 async function send() {
   if (!input.value.trim() || busy.value) return
   const task = input.value
@@ -406,6 +420,7 @@ async function send() {
   activity.value = []
   busy.value = true
   await nextTick(); scrollBottom()
+  abortController = new AbortController()
   try {
     const resp = await fetch('/api/agent/chat/stream', {
       method: 'POST',
@@ -418,6 +433,7 @@ async function send() {
         task, conversation_id: conversationId, project_id: currentProject.value,
         attachments: attachments.value,
       }),
+      signal: abortController.signal,
     })
     if (resp.status === 401) {
       // 登录态失效（服务重启/过期）：跳登录页重新拿 token
@@ -468,8 +484,13 @@ async function send() {
       }
     }
   } catch (e) {
-    // 已流式输出的内容保留（断网丢掉全部回答不可接受），只追加中断原因
-    reply.text = reply.text ? `${reply.text}\n\n[连接中断：${e.message}]` : `对话失败：${e.message}`
+    if (e.name === 'AbortError') {
+      // 用户点停止：保留已流式输出的内容，追加中断标记
+      reply.text = reply.text ? `${reply.text}\n\n[已中断]` : '[已中断]'
+    } else {
+      // 已流式输出的内容保留（断网丢掉全部回答不可接受），只追加中断原因
+      reply.text = reply.text ? `${reply.text}\n\n[连接中断：${e.message}]` : `对话失败：${e.message}`
+    }
   } finally {
     busy.value = false
     attachments.value = []   // 已随消息下行
@@ -555,7 +576,8 @@ async function answerConfirm(approved) {
 .composer textarea { width: 100%; min-height: 56px; max-height: 160px; border: 1px solid #e6e9ed; border-radius: 12px; padding: 10px 12px; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; }
 .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
 .hint { font-size: 12px; color: #a6adbd; }
-.send { background: #2ec5b1; color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; flex: none; }
+.send { background: #2ec5b1; color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; flex: none; font-size: 16px; line-height: 1; }
+.send.stop { background: #e5484d; }
 .send:disabled { opacity: .6; cursor: default; }
 .model-select { border: 1px solid #e6e9ed; border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #4a5160; background: #fff; }
 .attach-btn { border: 1px solid #e6e9ed; background: #fff; border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 16px; color: #4a5160; flex: none; }

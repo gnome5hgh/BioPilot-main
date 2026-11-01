@@ -267,32 +267,21 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=413, detail="文件超过大小上限")
         file_id = uuid.uuid4().hex
         name = pathlib.PurePosixPath(file.filename or "data.bin").name or "data.bin"
-        from biopilot.tools.papers import register_paper
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         db = _shared_db()
-        is_pdf = name.lower().endswith(".pdf")
-        if is_pdf:
-            # 论文走论文目录通道：OSS papers 前缀 + papers 行 + 自动索引
-            #（RAG 全局可检索）；uploaded_file 行让本条消息也引用它
-            paper_id = uuid.uuid4().hex
-            oss_key = (f"users/{x_user_id}/papers/{paper_id}/"
-                       f"{_sanitize_paper_filename(name)}")
-            _paper_store().put_file(oss_key, data, "application/pdf")
-            register_paper(db, x_user_id, paper_id, "", oss_key, len(data))
-            _schedule_user_index(x_user_id)
-        else:
-            oss_key = _user_files().put(
-                x_user_id, f"uploads/{file_id}/{name}", data,
-                file.content_type or "application/octet-stream")
+        # 对话上传的 PDF 只是会话附件：不入论文目录、不触发索引——要进知识库
+        # 请走论文目录页上传。全部文件统一 OSS uploads 前缀 + 元数据行。
+        oss_key = _user_files().put(
+            x_user_id, f"uploads/{file_id}/{name}", data,
+            file.content_type or "application/octet-stream")
         db.execute(
             "INSERT INTO uploaded_file (id, user_id, name, oss_key, size_bytes,"
             " content_type, created_at) VALUES (?,?,?,?,?,?,?)",
             (file_id, x_user_id, name, oss_key, len(data),
              file.content_type or "", now))
         return {"file_id": file_id, "name": name, "size": len(data),
-                "content_type": file.content_type or "",
-                "paper_id": paper_id if is_pdf else None}
+                "content_type": file.content_type or ""}
 
     @app.get("/files")
     async def files_list(x_user_id: str | None = Header(default=None)) -> dict:
