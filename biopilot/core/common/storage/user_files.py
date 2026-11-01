@@ -72,6 +72,7 @@ class UserFileStore:
                 return None
 
     def _local_path(self, key: str) -> Path:
+        """本地回退根 + 对象键拼成本地路径。"""
         return self._local_root / key
 
     def put(self, user_id: str, rel_path: str, data: bytes,

@@ -618,11 +618,12 @@ class Agent:
         if self.intent_service is not None:
             intent_text = (self.intent_service.rules_block or "")
         parts["intent"] = estimate_text_tokens(intent_text)
-        parts["tools_schema"] = len(json.dumps(self._tool_schemas, ensure_ascii=False))
+        parts["tools_schema"] = estimate_text_tokens(
+            json.dumps(self._tool_schemas, ensure_ascii=False))
         parts["messages"] = estimate_tokens(self.window.messages)
         total = sum(parts.values())
         limit = (self.compaction.context_size if self.compaction
-                 and self.compaction.context_size else 1000000)
+                 and self.compaction.context_size else self.llm.context_window)
         return {"total": total, "limit": limit, "parts": parts}
 
     async def _run_react_bound(self, task: str, stream_callback=None) -> str:

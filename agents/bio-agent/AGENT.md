@@ -65,11 +65,3 @@ TOOLS = [
 EOF
 /opt/miniconda3/envs/biopilot/bin/python -m pyflakes agents/bio-agent/tools.py; /opt/miniconda3/envs/biopilot/bin/python -c "
 import sys; sys.path.insert(0, '.')
-import importlib.util
-spec = importlib.util.spec_from_file_location('bio_tools', 'agents/bio-agent/tools.py')
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-print('bio-agent tools:', [t.name for t in m.TOOLS])
-" 2>&1 | tail -1
-__zcode_status=$?
-if [ "$__zcode_status" -eq 0 ]; then pwd -P > '/var/folders/49/67z2wsds2dj4zqbrx4tl19_80000gn/T/zcode-8e8782bd-a25f-43ab-b35f-dbcb26d16d43-cwd'; fi
-exit "$__zcode_status"

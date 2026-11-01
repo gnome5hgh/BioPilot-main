@@ -77,8 +77,12 @@
           📁 {{ currentProjectName }} · 本会话的消息将归入该项目
         </div>
         <div class="attach-chips" v-if="attachments.length">
-          <span v-for="a in attachments" :key="a.file_id || a.paper_id" class="chip">
-            {{ a.paper_id ? '📄' : '📎' }} {{ a.name }}
+          <span v-for="a in attachments" :key="a.file_id || a.paper_id" class="chip chip-file">
+            <span class="chip-icon">{{ fileIcon(a) }}</span>
+            <span class="chip-body">
+              <span class="chip-name">{{ a.name }}</span>
+              <span class="chip-meta">{{ chipMeta(a) }}</span>
+            </span>
             <button class="chip-x" @click="removeAttachment(a)">×</button>
           </span>
         </div>
@@ -91,12 +95,19 @@
                      accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
                      @change="uploadFiles" />
               <button class="icon-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
-              <button class="icon-btn" title="引用论文目录中的论文" @click="togglePaperPick">📄</button>
+              <button class="icon-btn" title="引用已上传的文件" @click="togglePaperPick">📎</button>
               <select v-if="paperPickOpen" class="model-select" @change="pickPaper($event)">
-                <option value="" disabled selected>选择论文…</option>
-                <option v-for="p in papers" :key="p.id" :value="p.id">
-                  {{ p.name || p.id.slice(0, 8) }}{{ p.indexed ? '（已索引）' : '' }}
-                </option>
+                <option value="" disabled selected>选择文件…</option>
+                <optgroup label="论文" v-if="papers.length">
+                  <option v-for="p in papers" :key="p.id" :value="'paper:' + p.id">
+                    📄 {{ p.file_name || p.title || p.id.slice(0, 8) }}{{ p.indexed ? '（已索引）' : '' }}
+                  </option>
+                </optgroup>
+                <optgroup label="数据文件" v-if="dataFiles.length">
+                  <option v-for="f in dataFiles" :key="f.id" :value="'file:' + f.id">
+                    📎 {{ f.name }}
+                  </option>
+                </optgroup>
               </select>
               <div class="ctx-wrap" v-if="usage"
                    @mouseenter="usageHover = true" @mouseleave="usageHover = false">
@@ -391,9 +402,6 @@ async function uploadFiles(evt) {
     form.append('file', f)
     try {
       const { data } = await http.post('/agent/files/upload', form)
-      if (data.paper_id) {
-        window.alert(`论文《${f.name}》已入论文目录并开始后台索引，稍后可在对话中直接问答`)
-      }
       attachments.value.push(data)
     } catch (e) {
       window.alert(e?.response?.data?.detail || `「${f.name}」上传失败`)

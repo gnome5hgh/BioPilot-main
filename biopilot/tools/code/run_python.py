@@ -78,7 +78,7 @@ class RunPythonTool(Tool):
         临时目录，使产物清单只反映本次执行。
 
         Args:
-            cfg: PaperFlowConfig，配置来源
+            cfg: BioPilotConfig，配置来源
             user_id: 归属用户（有值时挂载该用户的上传附件目录）
             conversation_id: 会话 id（定位附件目录）
 

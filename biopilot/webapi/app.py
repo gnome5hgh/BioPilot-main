@@ -1063,7 +1063,7 @@ def _paper_endpoints(app: FastAPI) -> None:
                                        file.content_type or "application/pdf"):
             raise HTTPException(status_code=502, detail="对象存储不可用，上传失败")
         register_paper(_shared_db(), x_user_id, paper_id, "", oss_key, len(data))
-        # 上传即触发该用户域的增量索引（工单 17「上传后自动索引」）：
+        # 上传即触发该用户域的增量索引：
         # 后台跑，不阻塞上传响应；重建中的 singleflight 由 reindex_running 保证
         _schedule_user_index(x_user_id)
         return {"status": "ok", "id": paper_id, "oss_key": oss_key}
@@ -1171,13 +1171,11 @@ def _doc_endpoints(app: FastAPI) -> None:
         if not oss_key:
             import uuid as _uuid
             oss_key = f"documents/{_uuid.uuid4().hex}"
-            db.execute("UPDATE documents SET oss_key=? WHERE id=? AND user_id=?",
-                       (oss_key, doc_id, x_user_id))
-        data = content.encode("utf-8")
+        # 对象先落 OSS、行后写（一致性方向红线）
         _user_files().put(x_user_id, oss_key.removeprefix(
-            user_file_prefix(x_user_id)), data, "text/markdown")
-        db.execute("UPDATE documents SET content=?, updated_at=? WHERE id=? AND user_id=?",
-                   (content, datetime.now(timezone.utc).isoformat(), doc_id, x_user_id))
+            user_file_prefix(x_user_id)), content.encode("utf-8"), "text/markdown")
+        db.execute("UPDATE documents SET content=?, oss_key=?, updated_at=? WHERE id=? AND user_id=?",
+                   (content, oss_key, datetime.now(timezone.utc).isoformat(), doc_id, x_user_id))
         return {"status": "ok"}
 
     @app.get("/literature/search")

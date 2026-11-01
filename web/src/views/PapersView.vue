@@ -65,8 +65,8 @@ async function onPick(evt) {
   isErr.value = false
   try {
     for (const f of list) {
-      if (f.size > 200 * 1024 * 1024) {
-        isErr.value = true; msg.value = `「${f.name}」超过 200MB 上限，已跳过`; continue
+      if (f.size > 100 * 1024 * 1024) {
+        isErr.value = true; msg.value = `「${f.name}」超过 100MB 上限，已跳过`; continue
       }
       const form = new FormData()
       form.append('file', f)
