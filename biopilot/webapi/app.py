@@ -538,10 +538,16 @@ def _accepts_stream(run_callable) -> bool:
         return False
 
 
-async def _default_agent_factory(user_id: str, conversation_id: str):
-    """真实装配：委托 assembly 的 web 会话装配（与 REPL 同一套对象图）。"""
+async def _default_agent_factory(user_id: str, conversation_id: str,
+                                 confirm_callback=None, project_id: str | None = None):
+    """真实装配：委托 assembly 的 web 会话装配（与 REPL 同一套对象图）。
+
+    确认回调与项目归属原样透传——确认走 SSE 往返、project_id 进 agent_state。
+    """
     from biopilot.cli.services.assembly import assemble_web_session
-    session = await assemble_web_session(user_id, conversation_id)
+    session = await assemble_web_session(user_id, conversation_id,
+                                         confirm_callback=confirm_callback,
+                                         project_id=project_id)
     # 整合队列挂到全局收尾集合：停服时 flush（游标推进走 DB 锁，多进程安全）
     _queues.append(session.consolidation_queue)
     return session.agent
