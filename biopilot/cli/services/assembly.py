@@ -66,19 +66,20 @@ def _approved_tools(config: BioPilotConfig) -> set[str]:
     return approved
 
 
-def _select_resume_session(agent_manager: AgentManager, io) -> str | None:
+def _select_resume_session(agent_manager: AgentManager, io, user_id: str) -> str | None:
     """列出历史会话并让用户选择要恢复的会话（`--resume` 不带 id 时）。
 
     Args:
         agent_manager: 记忆服务层句柄（读 agent_state / messages 表）。
         io: 输入适配器（读用户选择）。
+        user_id: 归属域（本机单人恒 local；Web 终端注入登录用户 id）。
 
     Returns:
         选中的 session_id；取消（空输入）或无历史会话时返回 None。
 
     选择方式：输入菜单编号，或直接粘贴会话 id。非法输入返回 None 并打印原因。
     """
-    sessions = agent_manager.list_sessions(limit=10, user_id="local")
+    sessions = agent_manager.list_sessions(limit=10, user_id=user_id)
     if not sessions:
         print("没有可恢复的历史会话。")
         return None
@@ -368,6 +369,11 @@ def main(argv: list[str] | None = None) -> int | None:
         notify=(lambda msg: console.print(msg, style="dim")) if console else None)
     for w in service_warnings:
         (console.print(w, style="yellow") if console else print(w))
+    # REPL 用户域：本机单人恒 "local"；Web 终端经适配层注入登录用户 id——
+    # 终端里的会话与该用户网页会话同库同域，出现在同一任务列表。
+    import os as _uid_os
+    repl_user = _uid_os.environ.get("BIOPILOT_USER_ID") or "local"
+
     # api_key 缺失提示：RAG 的云端嵌入未配 key 时只提示不阻断（检索退纯
     # BM25、无精排，降级路径由 retriever 自己消化）。
     if not config.rag.embedding.api_key:
@@ -430,7 +436,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # 记忆工具（SQL 按 agent_id 键控）与 MemoryConsolidator 都挂在它下面，三者对不上
     # 会各自读到空数据。
     db = MemoryDB(config.runtime.memory_dsn)
-    block_manager = BlockManager(db, user_id="local")
+    block_manager = BlockManager(db, user_id=repl_user)
     block_manager.migrate_legacy_labels()   # 旧 human/persona label 一次性迁移为 profile/assistant（幂等）
     block_manager.purge_removed_blocks()    # 已下线功能的块（历史清单）一次性清除（幂等）
     block_manager.ensure_default_blocks()   # 首启播种默认 profile/assistant 核心记忆块
@@ -448,13 +454,13 @@ def main(argv: list[str] | None = None) -> int | None:
                 sys.exit(1)
             session_id = args.resume
         else:
-            session_id = _select_resume_session(agent_manager, io)
+            session_id = _select_resume_session(agent_manager, io, user_id=repl_user)
             if session_id is None:
                 sys.exit(0)
     else:
         session_id = uuid.uuid4().hex[:8]
         # 无参启动保持新会话；检测到历史会话时提示可恢复（不自动询问）
-        last = agent_manager.list_sessions(limit=1, user_id="local")
+        last = agent_manager.list_sessions(limit=1, user_id=repl_user)
         if last and last[0]["message_count"] > 0:
             preview = last[0]["preview"] or "（无预览）"
             resume_hint = f"检测到上次会话（{preview}），biopilot --resume 可恢复"
@@ -465,7 +471,7 @@ def main(argv: list[str] | None = None) -> int | None:
     if args.resume is not None:
         agent_state = agent_manager.get_agent(session_id)
     else:
-        agent_state = agent_manager.create_agent(session_id, user_id="local")
+        agent_state = agent_manager.create_agent(session_id, user_id=repl_user)
 
     # 会话恢复的历史回放：--resume 恢复的是模型上下文，屏幕上
     # 否则不留任何痕迹，用户会以为恢复失败。这里把**同一个** in-context 窗口投影成
@@ -496,7 +502,7 @@ def main(argv: list[str] | None = None) -> int | None:
 
     memory_ctx = MemoryToolsContext(
         agent_id=session_id,
-        user_id="local",
+        user_id=repl_user,
         block_manager=block_manager,
         message_manager=message_manager,
         tool_result_store=tool_result_store,
@@ -575,7 +581,7 @@ def main(argv: list[str] | None = None) -> int | None:
         intent_service=intent_service,
         confirm_callback=_make_confirm_callback(io, renderer, center),
         session_id=session_id,
-        user_id="local",
+        user_id=repl_user,
         memory_context=memory_ctx,
     )
     consolidator = MemoryConsolidator(

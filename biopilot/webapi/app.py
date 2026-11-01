@@ -559,8 +559,10 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         env = _os.environ.copy()
         env["BIOPILOT_MEMORY_MYSQL_DSN"] = (
             _os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN", "mysql://root@127.0.0.1:3306/biopilot"))
+        # 终端身份注入：REPL 以该登录用户的域运行（会话与网页互通）
+        env["BIOPILOT_USER_ID"] = x_user_id
         proc = await asyncio.create_subprocess_exec(
-            _sys.executable, "-m", "biopilot", "--resume",
+            _sys.executable, "-m", "biopilot",
             stdin=slave, stdout=slave, stderr=slave, env=env,
             cwd=str(pathlib.Path.cwd()))
         _os.close(slave)
@@ -581,12 +583,19 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, _os.write, master, msg.encode())
 
+        # 任一泵退出（客户端断开/子进程退出）就立刻杀子进程——不能等 gather
+        # 收敛：executor 里阻塞的 os.read 无法被取消，等它返回会泄漏 REPL 进程
+        t_out = asyncio.create_task(pump_out())
+        t_in = asyncio.create_task(pump_in())
+        done, pending = await asyncio.wait([t_out, t_in],
+                                           return_when=asyncio.FIRST_COMPLETED)
+        proc.terminate()
+        for t in pending:
+            t.cancel()
         try:
-            await asyncio.gather(pump_out(), pump_in())
+            await proc.wait()
         except Exception:
             pass
-        finally:
-            proc.terminate()
 
     _paper_endpoints(app)
     # 索引触发：按用户域重建 RAG collection（RAGService user_domain）
