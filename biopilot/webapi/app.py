@@ -182,27 +182,6 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         fut.set_result(approved)
         return {"status": "ok"}
 
-    @app.get("/store/experts")
-    async def store_experts(x_user_id: str | None = Header(default=None)) -> dict:
-        """专家列表：读 agents 插件真数据（名称/描述/版本）。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.core.agent import AgentRegistry
-        from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
-        agents_dir = (cfg.runtime.agents_dir
-                      if Path(cfg.runtime.agents_dir).is_dir()
-                      else str(Path(__file__).resolve().parents[2] / "agents"))
-        registry = AgentRegistry(agents_dir)
-        experts = []
-        for name in registry.list_agents():
-            c = registry.get_config(name)
-            # 职责描述取 AGENT.md 的 description 字段；正文截断只是兜底
-            desc = (getattr(c, "description", "") or c.system_prompt[:120])
-            experts.append({"name": name, "description": desc[:120],
-                            "tools_count": len(c.tools)})
-        return {"experts": experts}
-
     @app.post("/store/skills/{name}/toggle")
     async def skill_toggle(
         name: str, body: dict, x_user_id: str | None = Header(default=None),
@@ -254,6 +233,28 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                    "enabled": lock.get(n, {}).get("enabled", True)}
                   for n in reg.list_skills()]
         return {"skills": skills}
+
+    @app.get("/chat/history")
+    async def chat_history(
+        conversation_id: str = "",
+        x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """取一段会话的可见历史（user/assistant 两条腿，按时间正序）。
+
+        会话列表点击回续时前端用它回放消息；tool/system 行不外露——那是
+        引擎的内部轨迹，不是对话内容。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        if not conversation_id:
+            return {"messages": []}
+        db = _shared_db()
+        rows = db.execute(
+            "SELECT role, content, created_at FROM messages"
+            " WHERE agent_id=? AND user_id=? AND role IN ('user','assistant')"
+            " AND content IS NOT NULL AND content != ''"
+            " ORDER BY seq", (conversation_id, x_user_id)).fetchall()
+        return {"messages": [dict(r) for r in rows]}
 
     @app.post("/chat/stream")
     async def chat_stream(

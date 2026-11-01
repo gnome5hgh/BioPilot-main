@@ -152,6 +152,21 @@ public class AgentProxyController {
         return proxyPost("/models/select", body);
     }
 
+    /** 会话列表（左栏）：本用户的会话（标题/时间/消息数），按新→旧。 */
+    @GetMapping("/sessions")
+    public ResponseEntity<String> sessionsList(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "50") int limit) {
+        return proxyGet("/sessions?limit=" + Math.max(1, Math.min(limit, 200)));
+    }
+
+    /** 会话历史回放：user/assistant 两条腿，供点击会话后回显。 */
+    @GetMapping("/chat/history")
+    public ResponseEntity<String> chatHistory(
+            @org.springframework.web.bind.annotation.RequestParam String conversationId) {
+        return proxyGet("/chat/history?conversation_id="
+                + java.net.URLEncoder.encode(conversationId, java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     /** KB 知识库：状态快照与重建触发透传。 */
     @GetMapping("/kb/status")
     public ResponseEntity<String> kbStatus() {
@@ -309,12 +324,7 @@ public class AgentProxyController {
         }
     }
 
-    /** 商店/技能读接口透传（Python 侧读 agents/skills 真数据）。 */
-    @GetMapping("/store/experts")
-    public ResponseEntity<String> storeExperts() {
-        return proxyGet("/store/experts");
-    }
-
+    /** 技能商店（读接口透传，Python 侧读 .biopilot/skills 真数据）。 */
     @GetMapping("/store/skills")
     public ResponseEntity<String> storeSkills() {
         return proxyGet("/store/skills");

@@ -8,7 +8,7 @@
       </div>
       <nav>
         <div class="nav-item" :class="{ active: $route.path === '/' }" @click="$router.push('/')">新建任务</div>
-        <div class="nav-item" :class="{ active: $route.path === '/store' }" @click="$router.push('/store')">专家 · 技能 · APP</div>
+        <div class="nav-item" :class="{ active: $route.path === '/store' }" @click="$router.push('/store')">技能</div>
         <div class="nav-item" :class="{ active: $route.path === '/scheduled' }" @click="$router.push('/scheduled')">定时任务</div>
         <div class="nav-item" :class="{ active: $route.path === '/papers' }" @click="$router.push('/papers')">论文目录</div>
         <div class="nav-item" :class="{ active: $route.path === '/docs' }" @click="$router.push('/docs')">文档编辑器</div>
