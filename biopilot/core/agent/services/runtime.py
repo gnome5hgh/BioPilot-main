@@ -591,6 +591,40 @@ class Agent:
         finally:
             await asyncio.to_thread(lock.release, lock_name)
 
+    def context_usage(self) -> dict:
+        """计算当前会话的上下文窗口用量分解（同步、只读、不发 LLM 请求）。
+
+        head 各块（系统提示/技能/可派发清单/记忆/意图）按构建口径逐块估算，
+        工具 schema 按 function calling JSON 估算，消息窗口按当前 in-context
+        内容估算。窗口上限 = 显式 context_size > 模型窗口（与压缩判定同口径）。
+        必须在 window.load() 之后的时点调用才有消息计数（适配层对缓存 Agent
+        调用时窗口已加载）。
+
+        Returns:
+            dict: {total, limit, parts: {...}}，parts 键与 head 组装顺序一致。
+        """
+        from biopilot.core.common.services.tokenization import estimate_text_tokens
+        from biopilot.core.memory.services.compaction import estimate_tokens
+
+        parts: dict[str, int] = {}
+        parts["system_prompt"] = estimate_text_tokens(self.system_prompt)
+        parts["skills"] = estimate_text_tokens(self.skills_block)
+        parts["agents_list"] = estimate_text_tokens(self.agents_block)
+        memory_text = ""
+        if self.memory is not None:
+            memory_text = self.memory.compile()
+        parts["memory"] = estimate_text_tokens(memory_text)
+        intent_text = ""
+        if self.intent_service is not None:
+            intent_text = (self.intent_service.rules_block or "")
+        parts["intent"] = estimate_text_tokens(intent_text)
+        parts["tools_schema"] = len(json.dumps(self._tool_schemas, ensure_ascii=False))
+        parts["messages"] = estimate_tokens(self.window.messages)
+        total = sum(parts.values())
+        limit = (self.compaction.context_size if self.compaction
+                 and self.compaction.context_size else 1000000)
+        return {"total": total, "limit": limit, "parts": parts}
+
     async def _run_react_bound(self, task: str, stream_callback=None) -> str:
         """在绑定记忆工具上下文的任务上下文里跑 ReAct 本体。
 

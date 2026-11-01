@@ -473,6 +473,28 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="会话不存在")
         return {"status": "ok"}
 
+    @app.get("/chat/context-usage")
+    async def chat_context_usage(
+        conversation_id: str = "", x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """当前会话的上下文窗口用量分解（head 各块 + 工具 schema + 消息）。
+
+        会话未装配（Agent 不在缓存里）时返回 usage=None——前端据此隐藏指示器
+        （新会话没有历史，首条消息发出后才有意义）。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        if not conversation_id:
+            return {"usage": None}
+        agent = agents.get((x_user_id, conversation_id, user_models.get(x_user_id)))
+        if agent is None:
+            return {"usage": None}
+        try:
+            return {"usage": agent.context_usage()}
+        except Exception:
+            logger.warning("上下文用量计算失败", exc_info=True)
+            return {"usage": None}
+
     @app.post("/chat/stream")
     async def chat_stream(
         request: Request,

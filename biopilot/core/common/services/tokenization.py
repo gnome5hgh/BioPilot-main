@@ -36,3 +36,21 @@ def get_token_encoder():
         import tiktoken
         _encoder = tiktoken.get_encoding(TOKEN_ENCODING)
     return _encoder
+
+
+def estimate_text_tokens(text: str) -> int:
+    """估算一段文本的 token 数（不含消息协议开销）。
+
+    供上下文用量分解等「非消息列表」场景使用：消息列表走
+    :func:`biopilot.core.memory.services.compaction.estimate_tokens`（含协议
+    开销），裸文本片段用本函数即可。
+
+    Args:
+        text: 待计数的文本（None/空串为 0）。
+
+    Returns:
+        int: 估算的 token 数。
+    """
+    if not text:
+        return 0
+    return len(get_token_encoder().encode(text))

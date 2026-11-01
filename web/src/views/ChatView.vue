@@ -77,30 +77,45 @@
           📁 {{ currentProjectName }} · 本会话的消息将归入该项目
         </div>
         <div class="attach-chips" v-if="attachments.length">
-          <span v-for="a in attachments" :key="a.file_id" class="chip">
-            📎 {{ a.name }} <button class="chip-x" @click="removeAttachment(a)">×</button>
+          <span v-for="a in attachments" :key="a.file_id || a.paper_id" class="chip">
+            {{ a.paper_id ? '📄' : '📎' }} {{ a.name }}
+            <button class="chip-x" @click="removeAttachment(a)">×</button>
           </span>
         </div>
-        <textarea v-model="input" :placeholder="placeholder"
-                  @keydown.enter.exact.prevent="send"></textarea>
-        <div class="foot">
-          <input ref="fileInput" type="file" class="file-hidden" multiple
-                 accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
-                 @change="uploadFiles" />
-          <button class="attach-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
-          <button class="attach-btn" title="引用论文目录中的论文" @click="togglePaperPick">📄</button>
-          <select v-if="paperPickOpen" class="model-select" @change="pickPaper($event)">
-            <option value="" disabled selected>选择论文…</option>
-            <option v-for="p in papers" :key="p.id" :value="p.id">
-              {{ p.name || p.id.slice(0, 8) }}{{ p.indexed ? '（已索引）' : '' }}
-            </option>
-          </select>
-          <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
-            <option v-for="m in models" :key="m.name" :value="m.name">{{ m.name }}</option>
-          </select>
-          <span class="hint">Enter 发送 · Shift+Enter 换行 · 产物经安全确认后落库</span>
-          <button class="send" :class="{ stop: busy }" @click="busy ? stopStreaming() : send()"
-                  :title="busy ? '中断回答' : '发送'">{{ busy ? '■' : '↑' }}</button>
+        <div class="input-box">
+          <textarea v-model="input" :placeholder="placeholder"
+                    @keydown.enter.exact.prevent="send"></textarea>
+          <div class="input-controls">
+            <div class="controls-left">
+              <input ref="fileInput" type="file" class="file-hidden" multiple
+                     accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
+                     @change="uploadFiles" />
+              <button class="icon-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
+              <button class="icon-btn" title="引用论文目录中的论文" @click="togglePaperPick">📄</button>
+              <select v-if="paperPickOpen" class="model-select" @change="pickPaper($event)">
+                <option value="" disabled selected>选择论文…</option>
+                <option v-for="p in papers" :key="p.id" :value="p.id">
+                  {{ p.name || p.id.slice(0, 8) }}{{ p.indexed ? '（已索引）' : '' }}
+                </option>
+              </select>
+              <div class="ctx-wrap" v-if="usage"
+                   @mouseenter="usageHover = true" @mouseleave="usageHover = false">
+                <span class="ctx-icon" :class="usageLevel">{{ usagePercent }}%</span>
+                <div class="ctx-panel" v-if="usageHover">
+                  <div class="ctx-head">上下文容量 {{ usage.total }}/{{ usage.limit }}</div>
+                  <div class="ctx-bar"><div class="ctx-fill" :style="{ width: usagePercent + '%' }"></div></div>
+                  <div v-for="(v, k) in usage.parts" :key="k" class="ctx-row">
+                    <span>{{ ctxLabel(k) }}</span><span>{{ v }}</span>
+                  </div>
+                </div>
+              </div>
+              <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
+                <option v-for="m in models" :key="m.name" :value="m.name">{{ m.name }}</option>
+              </select>
+            </div>
+            <button class="send" :class="{ stop: busy }" @click="busy ? stopStreaming() : send()"
+                    :title="busy ? '中断回答' : '发送'">{{ busy ? '■' : '↑' }}</button>
+          </div>
         </div>
       </div>
     </section>
@@ -155,6 +170,9 @@ const menuFor = ref(null)            // 当前打开 ⋯ 菜单的会话 id
 const menuSession = ref(null)        // 菜单对应的会话对象（删除用）
 const menuPos = ref({ x: 0, y: 0 })  // 菜单弹层的屏幕坐标（fixed 定位，避开滚动裁剪）
 const confirmDelete = ref(null)      // 两步删除：第一次点记下会话 id，再点执行
+const papers = ref([])               // 论文清单（📄 选择器）
+const dataFiles = ref([])            // 数据文件清单（📄 选择器）
+const paperPickOpen = ref(false)     // 📄 选择下拉开关
 const showProjectInput = ref(false)
 const newProjectName = ref('')
 const placeholder = computed(() =>
@@ -211,6 +229,11 @@ async function loadPapers() {
   try {
     papers.value = (await http.get('/agent/papers')).data.papers || []
   } catch { /* 论文清单拿不到就空态 */ }
+  try {
+    const f = await http.get('/agent/files')
+    dataFiles.value = (f.data.files || []).filter(
+      x => !x.name.toLowerCase().endsWith('.pdf'))
+  } catch { /* 数据文件清单拿不到就空态 */ }
 }
 
 function togglePaperPick() {
@@ -219,11 +242,20 @@ function togglePaperPick() {
 }
 
 function pickPaper(evt) {
-  const pid = evt.target.value
-  if (!pid) return
-  const p = papers.value.find(x => x.id === pid)
-  if (p && !attachments.value.some(a => a.paper_id === pid)) {
-    attachments.value.push({ paper_id: pid, name: p.name || pid.slice(0, 8) })
+  const val = evt.target.value
+  if (!val) return
+  const isPaper = val.startsWith('paper:')
+  const id = val.replace(/^(paper|file):/, '')
+  if (isPaper) {
+    const p = papers.value.find(x => x.id === id)
+    if (p && !attachments.value.some(a => a.paper_id === id)) {
+      attachments.value.push({ paper_id: id, name: p.name || id.slice(0, 8) })
+    }
+  } else {
+    const f = dataFiles.value.find(x => x.id === id)
+    if (f && !attachments.value.some(a => a.file_id === id)) {
+      attachments.value.push({ file_id: id, name: f.name })
+    }
   }
   paperPickOpen.value = false
   evt.target.value = ''
@@ -572,15 +604,29 @@ async function answerConfirm(approved) {
 .row.assistant .bubble { background: #f5f6f9; }
 .activity { font-size: 12px; color: #818999; line-height: 1.9; padding-left: 4px; }
 .composer { border-top: 1px solid #e6e9ed; padding: 14px 20px; background: #fff; }
+.input-box { border: 1px solid #e6e9ed; border-radius: 14px; padding: 10px 12px; }
+.input-box:focus-within { border-color: #2ec5b1; }
+.composer textarea { width: 100%; min-height: 48px; max-height: 160px; border: none; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; }
+.input-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px; }
+.controls-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.icon-btn { border: 1px solid #e6e9ed; background: #fff; border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 15px; color: #4a5160; flex: none; }
+.icon-btn:hover { border-color: #2ec5b1; color: #2ec5b1; }
+.ctx-wrap { position: relative; }
+.ctx-icon { font-size: 11px; color: #818999; cursor: default; padding: 2px 6px; border-radius: 6px; border: 1px solid #e6e9ed; }
+.ctx-icon.ok { color: #2ec5b1; border-color: #bfeee7; }
+.ctx-icon.warn { color: #d97706; border-color: #fde68a; }
+.ctx-icon.danger { color: #e5484d; border-color: #fecaca; }
+.ctx-panel { position: absolute; bottom: calc(100% + 8px); left: 0; background: #fff; border: 1px solid #e6e9ed; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 12px 14px; width: 260px; z-index: 45; font-size: 12px; }
+.ctx-head { font-weight: 600; margin-bottom: 8px; }
+.ctx-bar { height: 6px; background: #f0f1f5; border-radius: 3px; margin-bottom: 10px; overflow: hidden; }
+.ctx-fill { height: 100%; background: #2ec5b1; border-radius: 3px; }
+.ctx-row { display: flex; justify-content: space-between; padding: 2px 0; color: #4a5160; }
 .project-hint { font-size: 12px; color: #2ec5b1; margin-bottom: 8px; }
-.composer textarea { width: 100%; min-height: 56px; max-height: 160px; border: 1px solid #e6e9ed; border-radius: 12px; padding: 10px 12px; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; }
-.foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
 .hint { font-size: 12px; color: #a6adbd; }
 .send { background: #2ec5b1; color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; flex: none; font-size: 16px; line-height: 1; }
 .send.stop { background: #e5484d; }
 .send:disabled { opacity: .6; cursor: default; }
 .model-select { border: 1px solid #e6e9ed; border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #4a5160; background: #fff; }
-.attach-btn { border: 1px solid #e6e9ed; background: #fff; border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 16px; color: #4a5160; flex: none; }
 .file-hidden { display: none; }
 .attach-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .chip { font-size: 12px; background: #f0f1f5; border-radius: 6px; padding: 3px 8px; display: inline-flex; align-items: center; gap: 4px; }

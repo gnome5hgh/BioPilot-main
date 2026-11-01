@@ -10,7 +10,7 @@
         <div class="nav-item" :class="{ active: $route.path === '/' }" @click="$router.push('/')">新建任务</div>
         <div class="nav-item" :class="{ active: $route.path === '/store' }" @click="$router.push('/store')">技能</div>
         <div class="nav-item" :class="{ active: $route.path === '/scheduled' }" @click="$router.push('/scheduled')">定时任务</div>
-        <div class="nav-item" :class="{ active: $route.path === '/papers' }" @click="$router.push('/papers')">论文目录</div>
+        <div class="nav-item" :class="{ active: $route.path === '/papers' }" @click="$router.push('/papers')">文件管理</div>
         <div class="nav-item" :class="{ active: $route.path === '/docs' }" @click="$router.push('/docs')">文档编辑器</div>
         <div class="nav-item" :class="{ active: $route.path === '/literature' }" @click="$router.push('/literature')">文献搜索</div>
         <div class="nav-item" :class="{ active: $route.path === '/kb' }" @click="$router.push('/kb')">知识库</div>
