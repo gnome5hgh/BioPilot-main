@@ -15,7 +15,6 @@
         <div class="nav-item" :class="{ active: $route.path === '/literature' }" @click="$router.push('/literature')">文献搜索</div>
         <div class="nav-item" :class="{ active: $route.path === '/kb' }" @click="$router.push('/kb')">知识库</div>
         <div class="nav-item" :class="{ active: $route.path === '/terminal' }" @click="$router.push('/terminal')">终端</div>
-        <div class="nav-item" :class="{ active: $route.path === '/papers' }" @click="$router.push('/papers')">论文目录</div>
         <div class="nav-item" v-if="auth.role === 'ADMIN'" :class="{ active: $route.path === '/admin' }" @click="$router.push('/admin')">管理端</div>
         <div class="nav-item" v-if="auth.role === 'ADMIN'" :class="{ active: $route.path === '/settings' }" @click="$router.push('/settings')">设置</div>
       </nav>

@@ -96,6 +96,12 @@ async function send() {
       },
       body: JSON.stringify({ task, conversation_id: conversationId }),
     })
+    if (resp.status === 401) {
+      // 登录态失效（服务重启/过期）：跳登录页重新拿 token，别只报错让人卡在原地
+      reply.text = '登录已失效，正在跳转登录页…'
+      setTimeout(() => { window.location.href = '/login' }, 800)
+      return
+    }
     if (!resp.ok || !resp.body) {
       // 非 200：读 JSON 错误体给用户看（429 配额/422 缺参/装配失败在此分支）
       let detail = `HTTP ${resp.status}`
