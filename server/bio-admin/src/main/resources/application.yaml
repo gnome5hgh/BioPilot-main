@@ -12,6 +12,11 @@ spring:
     multipart:
       max-file-size: 200MB
       max-request-size: 210MB
+  # SSE 长连接不限时：对话流生命周期由两端管理（心跳保活）；容器默认 30s
+  # 异步超时会把超过 30 秒的回答拦腰掐断（掐断后写错误体还会二次报错）
+  mvc:
+    async:
+      request-timeout: 0
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

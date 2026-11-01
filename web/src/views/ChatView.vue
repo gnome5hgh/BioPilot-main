@@ -2,9 +2,7 @@
   <div class="chat-page">
     <!-- 左栏：项目 + 会话列表 -->
     <aside class="sessions">
-      <button class="new-session" @click="newSession">
-        ＋ 新建会话{{ currentProject ? '（进当前项目）' : '' }}
-      </button>
+      <button class="new-session" @click="newSession">＋ 新建会话</button>
       <div class="session-scroll">
         <!-- 项目区：项目可选中（新会话归属它），展开显示其下会话 -->
         <div class="group-label row-between">
@@ -19,13 +17,15 @@
           <div class="project-item" :class="{ selected: p.projectId === currentProject }"
                @click="selectProject(p)">
             <span class="p-name">📁 {{ p.name }}</span>
-            <span class="p-count">{{ sessionsOf(p.projectId).length || '' }}</span>
+            <span class="item-menu" :title="'在「' + p.name + '」下新建会话'"
+                  @click.stop="newSessionFor(p.projectId)">⊕</span>
           </div>
           <template v-if="expanded.has(p.projectId)">
             <div v-for="s in sessionsOf(p.projectId)" :key="s.agent_id"
                  class="session-item sub" :class="{ active: s.agent_id === conversationId }"
                  @click="openSession(s)">
               <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
+              <span class="s-time">{{ relTime(s.created_at) }}</span>
               <span class="item-menu" @click.stop="menuFor = menuFor === s.agent_id ? null : (confirmDelete = null, s.agent_id)">⋯</span>
               <div v-if="menuFor === s.agent_id" class="menu-pop" @click.stop>
                 <button class="menu-item danger" @click="deleteSession(s)">
@@ -45,6 +45,7 @@
                class="session-item" :class="{ active: s.agent_id === conversationId }"
                @click="openSession(s)">
             <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
+            <span class="s-time">{{ relTime(s.created_at) }}</span>
             <span class="item-menu" @click.stop="menuFor = menuFor === s.agent_id ? null : (confirmDelete = null, s.agent_id)">⋯</span>
             <div v-if="menuFor === s.agent_id" class="menu-pop" @click.stop>
               <button class="menu-item danger" @click="deleteSession(s)">
@@ -171,7 +172,9 @@ const ungroupedGroups = computed(() => {
 async function loadSessions() {
   try {
     const { data } = await http.get('/sessions', { params: { limit: 200 } })
-    sessions.value = data.data || []
+    const locals = sessions.value.filter(s => s.localOnly
+      && !(data.data || []).some(r => r.agent_id === s.agent_id))
+    sessions.value = [...locals, ...(data.data || [])]
   } catch { /* 列表拿不到就保持空态 */ }
 }
 
@@ -220,12 +223,49 @@ async function selectModel() {
   await http.post('/agent/models/select', { name: selectedModel.value })
 }
 
-function newSession() {
-  if (busy.value) return
-  conversationId = crypto.randomUUID()
+function resetChat() {
   messages.value = []
   pendingConfirm.value = null
   menuFor.value = null
+  confirmDelete.value = null
+}
+
+function newSession() {
+  if (busy.value) return
+  conversationId = crypto.randomUUID()
+  currentProject.value = null
+  resetChat()
+}
+
+// 在指定项目下开新会话：先在列表里放一个本地占位条目（首条消息落库后
+// 被服务端数据替换，标题由首条任务自动生成）
+function newSessionFor(projectId) {
+  if (busy.value) return
+  conversationId = crypto.randomUUID()
+  currentProject.value = projectId
+  resetChat()
+  const next = new Set(expanded.value); next.add(projectId)
+  expanded.value = next
+  if (!sessions.value.some(s => s.agent_id === conversationId)) {
+    sessions.value.unshift({
+      agent_id: conversationId, name: "新会话", project_id: projectId,
+      created_at: new Date().toISOString(), localOnly: true,
+    })
+  }
+  input.value = ""
+}
+
+// 相对时间标签（与参考图一致：刚刚 / N 天前）
+function relTime(iso) {
+  if (!iso) return ""
+  const t = new Date(iso)
+  if (Number.isNaN(t.getTime())) return ""
+  const day = 24 * 3600 * 1000
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0)
+  if (t >= startToday) return "刚刚"
+  const days = Math.floor((startToday - t) / day) + 1
+  if (days === 1) return "昨天"
+  return `${days}天`
 }
 
 async function openSession(s) {
@@ -388,7 +428,10 @@ async function answerConfirm(approved) {
 .session-item.active .s-name { color: #2ec5b1; font-weight: 600; }
 .s-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .s-count { font-size: 11px; color: #a6adbd; flex: none; }
+.s-time { font-size: 11px; color: #a6adbd; flex: none; }
+.p-count { font-size: 11px; color: #a6adbd; flex: none; }
 .item-menu { flex: none; font-size: 13px; color: #a6adbd; cursor: pointer; padding: 0 4px; border-radius: 4px; visibility: hidden; }
+.project-item .item-menu { margin-left: auto; visibility: visible; font-size: 15px; }
 .session-item:hover .item-menu { visibility: visible; }
 .menu-pop { position: absolute; right: 6px; top: 30px; background: #fff; border: 1px solid #e6e9ed; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); z-index: 20; min-width: 96px; }
 .menu-item { display: block; width: 100%; border: none; background: transparent; text-align: left; padding: 8px 12px; font-size: 12px; cursor: pointer; }
