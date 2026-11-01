@@ -280,6 +280,14 @@ public class AgentProxyController {
         return proxyGet("/files");
     }
 
+    /** 上下文用量分解：前端悬停面板数据源。 */
+    @GetMapping("/chat/context-usage")
+    public ResponseEntity<String> chatContextUsage(
+            @RequestParam String conversationId) {
+        return proxyGet("/chat/context-usage?conversation_id="
+                + java.net.URLEncoder.encode(conversationId, java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     /** 会话历史回放：user/assistant 两条腿，供点击会话后回显。 */
     @GetMapping("/chat/history")
     public ResponseEntity<String> chatHistory(

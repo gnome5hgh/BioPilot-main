@@ -172,7 +172,9 @@ const menuPos = ref({ x: 0, y: 0 })  // 菜单弹层的屏幕坐标（fixed 定�
 const confirmDelete = ref(null)      // 两步删除：第一次点记下会话 id，再点执行
 const papers = ref([])               // 论文清单（📄 选择器）
 const dataFiles = ref([])            // 数据文件清单（📄 选择器）
-const paperPickOpen = ref(false)     // 📄 选择下拉开关
+const paperPickOpen = ref(false)
+const usage = ref(null)
+const usageHover = ref(false)     // 📄 选择下拉开关
 const showProjectInput = ref(false)
 const newProjectName = ref('')
 const placeholder = computed(() =>
@@ -201,6 +203,50 @@ const currentSessionName = computed(() => {
   if (s) return s.name || s.agent_id.slice(0, 8)
   return messages.value.length ? '新会话' : '新任务'
 })
+
+const usagePercent = computed(() => {
+  if (!usage.value || !usage.value.limit) return 0
+  return Math.min(100, Math.round(usage.value.total / usage.value.limit * 1000) / 10)
+})
+
+const usageLevel = computed(() => {
+  const p = usagePercent.value
+  return p > 80 ? 'danger' : p > 50 ? 'warn' : 'ok'
+})
+
+function ctxLabel(k) {
+  return { system_prompt: '系统提示词', skills: '技能', agents_list: '可派发清单',
+           memory: '记忆块', intent: '意图规则', tools_schema: '工具定义',
+           messages: '消息' }[k] || k
+}
+
+async function refreshUsage() {
+  try {
+    const { data } = await http.get('/agent/chat/context-usage', {
+      params: { conversationId: conversationId },
+    })
+    usage.value = data.usage
+  } catch { /* 静默 */ }
+}
+
+function fileIcon(a) {
+  const n = (a.name || '').toLowerCase()
+  if (n.endsWith('.pdf')) return '📕'
+  if (/\.(csv|tsv|xlsx|xls)$/.test(n)) return '📊'
+  if (n.endsWith('.h5ad')) return '🧬'
+  if (n.endsWith('.md') || n.endsWith('.txt')) return '📝'
+  if (/\.(py|r)$/.test(n)) return '🐍'
+  return '📎'
+}
+
+function chipMeta(a) {
+  const parts = []
+  const n = (a.name || '').toLowerCase()
+  const ext = n.includes('.') ? n.split('.').pop().toUpperCase() : ''
+  if (ext) parts.push(ext)
+  if (a.size) parts.push(a.size > 1048576 ? (a.size / 1048576).toFixed(1) + 'MB' : Math.round(a.size / 1024) + 'KB')
+  return parts.join(' · ')
+}
 
 function openMenu(s, evt) {
   if (menuFor.value === s.agent_id) { menuFor.value = null; confirmDelete.value = null; return }
@@ -406,6 +452,7 @@ async function openSession(s) {
   } catch {
     messages.value = []
   }
+  refreshUsage()
   await nextTick()
   scrollBottom()
 }
@@ -527,6 +574,7 @@ async function send() {
     busy.value = false
     attachments.value = []   // 已随消息下行
     loadSessions()   // 新会话/新标题/项目归属进左栏
+    refreshUsage()   // 上下文用量随轮次增长
     await nextTick(); scrollBottom()
   }
 }

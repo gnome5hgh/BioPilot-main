@@ -41,7 +41,13 @@ def list_papers(db: MemoryDB, user_id: str) -> list[dict]:
     rows = db.execute(
         "SELECT id, title, oss_key, size_bytes, indexed, created_at"
         " FROM papers WHERE user_id=? ORDER BY seq DESC", (user_id,)).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        # 展示名：标题宁空勿错——列表显示用 OSS 键末段的原始文件名兜底
+        d["file_name"] = r["oss_key"].rsplit("/", 1)[-1] if r["oss_key"] else ""
+        out.append(d)
+    return out
 
 
 def remove_paper(db: MemoryDB, user_id: str, paper_id: str) -> str | None:
