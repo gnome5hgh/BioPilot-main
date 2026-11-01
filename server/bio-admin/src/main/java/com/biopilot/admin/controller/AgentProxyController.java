@@ -366,7 +366,7 @@ public class AgentProxyController {
     }
 
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<?> chatStream(
+    public ResponseEntity<StreamingResponseBody> chatStream(
             @RequestBody String body, HttpServletRequest request) {
         long userId = StpUtil.getLoginIdAsLong();
         String conversationId = request.getHeader("X-Conversation-Id");
@@ -400,7 +400,9 @@ public class AgentProxyController {
 
         if (upstreamResp.statusCode() != 200) {
             // 进入流之前就被适配层拒绝（429 配额/422 缺参/装配 500）：JSON 错误体
-            // 不是 SSE 帧，必须如实带状态码透传，否则前端按 200 解析出空气泡
+            // 不是 SSE 帧，必须如实带状态码透传，否则前端按 200 解析出空气泡。
+            // 返回类型必须保持 StreamingResponseBody——放宽成通配符会让 Spring
+            // 去找 JSON converter 而不是走流式输出（No converter for Lambda）。
             String errBody;
             try {
                 errBody = new String(upstreamResp.body().readAllBytes(),
@@ -408,9 +410,14 @@ public class AgentProxyController {
             } catch (java.io.IOException e) {
                 errBody = "{\"code\":502,\"msg\":\"适配层响应读取失败\"}";
             }
+            final String errPayload = errBody;
+            StreamingResponseBody errStream = out -> {
+                out.write(errPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                out.flush();
+            };
             return ResponseEntity.status(upstreamResp.statusCode())
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(errBody);
+                    .body(errStream);
         }
         java.io.InputStream upstreamBody = upstreamResp.body();
         StreamingResponseBody stream = out -> {
