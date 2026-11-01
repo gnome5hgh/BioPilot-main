@@ -49,10 +49,12 @@ class RunPythonTool(Tool):
     description = (
         "在隔离沙箱里运行一段 Python 代码并把结果取回来（分析论文数据、算统计、画图）。"
         "隔离方式：一次性容器，**无网络**，论文库只读挂在 /corpus/pdf 下，"
-        "只有 /work 可写。如需读取 PDF，请用 /corpus/pdf 下的路径。"
-        "代码写到 /work 下即可产出文件——产出清单会随结果返回，"
-        "需要长期留存时再用 write_file 写到目标目录（那一步会另行确认）。"
-        "依赖库已预装：pandas、numpy、matplotlib、pypdf、scipy。"
+        "对话附件的数据文件只读挂在 /corpus/uploads 下（csv/xlsx/h5ad 等），"
+        "只有 /work 可写。如需读取 PDF，请用 /corpus/pdf 下的路径；"
+        "分析上传的数据文件，请读 /corpus/uploads 下的对应文件。"
+        "代码写到 /work 下即可产出文件——产出清单会随结果返回（含留存路径）。"
+        "依赖库已预装：pandas、numpy、scipy、statsmodels、matplotlib、seaborn、"
+        "scikit-learn、scanpy、anndata、biopython、lifelines、openpyxl、pypdf。"
     )
     parameters = {
         "type": "object",
@@ -67,7 +69,8 @@ class RunPythonTool(Tool):
     risk_level = "medium"                     # 安全来自沙箱而非档位：默认免问档内静默
     side_effects = ["read_file", "write_file"]
 
-    def _build_policy(self, cfg) -> sb.SandboxPolicy:
+    def _build_policy(self, cfg, user_id: str | None = None,
+                      conversation_id: str | None = None) -> sb.SandboxPolicy:
         """按配置组装本次执行政策：临时目录、只读挂载、资源上限。
 
         论文库（pdf 根）默认只读挂载到容器内 ``/corpus/pdf``；``sandbox.read_roots``
@@ -76,6 +79,8 @@ class RunPythonTool(Tool):
 
         Args:
             cfg: PaperFlowConfig，配置来源
+            user_id: 归属用户（有值时挂载该用户的上传附件目录）
+            conversation_id: 会话 id（定位附件目录）
 
         Returns:
             SandboxPolicy，可直接交给沙箱能力。
@@ -90,6 +95,12 @@ class RunPythonTool(Tool):
             path = roots.get(name)
             if path:
                 mounts.append((str(Path(path).resolve()), f"{_CORPUS_MOUNT}/{name}"))
+        # 对话附件：只读挂进 /corpus/uploads——模型写的分析代码据此读数据文件
+        if user_id and conversation_id:
+            uploads = (Path(cfg.runtime.workspace) / "users" / user_id
+                       / "uploads" / conversation_id)
+            if uploads.is_dir():
+                mounts.append((str(uploads.resolve()), f"{_CORPUS_MOUNT}/uploads"))
 
         s = cfg.security.sandbox
         return sb.SandboxPolicy(
@@ -119,7 +130,7 @@ class RunPythonTool(Tool):
             return
         try:
             from biopilot.config import BioPilotConfig
-            from biopilot.core.storage.user_files import make_user_file_store
+            from biopilot.core.common.storage.user_files import make_user_file_store
             cfg = BioPilotConfig.from_env()
             store = make_user_file_store(
                 cfg, str(Path(cfg.runtime.workspace) / "user-files"))
@@ -187,7 +198,12 @@ class RunPythonTool(Tool):
         if not cfg.security.sandbox.enabled:
             return ToolResult(text="沙箱代码执行已在配置中关闭（sandbox.enabled=false）")
 
-        policy = self._build_policy(cfg)
+        from biopilot.tools.memory.runtime_context import get_memory_context
+        ctx = get_memory_context()
+        policy = self._build_policy(
+            cfg,
+            user_id=getattr(ctx, "user_id", None) if ctx is not None else None,
+            conversation_id=getattr(ctx, "agent_id", None) if ctx is not None else None)
         try:
             res = sb.run_python(code, policy)
         except sb.SandboxUnavailable as e:

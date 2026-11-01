@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS audit_event (
     KEY idx_audit_session (session_id, created_at),
     KEY idx_audit_user (user_id, created_at)
 );
+-- uploaded_file 表：对话附件（数据文件先入 OSS，任务执行时挂进沙箱）
+CREATE TABLE IF NOT EXISTS uploaded_file (
+    id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(191) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    oss_key VARCHAR(500) NOT NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    content_type VARCHAR(120) NULL,
+    created_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_upload_user (user_id)
+);
 -- scheduled_task 表：定时任务（webapi 进程内调度器消费；REPL 不跑调度）
 CREATE TABLE IF NOT EXISTS scheduled_task (
     id VARCHAR(64) NOT NULL,

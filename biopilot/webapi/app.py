@@ -22,7 +22,7 @@ import yaml as yaml_mod
 import uuid
 from dataclasses import dataclass
 
-from biopilot.core.storage.user_files import user_file_prefix
+from biopilot.core.common.storage.user_files import user_file_prefix
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import StreamingResponse
 
@@ -242,6 +242,94 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                   for n in reg.list_skills()]
         return {"skills": skills}
 
+    # ---------- 对话附件（数据文件：csv/h5ad/xlsx 等，先入 OSS 再挂沙箱） ----------
+
+    #: 附件大小上限：数据集文件，比论文上限收紧
+    _FILE_UPLOAD_LIMIT = 100 * 1024 * 1024
+
+    @app.post("/files/upload")
+    async def files_upload(file: UploadFile, x_user_id: str | None = Header(default=None)) -> dict:
+        """上传对话附件：入 OSS（users/<uid>/files/uploads/）并登记元数据行。
+
+        Args:
+            file: multipart 上传的数据文件。
+            x_user_id: 内网信任头。
+
+        Returns:
+            dict: file_id/name/size/content_type（前端附件 chips 与发送体引用）。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        data = await file.read()
+        if not data:
+            raise HTTPException(status_code=422, detail="上传内容为空")
+        if len(data) > _FILE_UPLOAD_LIMIT:
+            raise HTTPException(status_code=413, detail="文件超过大小上限")
+        file_id = uuid.uuid4().hex
+        name = pathlib.PurePosixPath(file.filename or "data.bin").name or "data.bin"
+        oss_key = _user_files().put(
+            x_user_id, f"uploads/{file_id}/{name}", data,
+            file.content_type or "application/octet-stream")
+        from datetime import datetime, timezone
+        db = _shared_db()
+        db.execute(
+            "INSERT INTO uploaded_file (id, user_id, name, oss_key, size_bytes,"
+            " content_type, created_at) VALUES (?,?,?,?,?,?,?)",
+            (file_id, x_user_id, name, oss_key, len(data),
+             file.content_type or "", datetime.now(timezone.utc).isoformat()))
+        return {"file_id": file_id, "name": name, "size": len(data),
+                "content_type": file.content_type or ""}
+
+    @app.get("/files")
+    async def files_list(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        rows = db.execute(
+            "SELECT id, name, size_bytes, content_type, created_at FROM uploaded_file"
+            " WHERE user_id=? ORDER BY created_at DESC LIMIT 100",
+            (x_user_id,)).fetchall()
+        return {"files": [dict(r) for r in rows]}
+
+    def _resolve_attachments(x_user_id: str, attachments: list[dict],
+                             conversation_id: str) -> list[dict]:
+        """把消息引用的附件落成本地文件并返回清单（发给模型的元数据行）。
+
+        附件正文存 OSS；这里取回到 ``users/<uid>/uploads/<会话>/``（持久本地
+        副本）——沙箱按会话挂载该目录，模型经清单里的路径读数据。归属双条件，
+        拿别人的 file_id 解析不到。
+
+        Args:
+            x_user_id: 归属用户。
+            attachments: 消息体里的 {file_id, name} 列表。
+            conversation_id: 会话 id（本地副本目录的一部分）。
+
+        Returns:
+            list[dict]: [{name, size, path}]，本地绝对路径清单。
+        """
+        db = _shared_db()
+        out = []
+        for att in attachments or []:
+            file_id = (att or {}).get("file_id", "")
+            if not file_id:
+                continue
+            row = db.execute(
+                "SELECT name, oss_key, size_bytes FROM uploaded_file"
+                " WHERE id=? AND user_id=?", (file_id, x_user_id)).fetchone()
+            if row is None:
+                continue
+            data = _user_files().get(row["oss_key"])
+            if data is None:
+                continue
+            target = (pathlib.Path(cfg_runtime_workspace()) / "users" / x_user_id
+                      / "uploads" / conversation_id / f"{file_id}_{row['name']}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists() or target.stat().st_size != len(data):
+                target.write_bytes(data)
+            out.append({"name": row["name"], "size": row["size_bytes"],
+                        "path": str(target)})
+        return out
+
     # ---------- 定时任务（webapi 进程内调度器；REPL 不跑调度） ----------
 
     @app.get("/schedules")
@@ -399,6 +487,15 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             if now - last > getattr(config, "agent_idle_evict_seconds", 1800.0) and stale_key in agents:
                 agents.pop(stale_key, None)
                 agent_last_used.pop(stale_key, None)
+
+        # 附件：落本地副本 + 生成清单（元数据行注入任务文本；沙箱挂目录读数据）
+        attachments = _resolve_attachments(
+            x_user_id, (body or {}).get("attachments") or [], conversation_id)
+        if attachments:
+            lines = ["【附件】以下数据文件已就位（沙箱内见 /corpus/uploads/，本机见列出的路径）："]
+            for a in attachments:
+                lines.append(f"- {a['name']}（{a['size']} 字节）路径：{a['path']}")
+            task = "\n".join(lines) + "\n\n" + task
 
         key = (x_user_id, conversation_id, user_models.get(x_user_id))
         if key not in agents:
@@ -846,7 +943,7 @@ def _user_files():
     global _user_files_instance
     if _user_files_instance is None:
         from biopilot.config import BioPilotConfig
-        from biopilot.core.storage.user_files import make_user_file_store
+        from biopilot.core.common.storage.user_files import make_user_file_store
         cfg = BioPilotConfig.from_env()
         _user_files_instance = make_user_file_store(
             cfg, str(pathlib.Path(cfg.runtime.workspace) / "user-files"))
@@ -854,6 +951,12 @@ def _user_files():
 
 
 _user_files_instance = None
+
+
+def cfg_runtime_workspace() -> str:
+    """当前工作区根（配置派生；本地路径拼装共用）。"""
+    from biopilot.config import BioPilotConfig
+    return BioPilotConfig.from_env().runtime.workspace
 
 
 def _paper_store():

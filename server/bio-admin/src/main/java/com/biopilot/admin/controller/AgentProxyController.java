@@ -227,6 +227,59 @@ public class AgentProxyController {
         }
     }
 
+    /** 对话附件：上传（multipart 入 OSS + 登记行）。 */
+    @PostMapping(value = "/files/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<String> filesUpload(@RequestParam("file") MultipartFile file) {
+        long userId = StpUtil.getLoginIdAsLong();
+        String boundary = "----biopilot" + java.util.UUID.randomUUID();
+        String original = file.getOriginalFilename() == null ? "data.bin"
+                : file.getOriginalFilename().replace("\"", "")
+                      .replace("\r", "").replace("\n", "");
+        String contentType = file.getContentType() == null
+                ? "application/octet-stream" : file.getContentType();
+        byte[] body;
+        try {
+            byte[] head = ("--" + boundary + "\r\n"
+                    + "Content-Disposition: form-data; name=\"file\"; filename=\""
+                    + original + "\"\r\n"
+                    + "Content-Type: " + contentType + "\r\n\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            byte[] fileBytes = file.getBytes();
+            byte[] tail = ("\r\n--" + boundary + "--\r\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            body = new byte[head.length + fileBytes.length + tail.length];
+            System.arraycopy(head, 0, body, 0, head.length);
+            System.arraycopy(fileBytes, 0, body, head.length, fileBytes.length);
+            System.arraycopy(tail, 0, body, head.length + fileBytes.length, tail.length);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"读取上传内容失败\"}");
+        }
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(adapterBase + "/files/upload"))
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .header("X-User-Id", String.valueOf(userId))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
+    @GetMapping("/files")
+    public ResponseEntity<String> filesList() {
+        return proxyGet("/files");
+    }
+
     /** 会话历史回放：user/assistant 两条腿，供点击会话后回显。 */
     @GetMapping("/chat/history")
     public ResponseEntity<String> chatHistory(

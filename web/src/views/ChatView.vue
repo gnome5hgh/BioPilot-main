@@ -76,9 +76,18 @@
         <div class="project-hint" v-if="currentProjectName">
           📁 {{ currentProjectName }} · 本会话的消息将归入该项目
         </div>
+        <div class="attach-chips" v-if="attachments.length">
+          <span v-for="a in attachments" :key="a.file_id" class="chip">
+            📎 {{ a.name }} <button class="chip-x" @click="removeAttachment(a)">×</button>
+          </span>
+        </div>
         <textarea v-model="input" :placeholder="placeholder"
                   @keydown.enter.exact.prevent="send"></textarea>
         <div class="foot">
+          <input ref="fileInput" type="file" class="file-hidden" multiple
+                 accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq"
+                 @change="uploadFiles" />
+          <button class="attach-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
           <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
             <option v-for="m in models" :key="m.name" :value="m.name">{{ m.name }}</option>
           </select>
@@ -154,6 +163,8 @@ let conversationId = crypto.randomUUID()
 // 多模型选择：清单不含 key；切换只写会话偏好，下一 run 生效
 const models = ref([])
 const selectedModel = ref('')
+const attachments = ref([])
+const fileInput = ref(null)
 
 const currentProjectName = computed(() =>
   projects.value.find(p => p.projectId === currentProject.value)?.name || '')
@@ -258,6 +269,31 @@ async function selectModel() {
   await http.post('/agent/models/select', { name: selectedModel.value })
 }
 
+// 附件：选择即上传（先入 OSS 登记元数据），发送时把 file_id 引用随消息体下行
+async function uploadFiles(evt) {
+  const files = Array.from(evt.target.files || [])
+  if (!files.length) return
+  for (const f of files) {
+    if (f.size > 100 * 1024 * 1024) {
+      window.alert(`「${f.name}」超过 100MB 上限，已跳过`)
+      continue
+    }
+    const form = new FormData()
+    form.append('file', f)
+    try {
+      const { data } = await http.post('/agent/files/upload', form)
+      attachments.value.push(data)
+    } catch (e) {
+      window.alert(e?.response?.data?.detail || `「${f.name}」上传失败`)
+    }
+  }
+  evt.target.value = ''
+}
+
+function removeAttachment(a) {
+  attachments.value = attachments.value.filter(x => x.file_id !== a.file_id)
+}
+
 function resetChat() {
   messages.value = []
   pendingConfirm.value = null
@@ -354,6 +390,7 @@ async function send() {
       },
       body: JSON.stringify({
         task, conversation_id: conversationId, project_id: currentProject.value,
+        attachments: attachments.value,
       }),
     })
     if (resp.status === 401) {
@@ -409,6 +446,7 @@ async function send() {
     reply.text = reply.text ? `${reply.text}\n\n[连接中断：${e.message}]` : `对话失败：${e.message}`
   } finally {
     busy.value = false
+    attachments.value = []   // 已随消息下行
     loadSessions()   // 新会话/新标题/项目归属进左栏
     await nextTick(); scrollBottom()
   }
@@ -494,6 +532,11 @@ async function answerConfirm(approved) {
 .send { background: #2ec5b1; color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; flex: none; }
 .send:disabled { opacity: .6; cursor: default; }
 .model-select { border: 1px solid #e6e9ed; border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #4a5160; background: #fff; }
+.attach-btn { border: 1px solid #e6e9ed; background: #fff; border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 16px; color: #4a5160; flex: none; }
+.file-hidden { display: none; }
+.attach-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.chip { font-size: 12px; background: #f0f1f5; border-radius: 6px; padding: 3px 8px; display: inline-flex; align-items: center; gap: 4px; }
+.chip-x { border: none; background: transparent; cursor: pointer; color: #818999; padding: 0 2px; }
 
 /* 确认弹框 */
 .confirm-mask { position: fixed; inset: 0; background: rgba(20, 24, 34, .45); display: flex; align-items: center; justify-content: center; z-index: 50; }
