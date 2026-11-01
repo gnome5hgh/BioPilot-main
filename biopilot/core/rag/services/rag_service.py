@@ -5,6 +5,7 @@
 内容检索不到。整个检索与索引过程共用同一把可重入锁（含模型推理），
 整段串行执行是最简单且正确的并发模型。
 """
+from pathlib import Path
 import threading
 import time
 
@@ -41,9 +42,21 @@ class RAGService:
 
         Args:
             config: 全局配置对象，包含工作区路径、模型名等。
+            user_domain: 用户隔离域。local=本机单用户（共享语料根与状态文件）；
+                其余值（登录用户 id）派生独立语料根 <workspace>/rag/users/<域>/papers
+                与独立索引状态文件——平台论文从 OSS 同步到该镜像目录后走同一条
+                解析→切块→入库管线，collection 与检索面随之按用户隔离。
         """
+        self.user_domain = user_domain or "local"
+        if self.user_domain != "local":
+            import re as _re
+            safe = _re.sub(r"[^A-Za-z0-9_-]", "_", self.user_domain)
+            from dataclasses import replace as _dc_replace
+            mirror = (Path(config.runtime.workspace) / "rag" / "users"
+                      / safe / "papers")
+            config = _dc_replace(
+                config, corpus=_dc_replace(config.corpus, pdf_dir=str(mirror)))
         self.config = config
-        self.user_domain = user_domain
         # 可重入锁，保护整个索引/检索流程，确保并发下状态一致
         self.lock = threading.RLock()
 
@@ -288,6 +301,70 @@ class RAGService:
                 max_query_chars=self.config.rag.query_rewrite.max_query_chars)
         return self._rewriter
 
+    def index_user_papers(self, user_id: str, db, store) -> dict:
+        """把该用户在 papers 表登记的论文（原文在 OSS）索引进本人 collection。
+
+        平台的论文原文在对象存储、元数据行在 papers 表；本方法把它们同步到
+        本域的镜像语料根（<paper_id>.pdf，稳定路径保证块 id 跨次重建稳定），
+        然后走与本地语料同一条 index_all 管线（增量、删除清理、BM25 重建）。
+        索引成功的行置 papers.indexed=1；解析/取回失败的行保持 0，下次重建重试。
+        papers 行被删除的论文，其镜像文件同步删除，index_all 据此清掉旧块。
+
+        Args:
+            user_id: 归属用户（即本服务实例的用户域）。
+            db: MemoryDB，papers 元数据读写。
+            store: 对象存取器（put/get 语义，论文原文来源）。
+
+        Returns:
+            dict: synced（本次下载篇数）/ indexed（置 1 篇数）/ failed（失败清单）。
+        """
+        rows = db.execute(
+            "SELECT id, oss_key, size_bytes, indexed FROM papers WHERE user_id=?",
+            (user_id,)).fetchall()
+        mirror = Path(self.config.corpus.pdf_dir)
+        mirror.mkdir(parents=True, exist_ok=True)
+
+        wanted: dict[str, dict] = {}
+        synced = 0
+        for r in rows:
+            paper_id = r["id"]
+            target = mirror / f"{paper_id}.pdf"
+            wanted[str(target)] = True
+            exists = target.exists() and target.stat().st_size > 0
+            if exists:
+                continue
+            data = store.get(r["oss_key"])
+            if not data:
+                continue
+            target.write_bytes(data)
+            synced += 1
+
+        # 镜像里已不在 papers 表的文件清掉（论文被删 → 块随 index_all 清理）
+        for old in mirror.glob("*.pdf"):
+            if str(old) not in wanted:
+                old.unlink()
+
+        with self.lock:
+            outcome = self.get_indexer().index_all()
+
+        # 状态里有镜像路径 = 该篇解析与入库成功（empty/skipped 不会写状态）
+        raw = self.get_indexer()._read_state()
+        state = (raw or (0, {}))[1]
+        indexed = 0
+        failed: list[dict] = []
+        for r in rows:
+            target = str(mirror / f"{r['id']}.pdf")
+            if state.get(target):
+                if not r["indexed"]:
+                    db.execute("UPDATE papers SET indexed=1 WHERE id=? AND user_id=?",
+                               (r["id"], user_id))
+                indexed += 1
+            else:
+                failed.append({"paper_id": r["id"],
+                               "reason": "未进入索引（对象取回或解析失败）"})
+        return {"synced": synced, "indexed": indexed,
+                "failed": failed, "changed": getattr(outcome, "changed", [])}
+
     # ---------- 对外便捷入口（索引/检索持同一把锁） ----------
     def index_document(self, path: str) -> IndexOutcome:
         """单篇文档的增量重索引（持锁）。
@@ -343,26 +420,30 @@ class RAGService:
             return self.get_retriever().retrieve(query, top_k)
 
 
-# ---------- 模块级单例 ----------
-_rag_service: RAGService | None = None
+# ---------- 模块级服务缓存（按用户域一域一例） ----------
+_rag_services: dict[str, RAGService] = {}
 _rag_singleton_lock = threading.RLock()
 
 
-def get_rag_service(config: BioPilotConfig | None = None) -> RAGService:
-    """模块级单例：所有调用方共享同一个检索服务实例（增量更新的前提）。
+def get_rag_service(config: BioPilotConfig | None = None,
+                    user_domain: str = "local") -> RAGService:
+    """按用户域缓存的检索服务实例（增量更新与索引状态的前提）。
 
-    双重检查加锁，保证并发下只创建一次。
-    如果未传入 config，则从环境变量加载默认配置。
+    local 域沿用历史单例语义（共享语料根）；其余域每域一个实例——collection
+    加 `_{域}` 后缀、语料根与状态文件各自独立，检索与索引天然按用户隔离。
+    双重检查加锁，保证并发下每域只创建一次。
 
     Args:
         config: 可选配置对象，不传则使用 BioPilotConfig.from_env()。
+        user_domain: 用户隔离域（工具侧经运行时上下文取当前 run 的域）。
 
     Returns:
-        RAGService: 全局唯一的检索服务实例。
+        RAGService: 该域唯一的检索服务实例。
     """
-    global _rag_service
-    if _rag_service is None:
-        with _rag_singleton_lock:
-            if _rag_service is None:
-                _rag_service = RAGService(config or BioPilotConfig.from_env())
-    return _rag_service
+    key = user_domain or "local"
+    with _rag_singleton_lock:
+        svc = _rag_services.get(key)
+        if svc is None:
+            svc = RAGService(config or BioPilotConfig.from_env(), user_domain=key)
+            _rag_services[key] = svc
+    return svc

@@ -7,6 +7,7 @@
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.constants import IndexOutcomeStatus
 from biopilot.core.rag.services.rag_service import get_rag_service
+from biopilot.tools.rag.runtime_context import get_rag_domain
 
 #: 单次入库的路径条数上限。上限的作用是让超量请求显式失败并提示分批，
 #: 而不是静默处理一批耗时很长的文档把子 agent 预算耗光。
@@ -61,7 +62,7 @@ class IndexPathsTool(Tool):
                      "请拆成多批",
                 is_error=True)
 
-        svc = get_rag_service()
+        svc = get_rag_service(user_domain=get_rag_domain())
         lines: list[str] = []
         indexed = skipped = 0
         failed: list[str] = []

@@ -8,6 +8,7 @@
 """
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.services.rag_service import get_rag_service
+from biopilot.tools.rag.runtime_context import get_rag_domain
 
 #: 幽灵 / 未入库清单在输出里的展示上限（超出只报总数，避免几十篇刷屏）
 _LIST_CAP = 10
@@ -42,7 +43,7 @@ class IndexStatusTool(Tool):
             （不中断调用方流程，由上级决定是否请示用户）。
         """
         try:
-            st = get_rag_service().index_status()
+            st = get_rag_service(user_domain=get_rag_domain()).index_status()
         except Exception as e:
             # 与 reindex_all 同款：外部服务缺席如实回报，不让异常穿透 ReAct 循环
             return ToolResult(text=f"索引体检失败：{e}", is_error=True)

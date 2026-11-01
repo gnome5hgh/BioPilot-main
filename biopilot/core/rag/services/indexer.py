@@ -172,8 +172,13 @@ class RagIndexer:
             service: RAGService 单例，索引器和检索器共享 service 中的组件（向量库、BM25、编码器等）。
         """
         self.service = service
-        # 状态文件：记录已索引文档的绝对路径 → 最后修改时间（浮点数时间戳）
-        self._state_path = Path(service.config.runtime.workspace) / "rag" / "index_state.json"
+        # 状态文件：记录已索引文档的绝对路径 → 最后修改时间（浮点数时间戳）。
+        # 用户域实例用独立状态文件——域内论文走镜像语料根，若与 local 共用一份，
+        # 本地 index_all 的「已删除清理」会把域内论文当 removed 连向量一起清掉。
+        domain = getattr(service, "user_domain", "local")
+        suffix = "" if domain == "local" else f"_{domain}"
+        self._state_path = (Path(service.config.runtime.workspace) / "rag"
+                            / f"index_state{suffix}.json")
 
     @property
     def _recipe(self) -> str:

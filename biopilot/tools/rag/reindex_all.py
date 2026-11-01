@@ -7,6 +7,7 @@
 """
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.services.rag_service import get_rag_service
+from biopilot.tools.rag.runtime_context import get_rag_domain
 
 
 class ReindexAllTool(Tool):
@@ -36,7 +37,7 @@ class ReindexAllTool(Tool):
             ToolResult，文本为变更/清理/块数合计；失败时返回错误文本。
         """
         try:
-            out = get_rag_service().index_all()
+            out = get_rag_service(user_domain=get_rag_domain()).index_all()
         except Exception as e:
             # 外部服务缺席不该以异常穿透到 ReAct 循环：如实回报，由上级决定是否请示用户
             return ToolResult(text=f"索引收敛失败：{e}", is_error=True)

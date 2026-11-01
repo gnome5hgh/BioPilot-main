@@ -576,14 +576,20 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         if x_user_id in reindex_running:
             return {"status": "already-running"}
-        from biopilot.core.rag.services.rag_service import RAGService
+        from biopilot.core.rag.services.rag_service import get_rag_service
         from biopilot.config import BioPilotConfig
-        svc = RAGService(BioPilotConfig.from_env(), user_domain=x_user_id)
+        from biopilot.core.rag.storage.image_store import MinioImageStore
+        cfg = BioPilotConfig.from_env()
+        svc = get_rag_service(cfg, user_domain=x_user_id)
+        store = MinioImageStore(cfg.rag.storage.minio)
+        db = _shared_db()
         reindex_running.add(x_user_id)
 
         def _job() -> None:
             try:
-                svc.index_all()
+                # 平台论文的原文在 MinIO、元数据在 papers 表：同步镜像后走
+                # 本域 index_all 管线；成功的行置 indexed=1（进度看 /kb/status）
+                svc.index_user_papers(x_user_id, db, store)
             finally:
                 reindex_running.discard(x_user_id)
 

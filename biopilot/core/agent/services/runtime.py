@@ -594,15 +594,21 @@ class Agent:
         还原父绑定；单会话 REPL 语义不变（绑定值即装配期那一份）。
         """
         token = None
+        rag_token = None
         if self._memory_context is not None:
             from biopilot.tools.memory.runtime_context import set_memory_context
             token = set_memory_context(self._memory_context)
+        # RAG 用户域随 run 绑定：检索/索引工具落在本用户的 collection
+        from biopilot.tools.rag.runtime_context import (
+            _rag_domain, set_rag_domain)
+        rag_token = set_rag_domain(getattr(self, "user_id", "local"))
         try:
             return await self._run_react(task)
         finally:
             if token is not None:
                 from biopilot.tools.memory.runtime_context import _memory_context
                 _memory_context.reset(token)
+            _rag_domain.reset(rag_token)
 
     async def _run_react(self, task: str) -> str:
         """

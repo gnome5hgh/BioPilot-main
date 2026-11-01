@@ -9,6 +9,7 @@ import logging
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.domain import section_label
 from biopilot.core.rag.services.rag_service import get_rag_service
+from biopilot.tools.rag.runtime_context import get_rag_domain
 from biopilot.tools.memory.runtime_context import get_memory_context
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ class RagRetrieveTool(Tool):
             ToolResult: 包含格式化文本的 ToolResult 对象。
         """
         # 1. 获取 RAGService 单例（若已注入则使用注入的实例）。
-        svc = self._service or get_rag_service()
+        svc = self._service or get_rag_service(user_domain=get_rag_domain())
         if top_k is None:
             top_k = svc.config.rag.retriever.top_k
 
