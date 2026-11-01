@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS audit_event (
     payload MEDIUMTEXT NOT NULL,
     PRIMARY KEY (id),
     KEY idx_audit_trace (trace_id),
-    KEY idx_audit_session (session_id, created_at)
+    KEY idx_audit_session (session_id, created_at),
+    KEY idx_audit_user (user_id, created_at)
 );
 
 -- papers 表：用户论文目录元数据（原文在 MinIO users/<uid>/papers/，行级 user_id 隔离）

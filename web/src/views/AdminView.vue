@@ -31,7 +31,23 @@
     </div>
 
     <div v-if="cur === '审计日志'" class="cards">
-      <table>
+      <div class="sub-tabs">
+        <button :class="{ active: auditSrc === 'events' }" @click="auditSrc = 'events'; loadAudit()">操作审计</button>
+        <button :class="{ active: auditSrc === 'logins' }" @click="auditSrc = 'logins'; loadAudit()">登录日志</button>
+      </div>
+      <table v-if="auditSrc === 'events'">
+        <thead><tr><th>时间</th><th>用户</th><th>事件</th><th>工具/角色</th><th>风险</th><th>决策</th><th>结果</th></tr></thead>
+        <tbody><tr v-for="e in auditEvents" :key="e.id">
+          <td>{{ (e.started_at || '').replace('T', ' ').slice(0, 19) }}</td>
+          <td>{{ e.user_id }}</td>
+          <td>{{ e.event_type }}</td>
+          <td>{{ e.tool_name || e.agent_type || '' }}</td>
+          <td>{{ e.risk_level || '' }}</td>
+          <td>{{ e.policy_decision || e.approval_outcome || '' }}</td>
+          <td>{{ e.result_status || '' }}</td>
+        </tr></tbody>
+      </table>
+      <table v-if="auditSrc === 'logins'">
         <thead><tr><th>用户名</th><th>结果</th><th>IP</th><th>时间</th></tr></thead>
         <tbody><tr v-for="l in audit" :key="l.id">
           <td>{{ l.userName }}</td><td>{{ l.outcome }}</td><td>{{ l.ip }}</td><td>{{ l.createTime }}</td>
@@ -50,11 +66,22 @@ const cur = ref('用户管理')
 const users = ref([])
 const sessions = ref([])
 const audit = ref([])
+const auditEvents = ref([])
+const auditSrc = ref('events')
+
+async function loadAudit() {
+  if (auditSrc.value === 'events') {
+    auditEvents.value = (await http.get('/admin/api/audit-events')).data.data || []
+  } else {
+    audit.value = (await http.get('/admin/api/audit')).data.data || []
+  }
+}
 
 async function load() {
   users.value = (await http.get('/admin/api/users')).data.data
   sessions.value = (await http.get('/admin/api/sessions')).data.data
   audit.value = (await http.get('/admin/api/audit')).data.data
+  loadAudit()
 }
 
 async function toggleStatus(u) {

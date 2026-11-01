@@ -33,6 +33,31 @@ public class UserAdminController {
         this.jdbc = jdbc;
     }
 
+    /** 操作审计事件（引擎侧 audit_event 核心列；payload 不出接口——取证回放按需直查库）。 */
+    @GetMapping("/audit-events")
+    @SaCheckRole("ADMIN")
+    public R<List<Map<String, Object>>> auditEvents(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String userId,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String eventType,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "200") int limit) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT id, user_id, event_type, session_id, agent_type, tool_name,"
+                + " risk_level, policy_decision, result_status, started_at, trace_id"
+                + " FROM audit_event WHERE 1=1");
+        var params = new java.util.ArrayList<Object>();
+        if (userId != null && !userId.isBlank()) {
+            sql.append(" AND user_id = ?");
+            params.add(userId);
+        }
+        if (eventType != null && !eventType.isBlank()) {
+            sql.append(" AND event_type = ?");
+            params.add(eventType);
+        }
+        sql.append(" ORDER BY id DESC LIMIT ?");
+        params.add(Math.min(Math.max(limit, 1), 1000));
+        return R.ok(jdbc.queryForList(sql.toString(), params.toArray()));
+    }
+
     /** 用户列表（全量，管理视角）。 */
     @GetMapping("/users")
     @SaCheckRole("ADMIN")
