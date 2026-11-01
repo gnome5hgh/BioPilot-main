@@ -85,7 +85,7 @@
                   @keydown.enter.exact.prevent="send"></textarea>
         <div class="foot">
           <input ref="fileInput" type="file" class="file-hidden" multiple
-                 accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq"
+                 accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
                  @change="uploadFiles" />
           <button class="attach-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
           <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
@@ -196,7 +196,30 @@ onMounted(() => {
   loadSessions()
   loadProjects()
   loadModels()
+  loadPapers()
 })
+
+async function loadPapers() {
+  try {
+    papers.value = (await http.get('/agent/papers')).data.papers || []
+  } catch { /* 论文清单拿不到就空态 */ }
+}
+
+function togglePaperPick() {
+  paperPickOpen.value = !paperPickOpen.value
+  if (paperPickOpen.value) loadPapers()   // 打开时刷新（含刚上传的）
+}
+
+function pickPaper(evt) {
+  const pid = evt.target.value
+  if (!pid) return
+  const p = papers.value.find(x => x.id === pid)
+  if (p && !attachments.value.some(a => a.paper_id === pid)) {
+    attachments.value.push({ paper_id: pid, name: p.name || pid.slice(0, 8) })
+  }
+  paperPickOpen.value = false
+  evt.target.value = ''
+}
 
 function dateGroup(t) {
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
@@ -282,6 +305,9 @@ async function uploadFiles(evt) {
     form.append('file', f)
     try {
       const { data } = await http.post('/agent/files/upload', form)
+      if (data.paper_id) {
+        window.alert(`论文《${f.name}》已入论文目录并开始后台索引，稍后可在对话中直接问答`)
+      }
       attachments.value.push(data)
     } catch (e) {
       window.alert(e?.response?.data?.detail || `「${f.name}」上传失败`)

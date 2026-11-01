@@ -267,18 +267,32 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=413, detail="文件超过大小上限")
         file_id = uuid.uuid4().hex
         name = pathlib.PurePosixPath(file.filename or "data.bin").name or "data.bin"
-        oss_key = _user_files().put(
-            x_user_id, f"uploads/{file_id}/{name}", data,
-            file.content_type or "application/octet-stream")
+        from biopilot.tools.papers import register_paper
         from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
         db = _shared_db()
+        is_pdf = name.lower().endswith(".pdf")
+        if is_pdf:
+            # 论文走论文目录通道：OSS papers 前缀 + papers 行 + 自动索引
+            #（RAG 全局可检索）；uploaded_file 行让本条消息也引用它
+            paper_id = uuid.uuid4().hex
+            oss_key = (f"users/{x_user_id}/papers/{paper_id}/"
+                       f"{_sanitize_paper_filename(name)}")
+            _paper_store().put_file(oss_key, data, "application/pdf")
+            register_paper(db, x_user_id, paper_id, "", oss_key, len(data))
+            _schedule_user_index(x_user_id)
+        else:
+            oss_key = _user_files().put(
+                x_user_id, f"uploads/{file_id}/{name}", data,
+                file.content_type or "application/octet-stream")
         db.execute(
             "INSERT INTO uploaded_file (id, user_id, name, oss_key, size_bytes,"
             " content_type, created_at) VALUES (?,?,?,?,?,?,?)",
             (file_id, x_user_id, name, oss_key, len(data),
-             file.content_type or "", datetime.now(timezone.utc).isoformat()))
+             file.content_type or "", now))
         return {"file_id": file_id, "name": name, "size": len(data),
-                "content_type": file.content_type or ""}
+                "content_type": file.content_type or "",
+                "paper_id": paper_id if is_pdf else None}
 
     @app.get("/files")
     async def files_list(x_user_id: str | None = Header(default=None)) -> dict:
@@ -310,24 +324,39 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         db = _shared_db()
         out = []
         for att in attachments or []:
-            file_id = (att or {}).get("file_id", "")
-            if not file_id:
+            att = att or {}
+            file_id = att.get("file_id", "")
+            paper_id = att.get("paper_id", "")
+            if file_id:
+                row = db.execute(
+                    "SELECT name, oss_key, size_bytes FROM uploaded_file"
+                    " WHERE id=? AND user_id=?", (file_id, x_user_id)).fetchone()
+                if row is None:
+                    continue
+                name, oss_key, size = row["name"], row["oss_key"], row["size_bytes"]
+            elif paper_id:
+                # 论文目录引用：论文原文在同前缀下，论文行校验归属
+                prow = db.execute(
+                    "SELECT oss_key FROM papers WHERE id=? AND user_id=?",
+                    (paper_id, x_user_id)).fetchone()
+                if prow is None:
+                    continue
+                oss_key = prow["oss_key"]
+                name = pathlib.PurePosixPath(oss_key).name
+                size = 0
+            else:
                 continue
-            row = db.execute(
-                "SELECT name, oss_key, size_bytes FROM uploaded_file"
-                " WHERE id=? AND user_id=?", (file_id, x_user_id)).fetchone()
-            if row is None:
-                continue
-            data = _user_files().get(row["oss_key"])
+            data = _user_files().get(oss_key)
             if data is None:
                 continue
             target = (pathlib.Path(cfg_runtime_workspace()) / "users" / x_user_id
-                      / "uploads" / conversation_id / f"{file_id}_{row['name']}")
+                      / "uploads" / conversation_id
+                      / f"{file_id or paper_id}_{name}")
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists() or target.stat().st_size != len(data):
                 target.write_bytes(data)
-            out.append({"name": row["name"], "size": row["size_bytes"],
-                        "path": str(target)})
+            out.append({"name": name, "size": size or len(data),
+                        "path": str(target), "paper_id": paper_id or None})
         return out
 
     # ---------- 定时任务（webapi 进程内调度器；REPL 不跑调度） ----------
