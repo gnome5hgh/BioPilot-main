@@ -70,3 +70,28 @@
 - **附注**：Milvus 不可用时 `rag_retrieve` **不会**软降级成纯 BM25，而是返回固定文本「⚠️ 向量检索不可用（Milvus 异常）」（`biopilot/tools/rag/rag_retrieve.py`）；`Retriever` 里只有 embedding 与 reranker 两路有 try/except，向量路与 BM25 路的 `fetch_by_ids` 均无保护——BM25 索引虽在本地内存，其元数据仍依赖 Milvus，所以「退纯 BM25」在 Milvus 挂掉时物理上不可行。别把这条与「embedding 未配 key → 退纯 BM25」的软降级混淆。
 - **修法（已实施）**：各 RPC 传 `rag.storage.timeout`（读路径 5s / 写路径 60s），并在 `rag_retrieve` 边界加检索侧熔断器（`biopilot/core/rag/services/breaker.py`，冷却 60s，跳闸期间直接返回降级文本）。旧版本上遇到时先升到含 `RetrievalBreaker` 的版本。
 - **验证**：`docker stop milvus-standalone` 后调一次 `rag_retrieve`，应在数秒内返回降级文本，而不是阻塞数十秒；再调一次应瞬时返回（熔断短路）；Milvus 起来后过冷却窗口自动恢复，无需重启进程。
+
+### `biopilot --web` 启动即 `ImportError: cannot import name ... from 'biopilot.webapi'`
+- **根因**：包门面（`biopilot/webapi/__init__.py`）的 `__all__` 漏再导出某个符号（如 `WebConfig`）——CLI 与测试可能从 `biopilot.webapi.app` 直连绕过门面，测试全绿也挡不住门面缺角。
+- **修法**：把缺的符号加进门面的 import 与 `__all__`；新增公开符号时同步维护门面。
+- **验证**：`conda run -n biopilot python -c "from biopilot.webapi import <缺失符号>"`。
+
+### 适配层起不来：`memory_dsn 必须是 mysql://... 形式` / 启动即 fail-fast（`BIOPILOT_MEMORY_MYSQL_DSN`）
+- **根因**：`biopilot --web` 不读 `config.yaml` 的 DSN 段，DSN 只来自环境变量；标题更新、论文/文档端点的共享 `MemoryDB()` 无参构造时没有回退默认值。REPL 模式才有 config 默认值兜底。
+- **修法**：启动命令带上 `BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3306/biopilot"`；库不存在时先 `docker compose up -d`（MySQL 容器首启由 `docker/mysql-init/` 建库建表；数据卷已存在的旧容器**不会**重跑 init，表缺失要手动执行 `server/script/sql/` 与建表脚本）。
+- **验证**：`docker exec biopilot-mysql mysql -uroot biopilot -e "SHOW TABLES;"` 列出 blocks/messages/sys_user 等表；适配层 `/health` 返回 ok。
+
+### 网页端带 body 的请求（对话/上传）到适配层全变空体，FastAPI 报 `Field required`（Java→Python 代理）
+- **根因**：SpringBoot 代理用的 java.net.http.HttpClient 默认带 h2c 升级头（`Upgrade: h2c` + `HTTP2-Settings`），uvicorn 把它当协议升级请求处理并**吞掉请求体**——GET 不带体所以列表类接口正常，极有迷惑性。
+- **修法**：`AgentProxyController` 的 HttpClient 已锁 `HttpClient.Version.HTTP_1_1`；新增代理端点必须共用这个 client，别 new 默认的。
+- **验证**：`curl -F "file=@/tmp/x.pdf" -H "satoken: <token>" http://127.0.0.1:8080/agent/papers/upload` 返回 `{"status":"ok",...}` 而非 422。
+
+### 管理端/profile 之类接口返回 500「系统繁忙」，日志里却没有异常堆栈
+- **根因**：全局异常兜底把未知异常转成通用文案且不打日志（设计如此，防泄内部细节）；「不存在的路径」也曾被它吞成 500（现 NoResourceFound 已如实 404）。
+- **修法**：先核对请求路径与方法是否真的存在（看控制器注解）；确实存在再本地复现并临时在兜底 handler 加日志定位。前端调错路径现在会拿到 404 + `接口不存在: <path>`。
+- **验证**：`curl -i http://127.0.0.1:8080/auth/profile`（无 token 应 401；拼错路径应 404）。
+
+### `mvn spring-boot:run -pl bio-admin -am` 报 `Unable to find a suitable main class`
+- **根因**：`spring-boot:run` 这类直接目标调用会在 reactor **每个**模块上执行，`-am` 把 bio-common-core 等库模块拉进来，它们没有 main class。
+- **修法**：先 `cd server && mvn install -DskipTests` 一次，之后 `cd server/bio-admin && mvn spring-boot:run`（reactor 里只有启动模块自己）。
+- **验证**：启动日志出现 `Started BioPilotApplication`，`curl http://127.0.0.1:8080/auth/profile` 返回 401（而非连接拒绝）。

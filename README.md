@@ -1,10 +1,18 @@
 # BioPilot
 
-LLM 驱动的学术研究流程助手：一个交互式终端 REPL，围绕「读论文 → 做笔记 → 追问题」的科研工作流，提供多 Agent 协作、RAG 知识库检索、引用管理与记忆系统。
+实验室私有部署的多用户生信科研 Agent 平台：网页端登录使用，围绕「读论文 → 做笔记 → 追问题」的科研工作流，提供多 Agent 协作、RAG 知识库检索、引用管理与记忆系统；数据按用户隔离（MySQL 行级 + OSS 前缀 + 独立向量 collection）。也可以单机 REPL 方式使用，两种方式同库互通。
+
+## 两种使用方式
+
+| | 网页平台（多用户） | 本地 REPL（单人） |
+|---|---|---|
+| 启动 | 三层各一进程（见下） | `biopilot` 一条命令 |
+| 登录 | 注册账号，数据按 user_id 隔离 | 无需登录 |
+| 适合 | 实验室共用部署 | 个人机器、开发调试 |
 
 ## 功能特性
 
-- **多 Agent 协作**：supervisor 单根调度，读子 agent 能力清单（`<available_agents>`）按需拆解子任务并派发（paper-agent 文献检索与阅读 / review-agent 审稿评阅 / note-agent 论文笔记 / research-agent 选题与研究计划 / citation-agent 引用库维护 / rag-agent 语料索引与检索 / memory-agent 记忆与清单），各子 agent 返回结构化摘要后聚合回答
+- **多 Agent 协作**：supervisor 单根调度，读子 agent 能力清单（`<available_agents>`）按需拆解子任务并派发（paper-agent 文献检索与阅读 / review-agent 审稿评阅 / note-agent 论文笔记 / research-agent 选题与研究计划 / citation-agent 引用库维护 / rag-agent 语料索引与检索 / memory-agent 记忆与清单 / code-agent 沙箱代码执行），各子 agent 返回结构化摘要后聚合回答
 - **意图识别（可选预处理层，默认关）**：规则层高精度模式命中即定类，不命中交给结合对话史的判定服务，产出一条单类别信号注入根 agent；它只作信号，不决定派发顺序
 - **RAG 检索栈**：本地版面解析 PDF（PyMuPDF 还原章节与坐标，不依赖外部服务）→ 学术分块（按节切 + 句界滑窗，丢弃参考文献/样板章节残渣）→ Milvus 向量 + BM25 混合检索 → RRF 融合 → 云端重排
 - **引用管理**：BibTeX 文库读写、语料标题索引、引用溯源，支持 APA / GB/T 7714 等格式
@@ -44,6 +52,24 @@ biopilot
 ```
 
 REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/mcp` 查看 MCP server 状态、`/version` 查看版本。历史会话可用 `biopilot --resume` 回放。
+
+### 网页平台启动
+
+```bash
+docker compose up -d                       # MySQL + MinIO + Milvus（首启自动建库建表）
+
+# ① Python 适配层（8300；DSN 环境变量必带）
+BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3306/biopilot" biopilot --web
+
+# ② SpringBoot（8080；首次先 cd server && mvn install -DskipTests）
+cd server/bio-admin && mvn spring-boot:run
+
+# ③ 前端（5173）
+cd web && npm install && npm run dev
+```
+
+浏览器打开 `http://localhost:5173` 注册使用；第一个管理员需要手工提权：
+`docker exec biopilot-mysql mysql -uroot biopilot -e "UPDATE sys_user SET role='ADMIN' WHERE user_name='你的用户名';"`，然后重新登录。
 
 ### 一键安装提示词
 
@@ -94,8 +120,12 @@ API key 也可经环境变量提供（如 `BIOPILOT_LLM_API_KEY`、`BIOPILOT_RAG
 ## 架构概览
 
 ```
+web/             前端（Vue3 + Vite）:登录 / 对话 / 论文库 / 文档 / 文献 / 终端 / 管理
+server/          SpringBoot 3.5（Java 21）:注册登录鉴权 / 业务表 / 内网代理（bio-admin
+                 / bio-modules / bio-common 三模块）
 biopilot/
-  cli/           装配根:对象图组装 + 启动预检
+  webapi/        HTTP/SSE 适配层:对话流 + 数据端点 + 资源闸（只绑回环/内网）
+  cli/           装配根:对象图组装 + 启动预检（REPL 与 web 会话共用同一套装配）
   config/        全局可调参数的唯一声明点
   core/          核心运行层:agent(ReAct 循环) / llm(客户端 + 结构化输出)
                  / intent(意图识别) / memory(记忆系统) / security(安全中间件)
@@ -107,11 +137,11 @@ biopilot/
   terminal/      终端交互层:REPL + 活动流渲染 + 确认中心 + 会话回放
 
 agents/          各角色 agent 的 AGENT.md + tools.py（插件目录，位于仓库根）
-.biopilot/      运行时数据根与资产目录:skills(流程 skill) / intent(意图知识库)
+.biopilot/      运行时数据根与资产目录:skills(流程 skill) / intent(意图知识库) / infra(服务数据卷)
 ```
 
-数据流：用户输入 →（可选）意图识别 → supervisor ReAct 循环（必要时 spawn 子 agent）→ 工具调用（本地工具 + MCP 工具）→ 结构化摘要聚合 → 流式回答。
+数据流：用户输入 →（可选）意图识别 → supervisor ReAct 循环（必要时 spawn 子 agent）→ 工具调用（本地工具 + MCP 工具）→ 结构化摘要聚合 → 流式回答。网页端的调用链：浏览器 → SpringBoot（鉴权 + `X-User-Id` 归属头）→ 适配层（SSE 帧契约）→ 引擎。
 
 ## AI 协作入口
 
-仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`biopilot/` 及其 `cli/`、`config/`、`core/`（再往下十二份）、`tools/`、`citations/`、`terminal/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。
+仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`web/`、`server/`、`biopilot/` 及其 `cli/`、`config/`、`core/`（再往下十二份）、`tools/`、`citations/`、`terminal/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。
