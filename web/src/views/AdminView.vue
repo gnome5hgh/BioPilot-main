@@ -67,8 +67,12 @@ async function makeAdmin(u) {
   await load()
 }
 
+// 重置密码：管理员现场输入新口令——硬编码公开常量等于给所有账号留后门
 async function resetPwd(u) {
-  await http.post(`/admin/api/users/${u.userId}/reset-password`, { password: 'biopilot-reset-2026' })
+  const pwd = window.prompt(`为 ${u.userName} 设置新密码（至少 8 位）：`)
+  if (!pwd || pwd.length < 8) return
+  await http.post(`/admin/api/users/${u.userId}/reset-password`, { password: pwd })
+  window.alert('密码已重置')
 }
 
 onMounted(load)

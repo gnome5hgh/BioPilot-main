@@ -39,7 +39,7 @@ class RunPythonTool(Tool):
         parameters: dict，JSON Schema（code）
         risk_level: str，"medium"（默认免问档内；安全来自沙箱而非档位）
         side_effects: list[str]，["read_file", "write_file"]
-        _config: PaperFlowConfig，装配注入（组装沙箱政策用）
+        _config: BioPilotConfig，装配注入（组装沙箱政策用）
     """
 
     name = "run_python"

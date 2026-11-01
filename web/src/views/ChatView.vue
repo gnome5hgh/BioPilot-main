@@ -19,12 +19,23 @@
         <pre>{{ m.text }}</pre>
       </div>
     </div>
+    <!-- 确认弹框：唯一确认决策点的前端半边——批准/拒绝由用户点选，300 秒不选服务端自动拒绝 -->
+    <div v-if="pendingConfirm" class="confirm-mask">
+      <div class="confirm-card">
+        <div class="confirm-title">安全确认</div>
+        <pre class="confirm-body">{{ pendingConfirm.summary || pendingConfirm.tool_name || '本次操作需要你的确认' }}</pre>
+        <div class="confirm-actions">
+          <button class="reject" @click="answerConfirm(false)">拒绝</button>
+          <button class="ok" @click="answerConfirm(true)">批准</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-// 对话闭环：SSE 经 SpringBoot 转发到 Python 适配层；当前 send 为占位反馈，
-// 真实流式链路接入后替换。
+// 对话闭环：SSE 经 SpringBoot 转发到 Python 适配层。confirm 帧挂起等待用户
+// 点选后回传 /chat/confirm；300 秒无操作由服务端按拒绝处理（计时不在此处）。
 import { ref } from 'vue'
 
 // 会话标识：本次进入页面生成一个（跨用户撞名面由 uuid 消除）
@@ -42,6 +53,7 @@ const input = ref('')
 const busy = ref(false)
 const messages = ref([])
 const placeholder = '发送消息…（Enter 发送，Shift+Enter 换行）'
+const pendingConfirm = ref(null)
 
 function fillExample() {
   input.value = caps.value[curCap.value].example.replace(/^示例：/, '')
@@ -66,7 +78,13 @@ async function send() {
       body: JSON.stringify({ task, conversation_id: conversationId }),
     })
     if (!resp.ok || !resp.body) {
-      reply.text = `对话失败（HTTP ${resp.status}）`
+      // 非 200：读 JSON 错误体给用户看（429 配额/422 缺参/装配失败在此分支）
+      let detail = `HTTP ${resp.status}`
+      try {
+        const data = await resp.json()
+        detail = data.msg || (typeof data.detail === 'string' ? data.detail : detail)
+      } catch { /* 非 JSON 响应体保持状态码提示 */ }
+      reply.text = `对话失败：${detail}`
       return
     }
     const reader = resp.body.getReader()
@@ -87,28 +105,37 @@ async function send() {
           else if (evt.type === 'done' && evt.text) reply.text = evt.text
           else if (evt.type === 'error') reply.text = `出错：${evt.text}`
           else if (evt.type === 'confirm') {
-            reply.text = `待确认：${evt.summary || evt.tool_name}`
-            approve(evt.req_id)
+            // 挂起弹框等用户裁决；流保持打开，回答在批准后继续下行
+            pendingConfirm.value = evt
+            reply.text = `待确认：${evt.summary || evt.tool_name || '危险操作'}`
           }
         }
       }
     }
   } catch (e) {
-    reply.text = `对话失败：${e.message}`
+    // 已流式输出的内容保留（断网丢掉全部回答不可接受），只追加中断原因
+    reply.text = reply.text ? `${reply.text}\n\n[连接中断：${e.message}]` : `对话失败：${e.message}`
   } finally {
     busy.value = false
   }
 }
 
 // 确认回传：批准=true / 拒绝=false；服务端计时，超时未回传视为拒绝
-async function approve(reqId, approved = true) {
+async function answerConfirm(approved) {
+  const evt = pendingConfirm.value
+  pendingConfirm.value = null
+  if (!evt) return
+  const last = messages.value[messages.value.length - 1]
+  if (last && last.text?.startsWith('待确认：')) {
+    last.text = approved ? '已批准，继续执行…' : '已拒绝'
+  }
   await fetch('/api/agent/chat/confirm', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'satoken': localStorage.getItem('biopilot_token') || '',
     },
-    body: JSON.stringify({ req_id: reqId, conversation_id: conversationId, approved }),
+    body: JSON.stringify({ req_id: evt.req_id, conversation_id: conversationId, approved }),
   })
 }
 </script>
@@ -128,5 +155,12 @@ textarea { width: 100%; min-height: 54px; border: none; resize: none; font-size:
 .messages { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .msg pre { white-space: pre-wrap; font-family: inherit; margin: 0; padding: 12px 14px; border-radius: 10px; font-size: 14px; }
 .msg.user pre { background: #e8f8f5; }
-.msg.assistant pre { background: #f8f9fc; }
+.confirm-mask { position: fixed; inset: 0; background: rgba(20, 24, 34, .45); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.confirm-card { background: #fff; border-radius: 14px; padding: 20px 22px; width: min(520px, 90vw); box-shadow: 0 12px 40px rgba(0,0,0,.18); }
+.confirm-title { font-weight: 700; margin-bottom: 10px; }
+.confirm-body { white-space: pre-wrap; font-family: inherit; background: #f8f9fc; border-radius: 10px; padding: 12px; font-size: 13px; margin: 0 0 14px; }
+.confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
+.confirm-actions button { border: none; border-radius: 8px; padding: 8px 18px; cursor: pointer; font-size: 13px; }
+.confirm-actions .ok { background: #2ec5b1; color: #fff; }
+.confirm-actions .reject { background: #f1f3f7; color: #4a5160; }
 </style>

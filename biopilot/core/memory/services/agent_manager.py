@@ -105,6 +105,12 @@ class AgentManager:
         """
         if not user_id:
             raise ValueError("create_agent 需要 user_id（多用户行级隔离的键，缺省即拒绝）")
+        # 归属防护：id 已被他人占用时拒绝覆盖（REPLACE 会把他人会话整行抹掉——
+        # 窗口 message_ids 清空、user_id 换人）。同用户重复创建=重置语义，照旧放行。
+        existing = self.db.execute("SELECT user_id FROM agent_state WHERE agent_id=?",
+                                   (agent_id,)).fetchone()
+        if existing is not None and existing["user_id"] != user_id:
+            raise ValueError(f"会话 {agent_id} 已归属其他用户")
         # project_id 经实例属性传递（REPLACE 需要它；None=未分组）
         self._create_project_id = project_id
         self.db.execute(
@@ -115,19 +121,25 @@ class AgentManager:
         self._create_project_id = None
         return self.get_agent(agent_id)
 
-    def get_agent(self, agent_id: str) -> AgentState:
-        """按 id 取 AgentState；不存在抛 KeyError。
+    def get_agent(self, agent_id: str, user_id: str | None = None) -> AgentState:
+        """按 id 取 AgentState；不存在（或归属不符）抛 KeyError。
 
         Args:
             agent_id: 要查询的 agent 标识。
+            user_id: 归属过滤（传则只返回该用户的会话）——多用户进程里会话 id
+                由客户端生成，不做归属校验的话拿到别人的 id 就能读到他人上下文。
 
         Returns:
             当前最新的 AgentState（memory 动态构建）。
 
         Raises:
-            KeyError: 当 agent_id 不存在时。
+            KeyError: 当 agent_id 不存在或归属不符时（不区分两种情况，避免探针）。
         """
-        cur = self.db.execute("SELECT * FROM agent_state WHERE agent_id=?", (agent_id,))
+        if user_id is None:
+            cur = self.db.execute("SELECT * FROM agent_state WHERE agent_id=?", (agent_id,))
+        else:
+            cur = self.db.execute("SELECT * FROM agent_state WHERE agent_id=? AND user_id=?",
+                                  (agent_id, user_id))
         row = cur.fetchone()
         if row is None:
             raise KeyError(f"agent {agent_id} not found")

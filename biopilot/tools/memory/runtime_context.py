@@ -1,12 +1,16 @@
 """记忆工具运行时上下文 + 模块级访问器。
 
 工具不持有上下文；execute 时经 get_memory_context() 取运行时绑定的 managers
-与归属会话。CLI 启动装配完服务层后 set_memory_context 绑定一次；未绑定返回
-None，工具据此降级（统一回「记忆服务未装配」而非抛异常）——工具定义与服务
-装配彻底解耦，测试也能传 None 隔离。
+与归属会话。绑定用 **ContextVar**：多用户 web 进程里多个会话的 run 并发交错，
+模块级单例会被后装配的会话覆盖（A 的记忆写进 B 的域）；ContextVar 按 asyncio
+任务隔离——Agent.run() 入口为本轮任务绑定自己的上下文、finally 复位，嵌套
+spawn 的子 agent 各绑各的、退出自动还原。CLI 单会话语义不变（装配期绑定一次，
+其后所有任务继承）。未绑定返回 None，工具据此降级（统一回「记忆服务未装配」
+而非抛异常）——工具定义与服务装配彻底解耦，测试也能传 None 隔离。
 """
 from __future__ import annotations
 
+import contextvars
 from dataclasses import dataclass
 
 __all__ = ["MemoryToolsContext", "set_memory_context", "get_memory_context"]
@@ -31,19 +35,25 @@ class MemoryToolsContext:
     tool_result_store: object = None
 
 
-_memory_context: MemoryToolsContext | None = None
+_memory_context: contextvars.ContextVar[MemoryToolsContext | None] = (
+    contextvars.ContextVar("biopilot_memory_context", default=None))
 
 
-def set_memory_context(ctx: MemoryToolsContext | None) -> None:
-    """绑定/清空运行时上下文（CLI 装配后调用；测试传 None 隔离）。
+def set_memory_context(ctx: MemoryToolsContext | None):
+    """绑定当前任务（及其子任务）的记忆上下文，返回复位令牌。
+
+    调用方若在嵌套场景（run 内 spawn 的子 run）绑定，收尾必须用返回的 token
+    调 ContextVar.reset 还原外层绑定；顶层绑定（装配期/单会话 REPL）可不复位。
 
     Args:
         ctx: MemoryToolsContext | None，要绑定的上下文；None 清空（测试隔离用）
+
+    Returns:
+        contextvars.Token，配对 `get_memory_context` 所在变量的复位令牌。
     """
-    global _memory_context
-    _memory_context = ctx
+    return _memory_context.set(ctx)
 
 
 def get_memory_context() -> MemoryToolsContext | None:
-    """返回当前绑定的上下文；未绑定返回 None（工具据此降级）。"""
-    return _memory_context
+    """返回当前任务绑定的上下文；未绑定返回 None（工具据此降级）。"""
+    return _memory_context.get()

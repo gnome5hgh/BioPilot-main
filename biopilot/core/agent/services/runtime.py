@@ -181,6 +181,7 @@ class Agent:
         stream_callback: Callable[[AgentEvent], None] | None = None,
         skill_registry: SkillRegistry | None = None,   # Skill 注册表；None = 无 skill 体系
         trace_id: str | None = None,   # 继承的追踪 ID；None = 每次 run 自行生成
+        memory_context=None,        # MemoryToolsContext | None（记忆工具运行时绑定；多会话进程内每个 Agent 各持一份）
     ):
         """
         Args:
@@ -207,10 +208,14 @@ class Agent:
             stream_callback: 流式事件回调(CLI 渲染器消费);None = 非流式路径 ——run() 保持调 chat(),mock/无 UI 调用方零影响
             skill_registry: Skill 注册表(可选)。提供时按 agent_type 计算 L1 <available_skills> 清单块注入 head(静态,每轮重建 head 时原样携带);None 时整块省略零开销
             trace_id: 继承的追踪 ID(可选)。spawn 工具传父 agent 的当前 trace_id,使子 agent 与父共享同一次用户任务的去重池与审计链;None 时每次 run 自行生成新 trace_id(默认,行为不变)
+            memory_context: MemoryToolsContext | None(可选)。记忆工具 execute 时经 ContextVar 取的运行时绑定;多会话进程( web 适配层)里每个 Agent 构造时各自传入,run 入口绑定、finally 复位——替代「进程级单例被后装配会话覆盖」的旧语义。None 时 run 不绑定(工具降级或沿用装配期绑定)
 
         """
         # Pull 模式:从唯一注册表按类型加载完整配置
         config = agent_registry.get_config(agent_type)
+
+        #: 记忆工具运行时上下文（run 入口绑到 ContextVar，finally 复位）
+        self._memory_context = memory_context
         #: agent 配置内容哈希（审计 agent_started 用）：AGENT.md 正文 + 工具全签名
         self._agent_version = _compute_agent_version(config)
 
@@ -563,7 +568,7 @@ class Agent:
         """
         lock_dsn = getattr(getattr(self.block_manager, "db", None), "dsn", None)
         if not lock_dsn:
-            return await self._run_react(task)
+            return await self._run_react_bound(task)
         from biopilot.core.memory.storage.named_lock import NamedLock
         lock = NamedLock(lock_dsn)
         lock_name = f"run:{self.conversation_id}"
@@ -573,17 +578,37 @@ class Agent:
             # 锁机制故障（MySQL 抖动）不拦任务：降级为无锁执行并留痕。
             # 这是可用性守卫而非安全边界，放行不会破坏隔离或数据正确性。
             logger.warning("会话运行锁获取失败，本轮无锁执行: %r", e)
-            return await self._run_react(task)
+            return await self._run_react_bound(task)
         if not acquired:
             return ("该会话正在运行中：上一个任务尚未结束，请等它完成后再发送新任务。")
         try:
-            return await self._run_react(task)
+            return await self._run_react_bound(task)
         finally:
             await asyncio.to_thread(lock.release, lock_name)
+
+    async def _run_react_bound(self, task: str) -> str:
+        """在绑定记忆工具上下文的任务上下文里跑 ReAct 本体。
+
+        多会话进程（web 适配层）里每个 Agent 持有自己的 MemoryToolsContext：
+        绑定用 ContextVar、finally 复位——嵌套 spawn 的子 run 各绑各的、退出
+        还原父绑定；单会话 REPL 语义不变（绑定值即装配期那一份）。
+        """
+        token = None
+        if self._memory_context is not None:
+            from biopilot.tools.memory.runtime_context import set_memory_context
+            token = set_memory_context(self._memory_context)
+        try:
+            return await self._run_react(task)
+        finally:
+            if token is not None:
+                from biopilot.tools.memory.runtime_context import _memory_context
+                _memory_context.reset(token)
 
     async def _run_react(self, task: str) -> str:
         """
         执行 ReAct 循环本体（由 run() 在会话互斥锁内调用）。
+        本任务生命周期内绑定自己的记忆工具上下文（嵌套 spawn 的子 run 各绑各的、
+        退出复位还原父绑定）——多会话进程里这是记忆写对归属的前提。
 
         调用方无需直接使用。
 

@@ -22,7 +22,7 @@ import yaml as yaml_mod
 import uuid
 from dataclasses import dataclass
 
-from fastapi import FastAPI, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,9 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         experts = []
         for name in registry.list_agents():
             c = registry.get_config(name)
-            experts.append({"name": name, "description": c.system_prompt[:120],
+            # 职责描述取 AGENT.md 的 description 字段；正文截断只是兜底
+            desc = (getattr(c, "description", "") or c.system_prompt[:120])
+            experts.append({"name": name, "description": desc[:120],
                             "tools_count": len(c.tools)})
         return {"experts": experts}
 
@@ -224,7 +226,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         try:
             fcntl.flock(lock_fp, fcntl.LOCK_EX)
             import json as _json
-            lock = _json.loads(lock_fp.read_text()) if lock_path.stat().st_size > 0 else {}
+            lock_fp.seek(0)
+            lock = _json.loads(lock_fp.read()) if lock_path.stat().st_size > 0 else {}
             entry = lock.get(name, {})
             entry["enabled"] = enabled
             if "version" not in entry:
@@ -305,6 +308,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=429,
                 detail="该账号并发任务已达上限，请等待进行中的任务完成")
+        user_runs[x_user_id] = user_runs.get(x_user_id, 0) + 1
 
         async def stream_chat():
             queue: asyncio.Queue = asyncio.Queue()
@@ -326,6 +330,15 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                         task, stream_callback=on_event) if _accepts_stream(
                         agent.run) else await agent.run(task)
                 await _autotitle(x_user_id, conversation_id, task)
+                # 轮末整合：与 REPL 同语义（一轮对话结束 → 沉淀进记忆）；
+                # 只 enqueue，防抖与游标推进由队列/DB 锁自理
+                queue = getattr(agent, "_consolidation_queue", None)
+                if queue is not None:
+                    try:
+                        queue.enqueue()
+                    except Exception:
+                        logger.warning("整合入队失败（不影响本轮回答）",
+                                       exc_info=True)
                 return answer
 
             # run 任务句柄挂流作用域：断开监视与 drain 共享（此前是 drain 局部变量，
@@ -388,11 +401,15 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                     finally:
                         active_queues.pop((x_user_id, conversation_id), None)
 
-            async for chunk in drain():
-                yield chunk
-
-            # 流结束清活动队列（此后确认请求无投递目标 → 按拒绝处理）
-            active_queues.pop((x_user_id, conversation_id), None)
+            try:
+                async for chunk in drain():
+                    yield chunk
+            finally:
+                # 流结束清活动队列（此后确认请求无投递目标 → 按拒绝处理）；
+                # 并发配额归还——只有还挂在缓存里的 run 才算「在途」
+                if active_queues.get((x_user_id, conversation_id)) is queue:
+                    active_queues.pop((x_user_id, conversation_id), None)
+                user_runs[x_user_id] = max(0, user_runs.get(x_user_id, 1) - 1)
             return
 
         return StreamingResponse(stream_chat(), media_type="text/event-stream")
@@ -408,22 +425,41 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 "confirm_above": cfg.runtime.confirm_above,
                 "models": cfg.runtime.models}
 
+    #: 设置端点可写的键 → config.yaml 里的嵌套落点（覆盖链：schema 默认 ← config.yaml ← env）。
+    #: 只开语义子集，凭据类字段永不经此通道。
+    _SETTING_PATHS = {
+        "intent_enabled": ("intent", "enabled"),
+        "confirm_above": ("runtime", "confirm_above"),
+    }
+
     @app.post("/settings")
     async def settings_set(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
+        """ADMIN 设置写入：把白名单键合并进 config.yaml 的嵌套覆盖结构。
+
+        生效语义是「下一 run」——引擎在 run 启动时读一次配置快照，本端点只负责
+        把覆盖值真正落盘（此前实现只回显 applied、从未合并写入，保存是空操作）。
+        """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        # 语义子集写 config.yaml（覆盖链的最后一层：config.py ← config.yaml ← env）
-        # 只写白名单键，不碰凭据
-        import yaml as _yaml
         cfg_path = yaml_path()
-        allowed = {"intent_enabled", "confirm_above"}
-        overrides = {k: v for k, v in (body or {}).items() if k in allowed}
+        overrides = {k: v for k, v in (body or {}).items() if k in _SETTING_PATHS}
+        applied = []
         if overrides:
             existing = {}
             if cfg_path.exists():
                 existing = yaml_mod.safe_load(cfg_path.read_text()) or {}
-            yaml_mod.safe_dump(existing, open(cfg_path, "w"), allow_unicode=True)
-        return {"status": "ok", "applied": list(overrides)}
+            for key, value in overrides.items():
+                node = existing
+                for seg in _SETTING_PATHS[key][:-1]:
+                    node = node.setdefault(seg, {})
+                    if not isinstance(node, dict):
+                        raise HTTPException(status_code=422,
+                                            detail=f"配置结构冲突：{key}")
+                node[_SETTING_PATHS[key][-1]] = value
+                applied.append(key)
+            with open(cfg_path, "w") as fh:
+                yaml_mod.safe_dump(existing, fh, allow_unicode=True)
+        return {"status": "ok", "applied": applied}
 
     # 删户两阶段：标记 → 等活动清零 → 物理删除（幂等）
     @app.post("/admin/users/{target_id}/mark-deleting")
@@ -437,26 +473,41 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.post("/admin/users/{target_id}/purge")
     async def purge_user(target_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        """物理清除该用户的全部引擎数据（幂等，可重复执行）。
+
+        agent_state 在 mark-deleting 阶段被改名为 `deleting:<uid>`，这里两种
+        形态都清；其余表从未改名，按原 uid 删。无论是否先走过 mark 都收敛。
+        """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         db = _shared_db()
         for table in ("messages", "blocks", "block_history", "papers", "documents"):
             db.execute(f"DELETE FROM {table} WHERE user_id=?", (target_id,))
-        db.execute("DELETE FROM agent_state WHERE user_id=?", (target_id,))
+        db.execute("DELETE FROM agent_state WHERE user_id=?"
+                   " OR user_id LIKE CONCAT('deleting:', ?)", (target_id, target_id))
         return {"status": "purged", "user_id": target_id}
 
-    # 终端 WebSocket：PTY 跑 biopilot REPL（只绑内网，用户终端非 agent 工具）
+    # 终端 WebSocket：PTY 跑 biopilot REPL（用户自己的终端，非 agent 工具）。
+    # fail-closed：缺 X-User-Id 直接拒连（与 HTTP 端点同一信任边界）；
+    # 子进程是该用户的 biopilot REPL（同库、带确认中间件）——绝不给裸宿主 shell。
     @app.websocket("/ws/terminal")
-    async def ws_terminal(ws, x_user_id: str = ""):
-        """PTY 桥：xterm.js ↔ biopilot REPL（用户自己的终端，非 agent 工具）。"""
+    async def ws_terminal(ws: WebSocket):
         import os as _os
         import pty as _pty
+        import sys as _sys
+        x_user_id = ws.headers.get("x-user-id", "")
+        if not x_user_id:
+            await ws.close(code=1008, reason="缺少 X-User-Id 请求头")
+            return
         await ws.accept()
         master, slave = _pty.openpty()
         env = _os.environ.copy()
-        env["BIOPILOT_USER_ID"] = x_user_id or "local"
+        env["BIOPILOT_MEMORY_MYSQL_DSN"] = (
+            _os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN", "mysql://root@127.0.0.1:3306/biopilot"))
         proc = await asyncio.create_subprocess_exec(
-            "/bin/bash", "-i", stdin=slave, stdout=slave, stderr=slave, env=env)
+            _sys.executable, "-m", "biopilot", "--resume",
+            stdin=slave, stdout=slave, stderr=slave, env=env,
+            cwd=str(pathlib.Path.cwd()))
         _os.close(slave)
 
         async def pump_out():
@@ -548,7 +599,9 @@ async def _default_agent_factory(user_id: str, conversation_id: str,
     session = await assemble_web_session(user_id, conversation_id,
                                          confirm_callback=confirm_callback,
                                          project_id=project_id)
-    # 整合队列挂到全局收尾集合：停服时 flush（游标推进走 DB 锁，多进程安全）
+    # 整合队列两处挂账：agent 实例上（每轮收尾 enqueue）+ 全局集合（停服 flush；
+    # 游标推进走 DB 锁，多进程安全）
+    session.agent._consolidation_queue = session.consolidation_queue
     _queues.append(session.consolidation_queue)
     return session.agent
 

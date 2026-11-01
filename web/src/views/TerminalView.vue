@@ -7,6 +7,8 @@
 
 <script setup>
 // xterm.js + WebSocket 桥接待接；当前为视图占位
+import { ref } from 'vue'
+
 const termBox = ref(null)
 </script>
 

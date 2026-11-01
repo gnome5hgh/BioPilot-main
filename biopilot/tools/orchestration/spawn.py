@@ -708,6 +708,8 @@ class SpawnSubAgentTool(Tool):
                 # 一次用户任务内跨 agent 共享——子 agent 因此不重复下载/抓取父任务
                 # 已处理过的资源（父超时重试时会派出新的 paper-agent，不共享池就会重抓）。
                 trace_id=getattr(parent, "_trace_id", None),
+                # 记忆工具上下文随父走：子 agent 的记忆写进同一用户的同一会话域
+                memory_context=getattr(parent, "_memory_context", None),
             )
             # 传解析后的超时:_run_child 用实际生效值(config > 类默认)
             result = await self._run_child(child, agent_type, task)

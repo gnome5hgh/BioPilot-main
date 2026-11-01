@@ -46,6 +46,11 @@ public class SysUserService {
     }
 
     /** 更新用户白名单字段与密码重置（管理端用）。 */
+    /** 物理删除账号（删户两阶段第二步；引擎侧数据清干净后才走到这里）。 */
+    public void deleteById(Long userId) {
+        userMapper.deleteById(userId);
+    }
+
     public void updateById(SysUser u) {
         userMapper.updateById(u);
     }

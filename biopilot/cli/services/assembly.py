@@ -134,14 +134,8 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     Returns:
         WebSession（agent + consolidation_queue）。
     """
-    import asyncio as _asyncio
-    import uuid as _uuid
-
     from biopilot.core.agent import Agent
     from biopilot.core.llm import LLMClient, StructuredOutput
-    # SkillRegistry/load_lock/LoadSkillTool 不在此处再导入：模块顶部已导入
-    # （from biopilot.core.skills / biopilot.tools.skills.load_skill）
-    from biopilot.core.memory.schemas.memory import Memory
     from biopilot.core.memory.services.agent_manager import AgentManager
     from biopilot.core.memory.services.block_manager import BlockManager
     from biopilot.core.memory.services.consolidation import MemoryConsolidator
@@ -165,9 +159,10 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     agent_manager = AgentManager(db, block_manager, message_manager)
     message_manager.agent_manager = agent_manager
 
-    # 会话：存在则复用（--resume 语义），不存在则创建
+    # 会话：同用户存在则复用（回续语义），不存在则创建；他人占用即拒绝——
+    # conversation_id 由客户端生成，必须验证归属才允许读到既有上下文
     try:
-        agent_state = agent_manager.get_agent(conversation_id)
+        agent_state = agent_manager.get_agent(conversation_id, user_id=user_id)
     except KeyError:
         agent_state = agent_manager.create_agent(conversation_id, user_id=user_id,
                                                  project_id=project_id)
@@ -200,7 +195,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     structured = StructuredOutput(llm)
     summary_structured = None
     if config.compaction.summary_model_name:
-        from dataclasses import dataclass, replace as _replace
+        from dataclasses import replace as _replace
         summary_llm = LLMClient(_replace(config.llm, model=config.compaction.summary_model_name))
         summary_structured = StructuredOutput(summary_llm)
 
@@ -208,13 +203,16 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     tool_result_offloader = make_tool_result_offloader(
         tool_result_store, config.compaction.tool_results)
 
-    set_memory_context(MemoryToolsContext(
+    # 会话级记忆工具上下文：装配期 set（兼容单会话语义），并随 Agent 持有——
+    # run 入口经 ContextVar 绑定，多会话进程里各 Agent 互不覆盖
+    memory_ctx = MemoryToolsContext(
         agent_id=conversation_id,
         user_id=user_id,
         block_manager=block_manager,
         message_manager=message_manager,
         tool_result_store=tool_result_store,
-    ))
+    )
+    set_memory_context(memory_ctx)
 
     middlewares = [
         AuditMiddleware(db=db),
@@ -225,12 +223,11 @@ async def assemble_web_session(user_id: str, conversation_id: str,
         PolicyEngineMiddleware(confirm_above=config.runtime.confirm_above),
     ]
 
-    # 意图层（可选）：web 路径与 REPL 同策略——判定服务不可达则整层不装配
+    # 意图层（可选）：web 路径与 REPL 同策略——判定服务不可达则整层不装配。
+    # IntentService/load_taxonomy/TaxonomyError 顶部已导入，此处只补 Jev 异常。
     intent_service = None
     if config.intent.enabled:
-        from biopilot.core.intent.services.intent import IntentService
-        from biopilot.core.intent.services.jev import JevClient, JevUnavailable
-        from biopilot.core.intent.services.taxonomy import load_taxonomy, TaxonomyError
+        from biopilot.core.intent.services.jev import JevUnavailable
         try:
             taxonomy = load_taxonomy()
         except TaxonomyError as exc:
@@ -242,7 +239,8 @@ async def assemble_web_session(user_id: str, conversation_id: str,
                           zero_data_retention=config.intent.jev.zero_data_retention,
                           only_provider=config.intent.jev.only_provider)
         try:
-            _asyncio.run(judge.probe())
+            # 装配运行在事件循环内的协程里，probe 是 async——asyncio.run 会直接抛错
+            await judge.probe()
         except JevUnavailable as exc:
             logger.warning("意图判定服务不可用，web 会话走纯 ReAct: %s", exc.reason)
         else:
@@ -271,6 +269,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
         confirm_callback=_web_confirm_callback,
         session_id=conversation_id,
         user_id=user_id,
+        memory_context=memory_ctx
     )
     consolidator = MemoryConsolidator(
         agent_state, block_manager, message_manager,
@@ -482,13 +481,14 @@ def main(argv: list[str] | None = None) -> int | None:
     tool_result_offloader = make_tool_result_offloader(
         tool_result_store, config.compaction.tool_results)
 
-    set_memory_context(MemoryToolsContext(
+    memory_ctx = MemoryToolsContext(
         agent_id=session_id,
         user_id="local",
         block_manager=block_manager,
         message_manager=message_manager,
         tool_result_store=tool_result_store,
-    ))
+    )
+    set_memory_context(memory_ctx)
 
     # 安全管道：四中间件（经验记忆中间件已移除——工具调用经验不再注入 prompt，
     # 改由 MemoryConsolidator 后台整合进核心记忆块）。
@@ -563,6 +563,7 @@ def main(argv: list[str] | None = None) -> int | None:
         confirm_callback=_make_confirm_callback(io, renderer, center),
         session_id=session_id,
         user_id="local",
+        memory_context=memory_ctx,
     )
     consolidator = MemoryConsolidator(
         agent_state, block_manager, message_manager,
