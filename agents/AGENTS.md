@@ -20,6 +20,7 @@
 - `citation-agent/` — 引用域：引用库的同步 / 新增 / 删除 / 查询导出
 - `rag-agent/` — 语料索引域：检索、入库、删除后收敛、索引体检
 - `memory-agent/` — 记忆域：记忆读写与未读清单
+- `bio-agent/` — 生信数据分析域：数据检查、统计分析、单细胞流程、可视化与报告入库
 
 ## Responsibilities
 

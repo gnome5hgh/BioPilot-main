@@ -271,6 +271,34 @@ class SecurityConfig:
     #: 语义判定层（判定网关；端点或密钥缺失即整层不装配）
     classifier: "ClassifierConfig" = field(default_factory=lambda: ClassifierConfig())
 
+    #: 沙箱代码执行（run_python 的容器政策来源）
+    sandbox: "SandboxConfig" = field(default_factory=lambda: SandboxConfig())
+
+
+@dataclass
+class SandboxConfig:
+    """沙箱代码执行配置（run_python/code-agent 依赖；缺它整条链路不可用）。
+
+    Attributes:
+        enabled: bool，总开关（关掉时 run_python 直接返回未启用文本）
+        image: str，沙箱镜像名（须预先构建：docker build -f docker/sandbox.Dockerfile）
+        network: bool，容器是否联网（默认 False = 断网，分析依赖须预装进镜像）
+        read_roots: list[str]，额外只读挂载的语义根名（挂到 /corpus/<根名>）
+        memory: str，容器内存上限（docker --memory 语法）
+        cpus: float，容器 CPU 上限
+        pids_limit: int，容器进程数上限
+        timeout_s: int，单次执行超时（秒）
+    """
+
+    enabled: bool = True
+    image: str = "biopilot-sandbox:latest"
+    network: bool = False
+    read_roots: list[str] = field(default_factory=list)
+    memory: str = "2g"
+    cpus: float = 2.0
+    pids_limit: int = 128
+    timeout_s: int = 120
+
 
 @dataclass
 class ClassifierConfig:

@@ -83,12 +83,12 @@ class RunPythonTool(Tool):
         mounts: list[tuple[str, str]] = []
         if cfg.corpus.pdf_dir:
             mounts.append((str(Path(cfg.corpus.pdf_dir).resolve()), f"{_CORPUS_MOUNT}/pdf"))
-        for name in cfg.sandbox.read_roots:
+        for name in cfg.security.sandbox.read_roots:
             path = roots.get(name)
             if path:
                 mounts.append((str(Path(path).resolve()), f"{_CORPUS_MOUNT}/{name}"))
 
-        s = cfg.sandbox
+        s = cfg.security.sandbox
         return sb.SandboxPolicy(
             image=s.image,
             scratch=str(scratch),
@@ -150,7 +150,7 @@ class RunPythonTool(Tool):
         cfg = getattr(self, "_config", None)
         if cfg is None:
             return ToolResult(text="run_python 未装配配置，无法执行")
-        if not cfg.sandbox.enabled:
+        if not cfg.security.sandbox.enabled:
             return ToolResult(text="沙箱代码执行已在配置中关闭（sandbox.enabled=false）")
 
         policy = self._build_policy(cfg)
