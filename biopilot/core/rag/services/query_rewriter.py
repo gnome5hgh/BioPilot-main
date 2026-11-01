@@ -72,7 +72,7 @@ def _make_output_schema(rewrite_num: int) -> type[BaseModel]:
     return RewriteOutput
 
 
-def _finalize(original: str, out: RewriteOutput, *, max_query_chars: int,
+def _finalize(original: str, out, *, max_query_chars: int,
               max_queries: int) -> list[str]:
     """把 LLM 输出整理成最终查询集：逐项过滤 → 大小写归一去重 → 生成侧截
     ``max_queries - 1`` → 原 query 兜底。

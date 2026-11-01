@@ -3,6 +3,7 @@
 装配顺序与依赖方向见 `main()` 的 docstring；启动预检在 `bootstrap.py`。
 """
 import asyncio
+import logging
 import sys
 import uuid
 from dataclasses import dataclass, replace
@@ -11,6 +12,8 @@ from pathlib import Path
 from rich.console import Console
 
 from biopilot.cli.services.bootstrap import _ensure_services
+
+logger = logging.getLogger(__name__)
 from biopilot.config import BioPilotConfig
 from biopilot.core.agent import Agent
 from biopilot.core.agent import AgentRegistry

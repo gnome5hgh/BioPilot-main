@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import pathlib
+from pathlib import Path
 
 import yaml as yaml_mod
 
@@ -100,7 +101,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     app = FastAPI(title="BioPilot Agent Adapter", docs_url=None, redoc_url=None)
     agents: dict[tuple[str, str], object] = {}
-    #: 全局 LLM 在途并发闸（多用户总闸：单学生的批量派发占不满全部外部资源）
+    #: 全局并发闸（run 粒度在途上限；多用户总闸，单学生的批量派发占不满全部外部资源）
     llm_gate = asyncio.Semaphore(getattr(config, "llm_max_concurrency", 8))
     #: 单用户活跃 run 计数（防单用户占满并发）
     user_runs: dict[str, int] = {}
@@ -210,8 +211,6 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
         enabled = bool((body or {}).get("enabled", True))
 
         pf_dir = Path.cwd() / ".biopilot"
@@ -251,7 +250,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         reg = SkillRegistry(str(pf_dir / "skills") if (pf_dir / "skills").is_dir() else None,
                             disabled={n for n, e in lock.items() if not e.get("enabled", True)})
         skills = [{"name": n,
-                   "version": reg.get_skill(n).version if reg.get_skill(n) else "",
+                   "version": ((reg.get_skill(n).metadata or {}).get("version", "")
+                               if reg.get_skill(n) else ""),
                    "description": (reg.get_skill(n).description[:120]
                                    if reg.get_skill(n) else ""),
                    "enabled": lock.get(n, {}).get("enabled", True)}
@@ -320,21 +320,29 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 })
 
             async def run_task() -> str:
-                answer = await agent.run(
-                    task, stream_callback=on_event) if _accepts_stream(
-                    agent.run) else await agent.run(task)
+                # 全局并发闸（run 粒度）：多用户在途 run 总上限，批量派发占不满外部资源
+                async with llm_gate:
+                    answer = await agent.run(
+                        task, stream_callback=on_event) if _accepts_stream(
+                        agent.run) else await agent.run(task)
                 await _autotitle(x_user_id, conversation_id, task)
                 return answer
+
+            # run 任务句柄挂流作用域：断开监视与 drain 共享（此前是 drain 局部变量，
+            # 断开分支引用它会 NameError，run 取消失效）
+            run_handle: asyncio.Task | None = None
 
             async def watch_disconnect() -> None:
                 """客户端断开 → 取消 run（复用取消级联，与 REPL Ctrl-C 同路径）。"""
                 while True:
                     if await request.is_disconnected():
-                        run_handle.cancel()
+                        if run_handle is not None:
+                            run_handle.cancel()
                         return
                     await asyncio.sleep(0.3)
 
             async def drain():
+                nonlocal run_handle
                 """把队列里的事件转 SSE 帧；run 结束立即补收尾帧。
 
                 竞速等待：queue.get 与 run 完成谁先到处理谁——run 正常完成时立即
@@ -476,16 +484,30 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     _paper_endpoints(app)
     # 索引触发：按用户域重建 RAG collection（RAGService user_domain）
+    # 每用户重建 singleflight：重建进行中时重复触发直接返回（防并发「先删后建」互删）
+    reindex_running: set[str] = set()
+
     @app.post("/kb/reindex")
     async def kb_reindex(x_user_id: str | None = Header(default=None)) -> dict:
+        """按用户域触发全量重建：后台线程跑 index_all（嵌入耗时可能数十分钟），
+        本端点立即返回；进度用 GET /kb/status 看 indexed 计数爬升。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        # per-user 串行化与整合队列同一把 DB 锁思路；此处仅触发重建
+        if x_user_id in reindex_running:
+            return {"status": "already-running"}
         from biopilot.core.rag.services.rag_service import RAGService
         from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
-        svc = RAGService(cfg, user_domain=x_user_id)
-        return {"status": "ok", "note": "indexer 按用户域 collection 装配"}
+        svc = RAGService(BioPilotConfig.from_env(), user_domain=x_user_id)
+        reindex_running.add(x_user_id)
+
+        def _job() -> None:
+            try:
+                svc.index_all()
+            finally:
+                reindex_running.discard(x_user_id)
+
+        asyncio.get_running_loop().create_task(asyncio.to_thread(_job))
+        return {"status": "started"}
 
     # KB 展示：索引状态快照（papers 已索引计数 + collection 命名）
     @app.get("/kb/status")

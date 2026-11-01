@@ -460,6 +460,8 @@ class ToolExecutor:
             try:
                 await mw.before(ctx)
             except ConfirmRequired as cr:
+                # except 变量在块尾会被 Python 隐式删除，闭包里改用提前绑定的名字
+                confirm_req = cr
                 # ----- 需要用户确认 -----
                 # 先通知中间件“请求已发出”
                 for mw in self._middleware:
@@ -472,7 +474,7 @@ class ToolExecutor:
                     Returns:
                         True 表示用户放行。
                     """
-                    return await confirm_callback(cr)
+                    return await confirm_callback(confirm_req)
 
                 # 串行化确认（若提供了锁）
                 try:

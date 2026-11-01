@@ -43,6 +43,7 @@ ReAct 循环流程::
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from typing import Callable
 
@@ -55,6 +56,8 @@ from biopilot.core.agent.services.context_window import (
 )
 from biopilot.core.agent.services.tool_executor import ToolExecutor
 from biopilot.core.agent.constants import AgentEventKind
+
+logger = logging.getLogger(__name__)
 from biopilot.core.agent.domain.dto.agent_event import AgentEvent
 from biopilot.core.agent.services.registry import AgentRegistry
 from biopilot.core.skills import SkillRegistry
