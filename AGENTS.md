@@ -16,17 +16,20 @@
 - 名称：`BioPilot`
 - 路径：`.`
 - 角色：`repo-root-workspace-manifest`
-- 当前定位：LLM 驱动的学术研究流程助手。单根 agent（supervisor）接收每一轮用户输入 → 可选的意图预处理 → ReAct 循环 → 拆解子任务派发子 agent → 聚合各子 agent 的结构化摘要后汇总回答。
-- 绑定环境：Python 3.11 / conda env `biopilot`。
+- 当前定位：**实验室私有部署的多用户生信科研 Agent 平台**。三层结构：`web/`（Vue3 前端）→ `server/`（SpringBoot：注册/登录/鉴权/角色/审计，内网代理）→ `biopilot/`（Python 引擎：原单机多 agent 研究助手，经 FastAPI 适配层暴露 HTTP/SSE）。学生登录使用；数据按 `user_id` 行级隔离（MySQL）与 `users/<uid>/` 前缀隔离（OSS/Milvus collection）。
+- 引擎本体不变的部分：单根 agent（supervisor）接收每一轮用户输入 → 可选的意图预处理 → ReAct 循环 → 拆解子任务派发子 agent → 聚合各子 agent 的结构化摘要后汇总回答。
+- 绑定环境：Python 3.11 / conda env `biopilot`；Java 21 + Maven（`server/`）；Node ≥ 20（`web/`）。
 
 ## 目录结构
 
 ```text
 BioPilot-main/
-├─ biopilot/          # 主包：cli/(装配) config/(参数) core/(运行层，内含 rag/ vision/)
-│                      #   citations/ tools/ terminal/
+├─ web/                # 前端（Vue3 + Vite + TS 风格 JS）：登录/对话/论文/文档/文献/终端/管理
+├─ server/             # SpringBoot 3（Java 21）：bio-admin(启动装配+控制器) bio-modules(业务域) bio-common(通用件)
+├─ biopilot/           # Python 引擎：cli/(装配) config/(参数) core/(运行层，内含 rag/ vision/)
+│                      #   citations/ tools/ terminal/ webapi/(HTTP/SSE 适配层)
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
-├─ .biopilot/         # 运行时数据根 + 静态资产（skills/ intent/）
+├─ .biopilot/         # 运行时数据根 + 静态资产（skills/ intent/）+ infra/（依赖服务数据卷）
 ├─ .agents/skills/     # 给编码代理按需加载的 skill（与本仓运行时无关）
 ├─ docs/               # 设计文档：adr/ learning/ research/
 ├─ .scratch/           # 开发过程文档：spec/ticket（matt-pocock 本地约定，gitignored；历史 spec/plan 归档在 .scratch/archive/）
@@ -34,23 +37,26 @@ BioPilot-main/
 ├─ scripts/            # 实验与标定脚本
 ├─ config.yaml         # 本地配置（gitignored），模板见 config.example.yaml
 ├─ docker-compose.yml  # 依赖服务栈（Milvus Standalone + MinIO + MySQL）
+├─ docker/mysql-init/  # MySQL 容器首启建库脚本（biopilot/biopilot_test + sys_* 表）
 └─ AGENTS.md
 ```
 
 ### 当前目录分层含义
 
-- `biopilot/` 是主包；`cli/` 是装配根，`config/` 是参数唯一声明点，`core/` 是运行层（`rag/` 与 `vision/` 已住进 `core/` 内）。
+- 三层调用链：`web/`（5173，Vite 代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 内网代理）→ `biopilot/webapi/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
+- `biopilot/` 是引擎主包；`cli/` 是装配根（`--web` 分流到适配层），`config/` 是参数唯一声明点，`core/` 是运行层（`rag/` 与 `vision/` 已住进 `core/` 内）。
+- `server/` 按 SpringBoot 惯例分三块：`bio-admin`（启动类 + 控制器 + 安全配置）、`bio-modules`（bio-system 用户域 / bio-project 项目域）、`bio-common`（R 响应体与异常兜底）。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
-- `.biopilot/` 同时是运行时数据根与静态资产根：`skills/` 与 `intent/` 入库，其余都是运行期产物。
+- `.biopilot/` 同时是运行时数据根与静态资产根：`skills/` 与 `intent/` 入库，`infra/` 是 docker 数据卷，其余都是运行期产物。
 - `.agents/skills/` 与 `.biopilot/skills/` 是**两条不相干的线**：前者给编码代理用，后者是 BioPilot 运行时的能力包。
 - `docs/`、`scripts/`、`tests/` 不入库是既定策略；运行期目录与个人路径不得入库。
 
 ## 技术结构
 
-- 语言与运行时：Python ≥ 3.11；依赖声明在 `pyproject.toml`，开发依赖经 `pip install -e ".[dev]"`。
-- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图的对象存储）+ MySQL（记忆/会话真相源，127.0.0.1:3306），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
+- 语言与运行时：Python ≥ 3.11（引擎与适配层，依赖在 `pyproject.toml`）；Java 21 + SpringBoot 3.5（`server/`，MyBatis-Plus + Sa-Token）；Vue3 + Vite（`web/`）。
+- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图与论文原文的对象存储，回环 9000）+ MySQL 8.4（记忆/会话/业务真相源，回环 3306），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
 - 外部模型端点：对话 LLM、视觉模型、RAG 嵌入与精排都是 OpenAI 兼容的 HTTP 接口，端点、模型名与 key 经配置提供，不硬编码。
-- 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。
+- 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。SpringBoot 侧配置在 `server/bio-admin/src/main/resources/application.yaml`。
 
 ## 环境与依赖
 
@@ -60,7 +66,7 @@ BioPilot-main/
 
 ## 仓库职责
 
-- 承载一个可运行的多 agent 学术研究流程助手：意图预处理、ReAct 编排、领域子 agent、RAG 检索、引用管理、记忆系统、终端交互。
+- 承载一个可运行的多用户科研 Agent 平台：注册/登录/鉴权/角色（两档）/审计（SpringBoot），对话编排、领域子 agent、RAG 检索、引用管理、记忆系统、终端交互（Python 引擎），论文库/文档编辑器/文献搜索/知识库/设置（三层协作）。
 - 维护 agent 插件契约、工具的安全元数据与安全中间件链。
 - 维护设计文档体系：按模块划分的 ADR（正文恒为最新设计）与学习材料。
 - 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`.biopilot/skills/`。
@@ -79,7 +85,7 @@ BioPilot-main/
 
 - **错误一律降级为文本**：工具与中间件的错误转成 `ToolResult` 文本回传模型，由模型决定重试或调整。唯一向上抛的异常是 `MaxTurnsExceeded`。
 - **截断必须续写，绝不交付残缺内容**：模型因长度被截断时，把半截内容与续写提示放回 in-context 继续循环，不能把那半截当最终回答返回。
-- **安全只有策略轴**：进程内决定「要不要用户点头」，性质是贴张纸。**隔离轴（由 OS 或容器强制）本项目不做**——要加能执行 shell 的工具，必须先有进程外隔离。
+- **安全只有策略轴，执行类工具必须进程外隔离**：进程内决定「要不要用户点头」。代码执行只经 `run_python` 的一次性 Docker 容器（断网/只读挂载/根只读）；要新增能执行 shell 或任意代码的工具，必须先有等强度的进程外隔离，否则不做。
 - **只有一个确认决策点**：策略引擎合并全部升级因后统一弹一次确认；其余中间件只登记升级原因。硬拒只来自显式规则，不来自档位。
 - **所有拦截走同一条降级通道**：拒绝、确认失败、安全阻断都表现为带 `decision` 的 `ToolResult`，绝不绕过 ReAct 循环。
 - **写工具必须声明安全元数据**（`risk_level` / `side_effects` / `provenance` 等），注册表加载时校验合法值。
@@ -90,16 +96,26 @@ BioPilot-main/
 - **领域产物的读写各自归口**：记忆写入归 `memory-agent`、语料索引归 `rag-agent`、引用库归 `citation-agent`；这三类工具**其余 agent 一件不装**。只读召回（工具结果回取）是例外：它不产生领域产物，装配给所有 agent；supervisor 因此持有 spawn + 只读召回，仍不持有执行类工具。
 - **`allowed_spawns` 与风险档位由框架强制**，不靠提示词自律；批量同类对象**一个对象一路**派发。
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
-- **同一会话的 `session_id` 三处必须一致**（CLI / AgentManager / `Agent.session_id`），错位会让各自读到空数据；子 agent 共享父 `session_id`（同一会话可检索），但各自持有独立 `conversation_id`（消息不互相污染窗口）。
+- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（blocks/messages/papers/documents/agent_state/audit_event/consolidation_cursor）都带 `user_id`；SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`agent_state`/`audit_event` 豁免），**不许手写 where 补过滤**。
+- **跨进程互斥只认 MySQL 锁**：per-conversation run 互斥与整合消费权认领都走 DB 锁（`GET_LOCK`/行级 `FOR UPDATE`），进程内锁只作单进程快路径；拿不到锁降级为文本提示，绝不排队阻塞。
+- **OSS 一致性方向固定**：对象先落、元数据行后写（失败留孤儿对象、不留死行）；删除反向（先删行、再删对象，孤儿可后台对账清扫）。论文标题恒来自解析器出口，上传登记也不回退文件名。
+- **config 快照语义**：run 启动时对配置做一次快照、全程读快照；设置页与模型切换都是**下一个 run 生效**，绝不热改在途 run。
+- **SSE 契约**：`done` 帧恒发（含异常路径），客户端断开映射为取消 run（不留悬挂任务占会话锁）；确认等待由策略引擎计时（300 秒自动拒绝），不依赖连接存活。
+- **审计落 MySQL**：`audit_event` 表是审计真相源（不是 JSONL 文件）；审计行不参与租户插件过滤。
+- **同一会话的身份链四处一致**：web 会话 id → SpringBoot（`X-User-Id`/`X-Conversation-Id` 头透传）→ AgentManager → `Agent.session_id`，错位会让各自读到空数据；子 agent 共享父 `session_id`，各自持有独立 `conversation_id`（消息不互相污染窗口）。
+- **多用户 RAG 隔离**：向量 collection 按用户域加后缀（`_{user_domain}`），`local` 域保持原名；BM25 按用户分语料，重建走 singleflight。
 - **流式零开销**：`stream_callback` / `telemetry_callback` 为 `None` 时，全链路保持非流式行为。
 - **常量与配置的落点**：一个枚举一个文件（`constants/enums/<name>.py`，`__init__` 只再导出）；常量**有第二个消费方才**进 `constants/`；可调参数进顶层 `biopilot/config/`，组件自己的行为参数跟组件走。
 - **标题宁空勿错**：论文标题来自解析器出口，取不到就如实为空；**绝不回退到 PDF 文件名**。
-- **已退役的实现不要复活**：意图的旧混合路由与澄清链路、路径白名单、沙箱轴都已整体移出主干。旧文档里的描述不作论据。
+- **已退役的实现不要复活**：意图的旧混合路由与澄清链路、路径白名单、记忆的 markdown 投影与 git 投影提交、`conversation_search` 召回工具都已整体移出主干。跨会话知识只走记忆块（blocks），会话内精确回溯不再提供（摘要有损、原话不留）。旧文档里的描述不作论据。
 
 ## 关键入口
 
 - 仓库规则与阅读路径：`AGENTS.md`
-- 装配根：`biopilot/cli/services/assembly.py`；启动预检：`biopilot/cli/services/bootstrap.py`
+- 装配根（REPL 与 web 会话共用对象图）：`biopilot/cli/services/assembly.py`；启动预检：`biopilot/cli/services/bootstrap.py`
+- Web 适配层（SSE/数据端点/资源闸）：`biopilot/webapi/app.py`
+- SpringBoot 启动类与代理控制器：`server/bio-admin/src/main/java/com/biopilot/admin/`
+- 前端入口与路由：`web/src/main.js`、`web/src/router/`
 - 参数声明点：`biopilot/config/schemas/sections.py`
 - 配置模板与字段示例：`config.example.yaml`
 - Agent 插件契约：`agents/AGENTS.md` 与各 `agents/<name>/AGENT.md`
@@ -129,21 +145,30 @@ BioPilot-main/
 # 安装开发依赖（conda env 内）
 conda run -n biopilot pip install -e ".[dev]"
 
-# 全量测试
+# 全量测试（Python）
 conda run -n biopilot python -m pytest tests/ -v
 
 # 单个测试
 conda run -n biopilot python -m pytest tests/agent/test_agent.py::TestExecTool -v
 
-# 依赖服务栈（Milvus Standalone + MinIO + MySQL）；biopilot 启动时会自动拉起，此命令用于手动管理
+# 依赖服务栈（Milvus Standalone + MinIO + MySQL）；REPL 启动时会自动拉起，此命令用于手动管理
 docker compose up -d
 
 # 交互式 REPL（⚠️ 不能经 conda run：它不转发 stdin，REPL 会立即 EOF 退出）
 conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 env 内）
+
+# Web 平台三层（各自一个终端）
+BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3306/biopilot" biopilot --web   # 8300
+cd server && mvn install -DskipTests && cd bio-admin && mvn spring-boot:run        # 8080，install 只需一次
+cd web && npm run dev                                                              # 5173
+
+# 服务端测试（bio-admin）
+cd server && mvn test -pl bio-admin
 ```
 
 - 启动时自动探测依赖服务，未起则自动 `docker compose up -d` 并等待健康；失败只警告不阻塞。跳过预检：`BIOPILOT_SKIP_BOOTSTRAP=1`。
 - 非交互命令（测试 / 脚本 / 安装）**一律经 `conda run -n biopilot`**，不要用裸 `python` 或 `pip`。唯一例外就是上面的交互式 REPL。
+- Python 适配层不读 `config.yaml` 的 DSN 段（走 `BIOPILOT_MEMORY_MYSQL_DSN` 环境变量）：标题更新、论文/文档端点的轻量 SQL 依赖它，启动时务必带上。
 
 ## 统一编码规范
 
@@ -183,7 +208,9 @@ conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 e
 ## Routing
 
 - 当前目录是 `BioPilot` 根工作区 manifest。
-- 主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`cli/`](biopilot/cli/AGENTS.md) / [`config/`](biopilot/config/AGENTS.md) / [`core/`](biopilot/core/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`citations/`](biopilot/citations/AGENTS.md) / [`terminal/`](biopilot/terminal/AGENTS.md)；`core/` 之下的十二份见 core manifest）
+- 前端入口：[`web/AGENTS.md`](web/AGENTS.md)
+- 服务端入口：[`server/AGENTS.md`](server/AGENTS.md)
+- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`cli/`](biopilot/cli/AGENTS.md) / [`config/`](biopilot/config/AGENTS.md) / [`core/`](biopilot/core/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`citations/`](biopilot/citations/AGENTS.md) / [`terminal/`](biopilot/terminal/AGENTS.md)；`core/` 之下的十二份见 core manifest）
 - 插件目录入口：[`agents/AGENTS.md`](agents/AGENTS.md)
 - 资产与数据根入口：[`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)（其下 [`skills/`](.biopilot/skills/AGENTS.md) / [`intent/`](.biopilot/intent/AGENTS.md)）
 - 设计文档索引：[`docs/adr/`](docs/adr/)（修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）、[`docs/learning/`](docs/learning/)
@@ -195,6 +222,8 @@ conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 e
 - [`README.md`](README.md)
 - [`config.example.yaml`](config.example.yaml)
 - [`REVIEW.md`](REVIEW.md)（代码审查的仓库定制层：重点盯防区域 / 输出约束 / 风险分流，供 cross-review 等审查流程读取）
+- [`web/AGENTS.md`](web/AGENTS.md)
+- [`server/AGENTS.md`](server/AGENTS.md)
 - [`docker-compose.yml`](docker-compose.yml)
 - [`pyproject.toml`](pyproject.toml)
 - [`biopilot/AGENTS.md`](biopilot/AGENTS.md)
