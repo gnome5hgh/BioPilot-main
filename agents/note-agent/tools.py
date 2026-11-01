@@ -17,6 +17,7 @@ from biopilot.tools import (
 )
 from biopilot.tools.common.factory import make_tools
 from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from biopilot.tools.docs import SaveDocumentTool
 from biopilot.tools.recall import get_recall_tools
 from biopilot.tools.vision.analyze_figures import AnalyzeFiguresTool
 
@@ -34,4 +35,5 @@ TOOLS = make_tools(BioPilotConfig.from_env(), [
                    max_turns=BioPilotConfig.from_env().agents.max_turns),
     GlobTool, GrepTool,
     AnalyzeFiguresTool(),
+    SaveDocumentTool(),  # 笔记定稿入库（网页文档编辑器可见）
 ], default_write_root="note") + get_recall_tools()

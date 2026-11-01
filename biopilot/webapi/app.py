@@ -234,6 +234,78 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                   for n in reg.list_skills()]
         return {"skills": skills}
 
+    # ---------- 定时任务（webapi 进程内调度器；REPL 不跑调度） ----------
+
+    @app.get("/schedules")
+    async def schedules_list(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        db = _shared_db()
+        rows = db.execute(
+            "SELECT id, conversation_id, name, task, interval_minutes, paused,"
+            " last_run_at, next_run_at FROM scheduled_task"
+            " WHERE user_id=? ORDER BY created_at DESC", (x_user_id,)).fetchall()
+        return {"schedules": [dict(r) for r in rows]}
+
+    @app.post("/schedules")
+    async def schedules_create(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
+        """新建定时任务：到点把任务文本投进指定会话跑一遍，回答落该会话。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from datetime import datetime, timedelta, timezone
+        b = body or {}
+        name = (b.get("name") or "").strip()[:200]
+        task = (b.get("task") or "").strip()
+        conversation_id = (b.get("conversation_id") or "").strip()
+        interval = int(b.get("interval_minutes") or 0)
+        if not name or not task or not conversation_id or interval < 5:
+            raise HTTPException(status_code=422,
+                                detail="name/task/conversation_id 必填，interval_minutes ≥ 5")
+        db = _shared_db()
+        now = datetime.now(timezone.utc)
+        db.execute(
+            "INSERT INTO scheduled_task (id, user_id, conversation_id, name, task,"
+            " interval_minutes, paused, next_run_at, created_at) VALUES (?,?,?,?,?,?,0,?,?)",
+            (uuid.uuid4().hex, x_user_id, conversation_id, name, task,
+             interval, (now + timedelta(minutes=interval)).isoformat(), now.isoformat()))
+        return {"status": "ok"}
+
+    @app.post("/schedules/{task_id}/pause")
+    async def schedules_pause(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        _shared_db().execute("UPDATE scheduled_task SET paused=1 WHERE id=? AND user_id=?",
+                             (task_id, x_user_id))
+        return {"status": "ok"}
+
+    @app.post("/schedules/{task_id}/resume")
+    async def schedules_resume(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        _shared_db().execute("UPDATE scheduled_task SET paused=0 WHERE id=? AND user_id=?",
+                             (task_id, x_user_id))
+        return {"status": "ok"}
+
+    @app.delete("/schedules/{task_id}")
+    async def schedules_delete(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        _shared_db().execute("DELETE FROM scheduled_task WHERE id=? AND user_id=?",
+                             (task_id, x_user_id))
+        return {"status": "ok"}
+
+    async def _scheduler_loop():
+        while True:
+            try:
+                await run_due_schedules(_shared_db(), agent_factory, _sched_running)
+            except Exception:
+                logger.warning("调度轮询异常", exc_info=True)
+            await asyncio.sleep(60)
+
+    @app.on_event("startup")
+    async def _start_scheduler():
+        app.state.scheduler = asyncio.create_task(_scheduler_loop())
+
     @app.get("/chat/history")
     async def chat_history(
         conversation_id: str = "",
@@ -682,6 +754,49 @@ async def _default_agent_factory(user_id: str, conversation_id: str,
 _queues: list = []
 #: 会话级模型选择（user -> model 名；None 用默认主模型）
 user_models: dict[str, str | None] = {}
+
+
+# ---------- 定时任务调度（模块级：依赖显式传入，测试直调） ----------
+
+_sched_running: set = set()
+
+
+async def run_due_schedules(db, agent_factory, running: set) -> int:
+    """扫描并执行到期的定时任务，返回本轮执行数。
+
+    执行即把任务文本投进归属会话跑一遍（回答落会话，用户在聊天流里看）；
+    跑完推进 last_run/next_run——失败也推进，防失败任务每轮重试刷爆。
+    running 集合防上一轮未完成的任务本轮重复入队。
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    due = db.execute(
+        "SELECT * FROM scheduled_task WHERE paused=0 AND next_run_at<=?",
+        (now,)).fetchall()
+    ran = 0
+    for row in due:
+        if row["id"] in running:
+            continue
+        running.add(row["id"])
+
+        async def _run_one(row=row):
+            try:
+                built = agent_factory(row["user_id"], row["conversation_id"])
+                agent = await built if asyncio.iscoroutine(built) else built
+                await agent.run("【定时任务】" + row["task"])
+            except Exception:
+                logger.warning("定时任务执行失败（%s）", row["name"], exc_info=True)
+            finally:
+                done_at = datetime.now(timezone.utc)
+                nxt = (done_at + timedelta(minutes=row["interval_minutes"])).isoformat()
+                db.execute(
+                    "UPDATE scheduled_task SET last_run_at=?, next_run_at=? WHERE id=?",
+                    (done_at.isoformat(), nxt, row["id"]))
+                running.discard(row["id"])
+
+        asyncio.create_task(_run_one())
+        ran += 1
+    return ran
 
 
 def run_server(config: WebConfig | None = None) -> None:

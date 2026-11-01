@@ -225,6 +225,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
         block_manager=block_manager,
         message_manager=message_manager,
         tool_result_store=tool_result_store,
+        db=db,
     )
     set_memory_context(memory_ctx)
 
@@ -506,6 +507,7 @@ def main(argv: list[str] | None = None) -> int | None:
         block_manager=block_manager,
         message_manager=message_manager,
         tool_result_store=tool_result_store,
+        db=db,
     )
     set_memory_context(memory_ctx)
 

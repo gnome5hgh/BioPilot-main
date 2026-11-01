@@ -26,6 +26,7 @@ class MemoryToolsContext:
         block_manager: BlockManager，块 CRUD 服务句柄
         message_manager: MessageManager，对话落盘与检索句柄
         tool_result_store: object | None，大工具结果存档（read_tool_result 用）
+        db: MemoryDB | None，库句柄（save_document 等直接落表的工具用）
     """
 
     agent_id: str = ""
@@ -33,6 +34,7 @@ class MemoryToolsContext:
     block_manager: object = None
     message_manager: object = None
     tool_result_store: object = None
+    db: object = None
 
 
 _memory_context: contextvars.ContextVar[MemoryToolsContext | None] = (

@@ -185,6 +185,48 @@ public class AgentProxyController {
         }
     }
 
+    /** 定时任务：列表/新建/暂停/恢复/删除透传（数据与执行都在适配层）。 */
+    @GetMapping("/schedules")
+    public ResponseEntity<String> schedulesList() {
+        return proxyGet("/schedules");
+    }
+
+    @PostMapping("/schedules")
+    public ResponseEntity<String> schedulesCreate(@RequestBody String body) {
+        return proxyPost("/schedules", body);
+    }
+
+    @PostMapping("/schedules/{taskId}/pause")
+    public ResponseEntity<String> schedulesPause(@PathVariable String taskId) {
+        return proxyPost("/schedules/" + taskId + "/pause", "{}");
+    }
+
+    @PostMapping("/schedules/{taskId}/resume")
+    public ResponseEntity<String> schedulesResume(@PathVariable String taskId) {
+        return proxyPost("/schedules/" + taskId + "/resume", "{}");
+    }
+
+    @DeleteMapping("/schedules/{taskId}")
+    public ResponseEntity<String> schedulesDelete(@PathVariable String taskId) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(adapterBase + "/schedules/" + taskId))
+                .header("X-User-Id", String.valueOf(userId))
+                .DELETE()
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
     /** 会话历史回放：user/assistant 两条腿，供点击会话后回显。 */
     @GetMapping("/chat/history")
     public ResponseEntity<String> chatHistory(

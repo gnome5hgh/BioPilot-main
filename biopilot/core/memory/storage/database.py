@@ -100,6 +100,22 @@ CREATE TABLE IF NOT EXISTS audit_event (
     KEY idx_audit_session (session_id, created_at),
     KEY idx_audit_user (user_id, created_at)
 );
+-- scheduled_task 表：定时任务（webapi 进程内调度器消费；REPL 不跑调度）
+CREATE TABLE IF NOT EXISTS scheduled_task (
+    id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(191) NOT NULL,
+    conversation_id VARCHAR(64) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    task TEXT NOT NULL,
+    interval_minutes INTEGER NOT NULL,
+    paused INTEGER NOT NULL DEFAULT 0,
+    last_run_at VARCHAR(40) NULL,
+    next_run_at VARCHAR(40) NOT NULL,
+    created_at VARCHAR(40) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_sched_user (user_id),
+    KEY idx_sched_next (next_run_at)
+);
 
 -- papers 表：用户论文目录元数据（原文在 MinIO users/<uid>/papers/，行级 user_id 隔离）
 CREATE TABLE IF NOT EXISTS papers (
