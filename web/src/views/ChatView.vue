@@ -1,18 +1,59 @@
 <template>
   <div class="chat-page">
-    <!-- 左栏：会话列表（点开回续，新建开新会话） -->
+    <!-- 左栏：项目 + 会话列表 -->
     <aside class="sessions">
-      <button class="new-session" @click="newSession">＋ 新建会话</button>
+      <button class="new-session" @click="newSession">
+        ＋ 新建会话{{ currentProject ? '（进当前项目）' : '' }}
+      </button>
       <div class="session-scroll">
-        <template v-for="g in groupedSessions" :key="g.label">
-          <div class="group-label">{{ g.label }}</div>
-          <div v-for="s in g.items" :key="s.agent_id" class="session-item"
-               :class="{ active: s.agent_id === conversationId }" @click="openSession(s)">
+        <!-- 项目区：项目可选中（新会话归属它），展开显示其下会话 -->
+        <div class="group-label row-between">
+          <span>项目</span>
+          <button class="mini-add" title="新建项目" @click="showProjectInput = !showProjectInput">＋</button>
+        </div>
+        <div class="project-input" v-if="showProjectInput">
+          <input v-model="newProjectName" placeholder="项目名称，回车确认"
+                 @keydown.enter.exact.prevent="createProject" />
+        </div>
+        <div v-for="p in projects" :key="p.projectId" class="project-block">
+          <div class="project-item" :class="{ selected: p.projectId === currentProject }"
+               @click="selectProject(p)">
+            <span class="p-name">📁 {{ p.name }}</span>
+            <span class="p-count">{{ sessionsOf(p.projectId).length || '' }}</span>
+          </div>
+          <template v-if="expanded.has(p.projectId)">
+            <div v-for="s in sessionsOf(p.projectId)" :key="s.agent_id"
+                 class="session-item sub" :class="{ active: s.agent_id === conversationId }"
+                 @click="openSession(s)">
+              <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
+              <span class="item-menu" @click.stop="menuFor = menuFor === s.agent_id ? null : (confirmDelete = null, s.agent_id)">⋯</span>
+              <div v-if="menuFor === s.agent_id" class="menu-pop" @click.stop>
+                <button class="menu-item danger" @click="deleteSession(s)">
+                  {{ confirmDelete === s.agent_id ? '再点一次确认删除' : '删除会话' }}
+                </button>
+              </div>
+            </div>
+            <div class="empty-sessions" v-if="sessionsOf(p.projectId).length === 0">暂无会话</div>
+          </template>
+        </div>
+
+        <!-- 未分组会话（按日期） -->
+        <div class="group-label">会话</div>
+        <template v-for="g in ungroupedGroups" :key="g.label">
+          <div class="sub-label">{{ g.label }}</div>
+          <div v-for="s in g.items" :key="s.agent_id"
+               class="session-item" :class="{ active: s.agent_id === conversationId }"
+               @click="openSession(s)">
             <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
-            <span class="s-count">{{ s.message_count > 0 ? s.message_count + ' 条' : '' }}</span>
+            <span class="item-menu" @click.stop="menuFor = menuFor === s.agent_id ? null : (confirmDelete = null, s.agent_id)">⋯</span>
+            <div v-if="menuFor === s.agent_id" class="menu-pop" @click.stop>
+              <button class="menu-item danger" @click="deleteSession(s)">
+                {{ confirmDelete === s.agent_id ? '再点一次确认删除' : '删除会话' }}
+              </button>
+            </div>
           </div>
         </template>
-        <div class="empty-sessions" v-if="sessions.length === 0">还没有会话</div>
+        <div class="empty-sessions" v-if="sessions.length === 0 && projects.length === 0">还没有会话</div>
       </div>
     </aside>
 
@@ -33,6 +74,9 @@
       </div>
 
       <div class="composer">
+        <div class="project-hint" v-if="currentProjectName">
+          📁 {{ currentProjectName }} · 本会话的消息将归入该项目
+        </div>
         <textarea v-model="input" :placeholder="placeholder"
                   @keydown.enter.exact.prevent="send"></textarea>
         <div class="foot">
@@ -60,9 +104,9 @@
 </template>
 
 <script setup>
-// 对话主界面：左侧会话列表（点开经 /chat/history 回放），右侧聊天流 +
-// 底部输入。confirm 帧挂起等用户裁决后回传 /chat/confirm；300 秒无操作
-// 由服务端按拒绝处理（计时不在此处）。会话级模型切换下一 run 生效。
+// 对话主界面：左侧项目 + 会话列表（点会话经 /chat/history 回放；⋯ 菜单删除），
+// 右侧聊天流 + 底部输入。选中项目后，新会话的第一条消息会把会话归入该项目。
+// confirm 帧挂起等用户裁决后回传 /chat/confirm；300 秒无操作由服务端按拒绝处理。
 import { ref, computed, onMounted, nextTick } from 'vue'
 import http from '../api/auth'
 
@@ -78,6 +122,13 @@ const input = ref('')
 const busy = ref(false)
 const messages = ref([])
 const sessions = ref([])
+const projects = ref([])
+const currentProject = ref(null)     // 新会话归属的项目（null = 未分组）
+const expanded = ref(new Set())      // 展开的项目集合
+const menuFor = ref(null)            // 当前打开 ⋯ 菜单的会话 id
+const confirmDelete = ref(null)      // 两步删除：第一次点记下会话 id，再点执行
+const showProjectInput = ref(false)
+const newProjectName = ref('')
 const placeholder = '给 BioPilot 发送消息…（Enter 发送，Shift+Enter 换行）'
 const pendingConfirm = ref(null)
 const msgsBox = ref(null)
@@ -89,29 +140,72 @@ let conversationId = crypto.randomUUID()
 const models = ref([])
 const selectedModel = ref('')
 
+const currentProjectName = computed(() =>
+  projects.value.find(p => p.projectId === currentProject.value)?.name || '')
+
 onMounted(() => {
   loadSessions()
+  loadProjects()
   loadModels()
 })
 
-const groupedSessions = computed(() => {
-  const groups = [{ label: '今天', items: [] }, { label: '昨天', items: [] }, { label: '更早', items: [] }]
+function dateGroup(t) {
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
   const yStart = new Date(dayStart); yStart.setDate(yStart.getDate() - 1)
+  if (t >= dayStart) return '今天'
+  if (t >= yStart) return '昨天'
+  return '更早'
+}
+
+const ungroupedGroups = computed(() => {
+  const groups = {}
   for (const s of sessions.value) {
-    const t = new Date(s.created_at)
-    if (t >= dayStart) groups[0].items.push(s)
-    else if (t >= yStart) groups[1].items.push(s)
-    else groups[2].items.push(s)
+    if (s.project_id) continue
+    const label = dateGroup(new Date(s.created_at))
+    ;(groups[label] = groups[label] || { label, items: [] }).items.push(s)
   }
-  return groups.filter(g => g.items.length > 0)
+  const order = ['今天', '昨天', '更早']
+  return order.map(l => groups[l]).filter(Boolean)
 })
 
 async function loadSessions() {
   try {
-    const { data } = await http.get('/sessions', { params: { limit: 100 } })
+    const { data } = await http.get('/sessions', { params: { limit: 200 } })
     sessions.value = data.data || []
   } catch { /* 列表拿不到就保持空态 */ }
+}
+
+async function loadProjects() {
+  try {
+    const { data } = await http.get('/project')
+    projects.value = data.data || []
+  } catch { /* 拿不到就空态 */ }
+}
+
+async function createProject() {
+  const name = newProjectName.value.trim()
+  if (!name) return
+  try {
+    const { data } = await http.post('/project', { name })
+    showProjectInput.value = false
+    newProjectName.value = ''
+    await loadProjects()
+    currentProject.value = data.data?.projectId || null
+    expanded.value = new Set([...expanded.value, currentProject.value])
+  } catch (e) {
+    window.alert(e?.response?.data?.msg || '新建项目失败')
+  }
+}
+
+function selectProject(p) {
+  currentProject.value = p.projectId
+  const next = new Set(expanded.value)
+  next.add(p.projectId)
+  expanded.value = next
+}
+
+function sessionsOf(pid) {
+  return sessions.value.filter(s => s.project_id === pid)
 }
 
 async function loadModels() {
@@ -131,12 +225,14 @@ function newSession() {
   conversationId = crypto.randomUUID()
   messages.value = []
   pendingConfirm.value = null
+  menuFor.value = null
 }
 
 async function openSession(s) {
   if (busy.value || s.agent_id === conversationId) return
   conversationId = s.agent_id
   pendingConfirm.value = null
+  menuFor.value = null
   try {
     const { data } = await http.get('/agent/chat/history', {
       params: { conversationId: s.agent_id },
@@ -147,6 +243,23 @@ async function openSession(s) {
   }
   await nextTick()
   scrollBottom()
+}
+
+async function deleteSession(s) {
+  // 两步确认（不弹原生框）：第一次点标记，再点执行
+  if (confirmDelete.value !== s.agent_id) {
+    confirmDelete.value = s.agent_id
+    return
+  }
+  confirmDelete.value = null
+  menuFor.value = null
+  try {
+    await http.delete('/agent/chat/session', { params: { conversationId: s.agent_id } })
+    if (s.agent_id === conversationId) newSession()
+    await loadSessions()
+  } catch (e) {
+    window.alert(e?.response?.data?.msg || '删除失败')
+  }
 }
 
 function fillExample(c) {
@@ -175,7 +288,9 @@ async function send() {
         'satoken': localStorage.getItem('biopilot_token') || '',
         'X-Conversation-Id': conversationId,
       },
-      body: JSON.stringify({ task, conversation_id: conversationId }),
+      body: JSON.stringify({
+        task, conversation_id: conversationId, project_id: currentProject.value,
+      }),
     })
     if (resp.status === 401) {
       // 登录态失效（服务重启/过期）：跳登录页重新拿 token
@@ -223,7 +338,7 @@ async function send() {
     reply.text = reply.text ? `${reply.text}\n\n[连接中断：${e.message}]` : `对话失败：${e.message}`
   } finally {
     busy.value = false
-    loadSessions()   // 新会话/新标题进左栏
+    loadSessions()   // 新会话/新标题/项目归属进左栏
     await nextTick(); scrollBottom()
   }
 }
@@ -250,21 +365,38 @@ async function answerConfirm(approved) {
 
 <style scoped>
 .chat-page { display: flex; height: 100vh; overflow: hidden; }
-/* 左栏会话列表 */
-.sessions { width: 230px; flex: none; border-right: 1px solid #e6e9ed; padding: 14px 10px; display: flex; flex-direction: column; gap: 6px; background: #fafbfc; }
+/* 左栏：项目 + 会话 */
+.sessions { width: 240px; flex: none; border-right: 1px solid #e6e9ed; padding: 14px 10px; display: flex; flex-direction: column; gap: 6px; background: #fafbfc; }
 .new-session { border: 1px solid #e6e9ed; background: #fff; border-radius: 10px; padding: 10px; cursor: pointer; font-size: 13px; }
 .new-session:hover { border-color: #2ec5b1; color: #2ec5b1; }
 .session-scroll { overflow-y: auto; margin-top: 4px; }
 .group-label { font-size: 11px; color: #a6adbd; margin: 10px 4px 4px; }
-.session-item { padding: 9px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.row-between { display: flex; justify-content: space-between; align-items: center; }
+.mini-add { border: none; background: transparent; cursor: pointer; color: #2ec5b1; font-size: 13px; padding: 0 4px; }
+.project-input { margin: 2px 0 6px; }
+.project-input input { width: 100%; box-sizing: border-box; border: 1px solid #2ec5b1; border-radius: 8px; padding: 7px 9px; font-size: 12px; outline: none; }
+.sub-label { font-size: 11px; color: #b7bdc9; margin: 6px 4px 2px 18px; }
+.project-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.project-item:hover { background: #f0f1f5; }
+.project-item.selected { background: #e8f8f5; }
+.project-item.selected .p-name { color: #2ec5b1; font-weight: 600; }
+.p-count { font-size: 11px; color: #a6adbd; }
+.session-item { position: relative; padding: 9px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.session-item.sub { margin-left: 16px; }
 .session-item:hover { background: #f0f1f5; }
 .session-item.active { background: #e8f8f5; }
 .session-item.active .s-name { color: #2ec5b1; font-weight: 600; }
 .s-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .s-count { font-size: 11px; color: #a6adbd; flex: none; }
-.empty-sessions { font-size: 12px; color: #a6adbd; text-align: center; padding: 24px 0; }
+.item-menu { flex: none; font-size: 13px; color: #a6adbd; cursor: pointer; padding: 0 4px; border-radius: 4px; visibility: hidden; }
+.session-item:hover .item-menu { visibility: visible; }
+.menu-pop { position: absolute; right: 6px; top: 30px; background: #fff; border: 1px solid #e6e9ed; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); z-index: 20; min-width: 96px; }
+.menu-item { display: block; width: 100%; border: none; background: transparent; text-align: left; padding: 8px 12px; font-size: 12px; cursor: pointer; }
+.menu-item.danger { color: #e5484d; }
+.menu-item:hover { background: #f8f9fc; }
+.empty-sessions { font-size: 12px; color: #a6adbd; text-align: center; padding: 16px 0; }
 
-/* 右侧聊天区：消息滚动区 + 底部输入 */
+/* 右侧聊天区 */
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .messages { flex: 1; overflow-y: auto; padding: 28px 32px; display: flex; flex-direction: column; gap: 14px; }
 .hero { font-size: 32px; font-weight: 700; text-align: center; margin-top: 8vh; }
@@ -278,6 +410,7 @@ async function answerConfirm(approved) {
 .row.user .bubble { background: #e8f8f5; }
 .row.assistant .bubble { background: #f5f6f9; }
 .composer { border-top: 1px solid #e6e9ed; padding: 14px 20px; background: #fff; }
+.project-hint { font-size: 12px; color: #2ec5b1; margin-bottom: 8px; }
 .composer textarea { width: 100%; min-height: 56px; max-height: 160px; border: 1px solid #e6e9ed; border-radius: 12px; padding: 10px 12px; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; }
 .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
 .hint { font-size: 12px; color: #a6adbd; }

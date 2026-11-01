@@ -256,6 +256,30 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             " ORDER BY seq", (conversation_id, x_user_id)).fetchall()
         return {"messages": [dict(r) for r in rows]}
 
+    @app.delete("/chat/session")
+    async def chat_session_delete(
+        conversation_id: str = "", x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """删除一个会话：消息行 + agent_state 行（归属双条件）。
+
+        进程内缓存的 Agent 实例一并弹出（会话 id 是 uuid，理论不会复用，
+        弹缓存是防手滑复用旧窗口的兜底）。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        if not conversation_id:
+            raise HTTPException(status_code=422, detail="缺少 conversation_id")
+        db = _shared_db()
+        db.execute("DELETE FROM messages WHERE agent_id=? AND user_id=?",
+                   (conversation_id, x_user_id))
+        gone = db.execute("DELETE FROM agent_state WHERE agent_id=? AND user_id=?",
+                          (conversation_id, x_user_id))
+        agents.pop((x_user_id, conversation_id, user_models.get(x_user_id)), None)
+        agent_last_used.pop((x_user_id, conversation_id), None)
+        if gone == 0:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return {"status": "ok"}
+
     @app.post("/chat/stream")
     async def chat_stream(
         request: Request,

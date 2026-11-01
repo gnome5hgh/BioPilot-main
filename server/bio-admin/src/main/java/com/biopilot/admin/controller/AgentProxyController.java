@@ -159,6 +159,29 @@ public class AgentProxyController {
         return proxyGet("/sessions?limit=" + Math.max(1, Math.min(limit, 200)));
     }
 
+    /** 删除会话（消息行 + agent_state 行，引擎侧归属双条件）。 */
+    @DeleteMapping("/chat/session")
+    public ResponseEntity<String> chatSessionDelete(@RequestParam String conversationId) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(ADAPTER_BASE + "/chat/session?conversation_id="
+                        + java.net.URLEncoder.encode(conversationId, java.nio.charset.StandardCharsets.UTF_8)))
+                .header("X-User-Id", String.valueOf(userId))
+                .DELETE()
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
     /** 会话历史回放：user/assistant 两条腿，供点击会话后回显。 */
     @GetMapping("/chat/history")
     public ResponseEntity<String> chatHistory(
