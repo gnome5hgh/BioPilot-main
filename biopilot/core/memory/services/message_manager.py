@@ -140,7 +140,7 @@ class MessageManager:
             - 使用 dataclasses.replace 生成新对象，不修改原 wire。
             - 清洗函数 sanitize_surrogates 将无效代理码点替换为 �，确保数据库写入安全。
         """
-        # 清洗 content 中的 surrogateescape 残留（防止写入 SQLite 时 UnicodeEncodeError）
+        # 清洗 content 中的 surrogateescape 残留（防止写入数据库时 UnicodeEncodeError）
         wire = replace(wire, content=sanitize_surrogates(wire.content))
         meta = getattr(wire, "meta", None)
         if meta is not None:

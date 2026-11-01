@@ -136,7 +136,8 @@ async def assemble_web_session(user_id: str, conversation_id: str,
 
     from biopilot.core.agent import Agent
     from biopilot.core.llm import LLMClient, StructuredOutput
-    from biopilot.core.llm.skills import LoadSkillTool, SkillRegistry, load_lock
+    # SkillRegistry/load_lock/LoadSkillTool 不在此处再导入：模块顶部已导入
+    # （from biopilot.core.skills / biopilot.tools.skills.load_skill）
     from biopilot.core.memory.schemas.memory import Memory
     from biopilot.core.memory.services.agent_manager import AgentManager
     from biopilot.core.memory.services.block_manager import BlockManager
@@ -148,7 +149,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     from biopilot.core.security.middleware.command_guard import CommandGuardMiddleware
     from biopilot.core.security.middleware.content_guard import ContentGuardMiddleware
     from biopilot.core.security.middleware.policy_engine import PolicyEngineMiddleware
-    from biopilot.core.security.middleware.workspace_policy import WorkspacePolicyMiddleware
+    # WorkspacePolicyMiddleware 不在此处再导入：模块顶部已从包门面导入（文件名是 workspace.py）
 
     config = config or BioPilotConfig.from_env()
 

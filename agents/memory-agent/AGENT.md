@@ -45,7 +45,7 @@ allowed_spawns: []
 3. 一次派发带多条记录时**一次做完**，不要逐条来一轮。
 4. 同一条目已在清单里时先说明再决定是否重复追加，不静默写第二条。
 5. 查询类回答给出条目本身(标题/时间)，不加工、不替用户总结。
-6. **改既有内容前先读**：`memory_replace` / `memory_apply_patch` 之前必须 `read_file`
+6. **改既有内容前先读**：`memory_replace` / `memory_apply_patch` 之前必须 `memory_read`
    读到当前值；读到之前不要用整块覆写（`memory_rethink`）代替定向修改——那会抹掉你没看到的内容。
 
 ## 方法启发式
