@@ -215,28 +215,22 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         enabled = bool((body or {}).get("enabled", True))
 
-        pf_dir = Path.cwd() / ".biopilot"
-        lock_path = pf_dir / "skills.lock.json"
-        # 原子写：临时文件 + os.replace（并发写不撕裂）
+        # 读写走 skills 体系自己的 lock 助手：信封带 schema 版本、原子替换、
+        # 排序稳定——裸 JSON 读写会把信封抹掉，下一次任何 lock 消费方直接 fail-closed
         import fcntl
-        import os as _os
-        import tempfile
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_fp = open(lock_path, "a+")
+        from biopilot.core.skills.services.install import (
+            _save_lock, lock_path as _lock_path)
+        from biopilot.core.skills import load_lock
+        pf_dir = Path.cwd() / ".biopilot"
+        lock_fp = open(_lock_path(pf_dir), "a+")
         try:
             fcntl.flock(lock_fp, fcntl.LOCK_EX)
-            import json as _json
-            lock_fp.seek(0)
-            lock = _json.loads(lock_fp.read()) if lock_path.stat().st_size > 0 else {}
-            entry = lock.get(name, {})
+            skills = (load_lock(pf_dir)
+                      if _lock_path(pf_dir).stat().st_size > 0 else {})
+            entry = skills.get(name, {})
             entry["enabled"] = enabled
-            if "version" not in entry:
-                entry["version"] = "0.0.0"
-            lock[name] = entry
-            fd, tmp = tempfile.mkstemp(dir=str(lock_path.parent))
-            with _os.fdopen(fd, "w", encoding="utf-8") as f:
-                _json.dump(lock, f, ensure_ascii=False, indent=2)
-            _os.replace(tmp, lock_path)
+            skills[name] = entry
+            _save_lock(pf_dir, skills)
         finally:
             fcntl.flock(lock_fp, fcntl.LOCK_UN)
             lock_fp.close()
@@ -425,6 +419,42 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 "confirm_above": cfg.runtime.confirm_above,
                 "models": cfg.runtime.models}
 
+    @app.get("/models")
+    async def models_list(x_user_id: str | None = Header(default=None)) -> dict:
+        """可选模型清单：主模型 + runtime.models 配置条目（不回传 key）。
+
+        空配置时退化为只展示主模型——前端据此隐藏切换器。
+        """
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        items = [{"name": m.get("name") or m.get("model", ""),
+                  "model": m.get("model", ""),
+                  "current": False}
+                 for m in cfg.runtime.models]
+        items.insert(0, {"name": "默认主模型", "model": cfg.llm.model, "current": True})
+        return {"models": items,
+                "selected": user_models.get(x_user_id),
+                "base_model": cfg.llm.model}
+
+    @app.post("/models/select")
+    async def models_select(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
+        """会话级模型选择：本用户后续 run 用所选模型（agent 缓存按模型分键）。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        name = (body or {}).get("name", "")
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        if name and name != "默认主模型":
+            known = any((m.get("name") or m.get("model")) == name for m in cfg.runtime.models)
+            if not known:
+                raise HTTPException(status_code=422, detail=f"未知模型：{name}")
+            user_models[x_user_id] = name
+        else:
+            user_models[x_user_id] = None    # 回到主模型
+        return {"status": "ok", "selected": user_models.get(x_user_id)}
+
     #: 设置端点可写的键 → config.yaml 里的嵌套落点（覆盖链：schema 默认 ← config.yaml ← env）。
     #: 只开语义子集，凭据类字段永不经此通道。
     _SETTING_PATHS = {
@@ -591,6 +621,7 @@ def _accepts_stream(run_callable) -> bool:
 
 async def _default_agent_factory(user_id: str, conversation_id: str,
                                  confirm_callback=None, project_id: str | None = None):
+    # 模型选择读模块级 user_models（端点写入）——不进工厂签名，注入替身契约不变
     """真实装配：委托 assembly 的 web 会话装配（与 REPL 同一套对象图）。
 
     确认回调与项目归属原样透传——确认走 SSE 往返、project_id 进 agent_state。
@@ -598,7 +629,8 @@ async def _default_agent_factory(user_id: str, conversation_id: str,
     from biopilot.cli.services.assembly import assemble_web_session
     session = await assemble_web_session(user_id, conversation_id,
                                          confirm_callback=confirm_callback,
-                                         project_id=project_id)
+                                         project_id=project_id,
+                                         model_name=user_models.get(user_id))
     # 整合队列两处挂账：agent 实例上（每轮收尾 enqueue）+ 全局集合（停服 flush；
     # 游标推进走 DB 锁，多进程安全）
     session.agent._consolidation_queue = session.consolidation_queue
@@ -700,10 +732,15 @@ def _paper_endpoints(app: FastAPI) -> None:
     ) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        oss_key = (body or {}).get("oss_key", "")
+        # OSS 写围栏：登记的对象键必须落在本人前缀下（防登记/删除他人对象）
+        if not oss_key.startswith(f"users/{x_user_id}/"):
+            raise HTTPException(status_code=422,
+                                detail="oss_key 必须以 users/<本人>/ 开头")
         db = _shared_db()
         register_paper(db, x_user_id, paper_id,
                        (body or {}).get("title", ""),
-                       (body or {}).get("oss_key", ""),
+                       oss_key,
                        int((body or {}).get("size_bytes", 0)))
         return {"status": "ok"}
 

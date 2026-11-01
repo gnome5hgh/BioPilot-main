@@ -65,7 +65,8 @@ class RAGService:
                                        config.rag.chunker.overlap_tokens)
 
         # 检索熔断器：Milvus 不可达时跳闸，省掉「每次检索都白等一轮连接超时」。
-        # 它是有状态的守卫而非惰性组件，构造期就建好；检索侧读它做放行判断。
+        # 每实例独立（实例按用户域构造）——故障域对齐故障源，一个用户的
+        # collection 异常不再把所有用户的检索打入熔断。
         self.retrieval_breaker = RetrievalBreaker()
 
     # —— 惰性组件（双重检查加锁，保证并发下只初始化一次）——

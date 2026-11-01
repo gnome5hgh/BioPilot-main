@@ -3,6 +3,7 @@
 索引为空时返回空结果。对外检索工具 RagRetrieveTool 在 `biopilot/tools/rag/rag_retrieve.py`。
 """
 import logging
+import threading
 
 from biopilot.core.rag.domain import Chunk, indexed_text
 
@@ -42,6 +43,8 @@ class Retriever:
         # 从向量库整体重建一次才能与向量路对齐；此后增删改由索引器与向量库
         # 成对执行维护，无需再重建。
         self._bm25_synced = False
+        #: BM25 重建 singleflight 锁（实例级：一个 Retriever 服务一个 collection）
+        self._bm25_rebuild_lock = threading.Lock()
 
     def retrieve(self, queries, top_k: int | None = None) -> list[Chunk]:
         """对查询集执行检索，返回有序块（不带分数）。
@@ -120,8 +123,13 @@ class Retriever:
         # 不触碰索引状态与文档块（那是 index_all 全量重扫的职责，个人语料规模下两者开销差一个量级）。
         # 重建失败（Milvus 读取异常）不置位，下次查询重试；本次退化为纯向量路。
         if not self._bm25_synced:
-            bm25.rebuild([(c.id, indexed_text(c)) for c, _mtime in vs.all_documents()])
-            self._bm25_synced = True
+            # 重建 singleflight：并发首查只有一路真重建，后到者等锁后直接用——
+            # 裸 rebuild 会让两路同时全量拉取向量库（慢一倍），且重建窗内结果不一致
+            with self._bm25_rebuild_lock:
+                if not self._bm25_synced:
+                    bm25.rebuild([(c.id, indexed_text(c))
+                                  for c, _mtime in vs.all_documents()])
+                    self._bm25_synced = True
 
         # ---- 多查询双路检索，全部排名累计进同一 RRF 池 ----
         # scores：块 id → 各路倒数排名分之和。同一块在越多路命中、名次越靠前，

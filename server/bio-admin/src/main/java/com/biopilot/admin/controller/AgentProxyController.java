@@ -141,6 +141,17 @@ public class AgentProxyController {
         }
     }
 
+    /** 会话级多模型：清单（不含 key）与选择切换，切换下一 run 生效。 */
+    @GetMapping("/models")
+    public ResponseEntity<String> modelsList() {
+        return proxyGet("/models");
+    }
+
+    @PostMapping("/models/select")
+    public ResponseEntity<String> modelsSelect(@RequestBody String body) {
+        return proxyPost("/models/select", body);
+    }
+
     /** KB 知识库：状态快照与重建触发透传。 */
     @GetMapping("/kb/status")
     public ResponseEntity<String> kbStatus() {

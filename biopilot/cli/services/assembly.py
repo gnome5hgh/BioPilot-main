@@ -115,7 +115,8 @@ class WebSession:
 
 async def assemble_web_session(user_id: str, conversation_id: str,
                                config=None, confirm_callback=None,
-                               project_id: str | None = None) -> WebSession:
+                               project_id: str | None = None,
+                               model_name: str | None = None) -> WebSession:
     """Web 适配层的会话装配：与 main() 同一套对象图，无终端 IO。
 
     与 main() 的三处差异（业务层替换的边界内）：
@@ -167,7 +168,19 @@ async def assemble_web_session(user_id: str, conversation_id: str,
         agent_state = agent_manager.create_agent(conversation_id, user_id=user_id,
                                                  project_id=project_id)
 
-    llm = LLMClient(config.llm)
+    # 会话级模型选择：条目字段覆盖主模型配置（缺省字段回落主 llm 段）
+    llm_cfg = config.llm
+    if model_name:
+        entry = next((m for m in config.runtime.models
+                      if (m.get("name") or m.get("model")) == model_name), None)
+        if entry is not None:
+            from dataclasses import replace as _dc_replace
+            llm_cfg = _dc_replace(
+                config.llm,
+                model=entry.get("model", config.llm.model),
+                base_url=entry.get("base_url", config.llm.base_url),
+                api_key=entry.get("api_key", config.llm.api_key))
+    llm = LLMClient(llm_cfg)
     agents_dir = (config.runtime.agents_dir if Path(config.runtime.agents_dir).is_dir()
                   else str(Path(__file__).resolve().parents[3] / "agents"))
     registry = AgentRegistry(agents_dir)

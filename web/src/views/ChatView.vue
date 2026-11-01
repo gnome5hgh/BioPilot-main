@@ -10,6 +10,9 @@
     <div class="input-card">
       <textarea v-model="input" :placeholder="placeholder" @keydown.enter.exact.prevent="send"></textarea>
       <div class="foot">
+        <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
+          <option v-for="m in models" :key="m.name" :value="m.name">{{ m.name }}</option>
+        </select>
         <span class="hint">Enter 发送 · 产物经安全确认后落库</span>
         <button class="send" :disabled="busy" @click="send">{{ busy ? '…' : '发送' }}</button>
       </div>
@@ -36,10 +39,26 @@
 <script setup>
 // 对话闭环：SSE 经 SpringBoot 转发到 Python 适配层。confirm 帧挂起等待用户
 // 点选后回传 /chat/confirm；300 秒无操作由服务端按拒绝处理（计时不在此处）。
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import http from '../api/auth'
 
 // 会话标识：本次进入页面生成一个（跨用户撞名面由 uuid 消除）
 const conversationId = crypto.randomUUID()
+
+// 多模型选择：清单不含 key；切换只写会话偏好，下一 run 生效
+const models = ref([])
+const selectedModel = ref('')
+onMounted(async () => {
+  try {
+    const { data } = await http.get('/agent/models')
+    models.value = data.models || []
+    selectedModel.value = data.selected || data.models?.[0]?.name || ''
+  } catch { /* 清单拿不到就不显示选择器（单模型部署） */ }
+})
+
+async function selectModel() {
+  await http.post('/agent/models/select', { name: selectedModel.value })
+}
 
 const caps = [
   { name: '生信分析', example: '示例：帮我整理单细胞 QC 的标准流程要点' },
@@ -163,4 +182,5 @@ textarea { width: 100%; min-height: 54px; border: none; resize: none; font-size:
 .confirm-actions button { border: none; border-radius: 8px; padding: 8px 18px; cursor: pointer; font-size: 13px; }
 .confirm-actions .ok { background: #2ec5b1; color: #fff; }
 .confirm-actions .reject { background: #f1f3f7; color: #4a5160; }
+.model-select { border: 1px solid #e6e9ed; border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #4a5160; background: #fff; }
 </style>
