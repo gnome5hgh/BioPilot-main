@@ -95,3 +95,8 @@
 - **根因**：`spring-boot:run` 这类直接目标调用会在 reactor **每个**模块上执行，`-am` 把 bio-common-core 等库模块拉进来，它们没有 main class。
 - **修法**：先 `cd server && mvn install -DskipTests` 一次，之后 `cd server/bio-admin && mvn spring-boot:run`（reactor 里只有启动模块自己）。
 - **验证**：启动日志出现 `Started BioPilotApplication`，`curl http://127.0.0.1:8080/auth/profile` 返回 401（而非连接拒绝）。
+
+### 某个不常用的端点/分支一调就 `NameError: name 'X' is not defined`（导入期一切正常）
+- **根因**：未定义名藏在冷路径里（ rarely 执行的端点、异常分支、闭包），导入与常规测试都覆盖不到；典型如缺模块级 `logger`、`from pathlib import Path` 只导入了 `pathlib`、闭包引用 `except X as e` 的隐删变量、内层函数引用兄弟函数的局部变量。
+- **修法**：`/opt/miniconda3/envs/biopilot/bin/python -m pyflakes biopilot/` 全量扫 `undefined name`（F821），逐条修；修完保持扫描清零作为回归线。except 变量在闭包里用要提前 `req = e` 绑定。
+- **验证**：pyflakes 对 `biopilot/` 输出 0 条 undefined name；对应端点 curl 200。
