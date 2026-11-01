@@ -13,7 +13,8 @@ from __future__ import annotations
 import contextvars
 from dataclasses import dataclass
 
-__all__ = ["MemoryToolsContext", "set_memory_context", "get_memory_context"]
+__all__ = ["MemoryToolsContext", "set_memory_context",
+           "reset_memory_context", "get_memory_context"]
 
 
 @dataclass
@@ -54,6 +55,15 @@ def set_memory_context(ctx: MemoryToolsContext | None):
         contextvars.Token，配对 `get_memory_context` 所在变量的复位令牌。
     """
     return _memory_context.set(ctx)
+
+
+def reset_memory_context(token) -> None:
+    """按 set_memory_context 返回的令牌复位绑定（嵌套 run 退出时还原外层）。
+
+    Args:
+        token: set_memory_context 返回的 contextvars.Token。
+    """
+    _memory_context.reset(token)
 
 
 def get_memory_context() -> MemoryToolsContext | None:

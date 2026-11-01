@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextvars
 
-__all__ = ["set_rag_domain", "get_rag_domain"]
+__all__ = ["set_rag_domain", "reset_rag_domain", "get_rag_domain"]
 
 _rag_domain: contextvars.ContextVar[str] = contextvars.ContextVar(
     "biopilot_rag_domain", default="local")
@@ -25,6 +25,15 @@ def set_rag_domain(domain: str | None):
         contextvars.Token，嵌套场景收尾用 ContextVar.reset 还原外层绑定。
     """
     return _rag_domain.set(domain or "local")
+
+
+def reset_rag_domain(token) -> None:
+    """按 set_rag_domain 返回的令牌复位绑定（嵌套 run 退出时还原外层）。
+
+    Args:
+        token: set_rag_domain 返回的 contextvars.Token。
+    """
+    _rag_domain.reset(token)
 
 
 def get_rag_domain() -> str:

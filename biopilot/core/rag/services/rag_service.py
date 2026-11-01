@@ -348,7 +348,7 @@ class RAGService:
             outcome = self.get_indexer().index_all()
 
         # 状态里有镜像路径 = 该篇解析与入库成功（empty/skipped 不会写状态）
-        raw = self.get_indexer()._read_state()
+        raw = self.get_indexer().read_state()
         state = (raw or (0, {}))[1]
         indexed = 0
         failed: list[dict] = []

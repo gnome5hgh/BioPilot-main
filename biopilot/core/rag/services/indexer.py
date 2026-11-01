@@ -218,6 +218,12 @@ class RagIndexer:
             return None
 
 
+    def read_state(self) -> tuple[object, dict] | None:
+        """读原始状态（公开入口；供全量收敛与用户域论文索引判成功）。
+
+        内部路径仍走 _read_state。"""
+        return self._read_state()
+
     def _read_state(self) -> tuple[object, dict] | None:
         """读原始状态文件，返回 (版本号, docs)。
 

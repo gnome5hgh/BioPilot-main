@@ -146,6 +146,22 @@ class RuntimeConfig:
     #: 空列表表示未配置多模型——模型选择器退化为只展示当前主模型。
     models: list[dict] = field(default_factory=list)
 
+    def find_model_entry(self, name: str) -> "dict | None":
+        """按展示名（name 缺省回退 model）查多模型条目；未命中返回 None。
+
+        Args:
+            name: 模型展示名（models/select 与装配两侧共用的唯一匹配口径）。
+
+        Returns:
+            dict | None：命中的条目；name 为空或未配置多模型时为 None。
+        """
+        if not name:
+            return None
+        for m in self.models:
+            if (m.get("name") or m.get("model")) == name:
+                return m
+        return None
+
     #: Agent 插件扫描目录，默认扫描项目根下的 agents/
     agents_dir: str = "agents"
 

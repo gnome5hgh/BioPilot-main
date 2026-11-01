@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 #: 论文上传的单文件上限：超限直接拒绝，不把大文件整个读进内存
 _PAPER_UPLOAD_LIMIT = 200 * 1024 * 1024
 
+#: 设置端点可写的键 → config.yaml 里的嵌套落点（覆盖链：schema 默认 ← config.yaml ← env）。
+#: 只开语义子集，凭据类字段永不经此通道。
+_SETTING_PATHS = {
+    "intent_enabled": ("intent", "enabled"),
+    "confirm_above": ("runtime", "confirm_above"),
+}
+
 
 @dataclass
 class WebConfig:
@@ -238,6 +245,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.get("/schedules")
     async def schedules_list(x_user_id: str | None = Header(default=None)) -> dict:
+        """本用户的定时任务清单（新→旧）。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         db = _shared_db()
@@ -272,6 +280,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.post("/schedules/{task_id}/pause")
     async def schedules_pause(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        """暂停定时任务（不动已排队的下一次执行时间，恢复后照常）。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         _shared_db().execute("UPDATE scheduled_task SET paused=1 WHERE id=? AND user_id=?",
@@ -280,6 +289,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.post("/schedules/{task_id}/resume")
     async def schedules_resume(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        """恢复已暂停的定时任务。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         _shared_db().execute("UPDATE scheduled_task SET paused=0 WHERE id=? AND user_id=?",
@@ -288,6 +298,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.delete("/schedules/{task_id}")
     async def schedules_delete(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        """删除定时任务（行删除；执行中的一次跑到自然结束）。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         _shared_db().execute("DELETE FROM scheduled_task WHERE id=? AND user_id=?",
@@ -295,15 +306,18 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         return {"status": "ok"}
 
     async def _scheduler_loop():
+        """调度循环：每 60 秒扫一次到期任务（扫描与执行逻辑在模块级 run_due_schedules）。"""
         while True:
             try:
-                await run_due_schedules(_shared_db(), agent_factory, _sched_running)
+                await run_due_schedules(_shared_db(), agent_factory,
+                                        _sched_running, gate=llm_gate)
             except Exception:
                 logger.warning("调度轮询异常", exc_info=True)
             await asyncio.sleep(60)
 
     @app.on_event("startup")
     async def _start_scheduler():
+        """应用启动时拉起调度循环；随应用关停由事件循环统一回收。"""
         app.state.scheduler = asyncio.create_task(_scheduler_loop())
 
     @app.get("/chat/history")
@@ -544,20 +558,12 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         from biopilot.config import BioPilotConfig
         cfg = BioPilotConfig.from_env()
         if name and name != "默认主模型":
-            known = any((m.get("name") or m.get("model")) == name for m in cfg.runtime.models)
-            if not known:
+            if cfg.runtime.find_model_entry(name) is None:
                 raise HTTPException(status_code=422, detail=f"未知模型：{name}")
             user_models[x_user_id] = name
         else:
             user_models[x_user_id] = None    # 回到主模型
         return {"status": "ok", "selected": user_models.get(x_user_id)}
-
-    #: 设置端点可写的键 → config.yaml 里的嵌套落点（覆盖链：schema 默认 ← config.yaml ← env）。
-    #: 只开语义子集，凭据类字段永不经此通道。
-    _SETTING_PATHS = {
-        "intent_enabled": ("intent", "enabled"),
-        "confirm_above": ("runtime", "confirm_above"),
-    }
 
     @app.post("/settings")
     async def settings_set(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
@@ -671,9 +677,6 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     _paper_endpoints(app)
     # 索引触发：按用户域重建 RAG collection（RAGService user_domain）
-    # 每用户重建 singleflight：重建进行中时重复触发直接返回（防并发「先删后建」互删）
-    reindex_running: set[str] = set()
-
     @app.post("/kb/reindex")
     async def kb_reindex(x_user_id: str | None = Header(default=None)) -> dict:
         """按用户域触发全量重建：后台线程跑 index_all（嵌入耗时可能数十分钟），
@@ -682,24 +685,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         if x_user_id in reindex_running:
             return {"status": "already-running"}
-        from biopilot.core.rag.services.rag_service import get_rag_service
-        from biopilot.config import BioPilotConfig
-        from biopilot.core.rag.storage.image_store import MinioImageStore
-        cfg = BioPilotConfig.from_env()
-        svc = get_rag_service(cfg, user_domain=x_user_id)
-        store = MinioImageStore(cfg.rag.storage.minio)
-        db = _shared_db()
-        reindex_running.add(x_user_id)
-
-        def _job() -> None:
-            try:
-                # 平台论文的原文在 MinIO、元数据在 papers 表：同步镜像后走
-                # 本域 index_all 管线；成功的行置 indexed=1（进度看 /kb/status）
-                svc.index_user_papers(x_user_id, db, store)
-            finally:
-                reindex_running.discard(x_user_id)
-
-        asyncio.get_running_loop().create_task(asyncio.to_thread(_job))
+        _schedule_user_index(x_user_id)
         return {"status": "started"}
 
     # KB 展示：索引状态快照（papers 已索引计数 + collection 命名）
@@ -761,12 +747,18 @@ user_models: dict[str, str | None] = {}
 _sched_running: set = set()
 
 
-async def run_due_schedules(db, agent_factory, running: set) -> int:
+async def run_due_schedules(db, agent_factory, running: set, gate=None) -> int:
     """扫描并执行到期的定时任务，返回本轮执行数。
 
     执行即把任务文本投进归属会话跑一遍（回答落会话，用户在聊天流里看）；
     跑完推进 last_run/next_run——失败也推进，防失败任务每轮重试刷爆。
     running 集合防上一轮未完成的任务本轮重复入队。
+
+    Args:
+        db: MemoryDB，任务行读写。
+        agent_factory: 会话工厂（与对话同一路径）。
+        running: 运行中任务 id 集合（防重复入队；跨调用量由调用方持有）。
+        gate: asyncio.Semaphore | None，全局并发闸（定时执行与网页对话共用）。
     """
     from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc).isoformat()
@@ -781,9 +773,16 @@ async def run_due_schedules(db, agent_factory, running: set) -> int:
 
         async def _run_one(row=row):
             try:
-                built = agent_factory(row["user_id"], row["conversation_id"])
-                agent = await built if asyncio.iscoroutine(built) else built
-                await agent.run("【定时任务】" + row["task"])
+                # 定时执行与网页对话同过全局并发闸（此前直调 agent.run 绕过了资源治理）
+                if gate is not None:
+                    async with gate:
+                        built = agent_factory(row["user_id"], row["conversation_id"])
+                        agent = await built if asyncio.iscoroutine(built) else built
+                        await agent.run("【定时任务】" + row["task"])
+                else:
+                    built = agent_factory(row["user_id"], row["conversation_id"])
+                    agent = await built if asyncio.iscoroutine(built) else built
+                    await agent.run("【定时任务】" + row["task"])
             except Exception:
                 logger.warning("定时任务执行失败（%s）", row["name"], exc_info=True)
             finally:
@@ -812,6 +811,41 @@ def run_server(config: WebConfig | None = None) -> None:
 def os_env(key: str, default: str | None) -> str | None:
     import os
     return os.environ.get(key, default)
+
+
+#: 每用户重建 singleflight（模块级：上传自动索引与手动重建共用，防并发「先删后建」互删）
+reindex_running: set[str] = set()
+
+
+def _schedule_user_index(user_id: str) -> None:
+    """在事件循环里后台触发一次该用户的增量索引（singleflight 去重）。
+
+    Args:
+        user_id: 归属用户（即 RAG 用户域）。
+    """
+
+    def _job() -> None:
+        try:
+            from biopilot.config import BioPilotConfig
+            from biopilot.core.rag.services.rag_service import get_rag_service
+            from biopilot.core.rag.storage.image_store import MinioImageStore
+            cfg = BioPilotConfig.from_env()
+            svc = get_rag_service(cfg, user_domain=user_id)
+            svc.index_user_papers(user_id, _shared_db(), MinioImageStore(cfg.rag.storage.minio))
+        except Exception:
+            logger.warning("上传后自动索引失败（%s）", user_id, exc_info=True)
+
+    if user_id in reindex_running:
+        return
+    reindex_running.add(user_id)
+
+    async def _runner():
+        try:
+            await asyncio.to_thread(_job)
+        finally:
+            reindex_running.discard(user_id)
+
+    asyncio.get_running_loop().create_task(_runner())
 
 
 def _paper_store():
@@ -878,6 +912,9 @@ def _paper_endpoints(app: FastAPI) -> None:
                                        file.content_type or "application/pdf"):
             raise HTTPException(status_code=502, detail="对象存储不可用，上传失败")
         register_paper(_shared_db(), x_user_id, paper_id, "", oss_key, len(data))
+        # 上传即触发该用户域的增量索引（工单 17「上传后自动索引」）：
+        # 后台跑，不阻塞上传响应；重建中的 singleflight 由 reindex_running 保证
+        _schedule_user_index(x_user_id)
         return {"status": "ok", "id": paper_id, "oss_key": oss_key}
 
     @app.post("/papers/{paper_id}")

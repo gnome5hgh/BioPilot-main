@@ -600,21 +600,19 @@ class Agent:
             token = set_memory_context(self._memory_context)
         # RAG 用户域随 run 绑定：检索/索引工具落在本用户的 collection
         from biopilot.tools.rag.runtime_context import (
-            _rag_domain, set_rag_domain)
+            reset_rag_domain, set_rag_domain)
         rag_token = set_rag_domain(getattr(self, "user_id", "local"))
         try:
             return await self._run_react(task)
         finally:
             if token is not None:
-                from biopilot.tools.memory.runtime_context import _memory_context
-                _memory_context.reset(token)
-            _rag_domain.reset(rag_token)
+                from biopilot.tools.memory.runtime_context import reset_memory_context
+                reset_memory_context(token)
+            reset_rag_domain(rag_token)
 
     async def _run_react(self, task: str) -> str:
         """
         执行 ReAct 循环本体（由 run() 在会话互斥锁内调用）。
-        本任务生命周期内绑定自己的记忆工具上下文（嵌套 spawn 的子 run 各绑各的、
-        退出复位还原父绑定）——多会话进程里这是记忆写对归属的前提。
 
         调用方无需直接使用。
 

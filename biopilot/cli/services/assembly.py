@@ -172,8 +172,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     # 会话级模型选择：条目字段覆盖主模型配置（缺省字段回落主 llm 段）
     llm_cfg = config.llm
     if model_name:
-        entry = next((m for m in config.runtime.models
-                      if (m.get("name") or m.get("model")) == model_name), None)
+        entry = config.runtime.find_model_entry(model_name)
         if entry is not None:
             from dataclasses import replace as _dc_replace
             llm_cfg = _dc_replace(
