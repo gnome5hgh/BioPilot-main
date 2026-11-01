@@ -157,10 +157,8 @@ docker compose up -d
 # 交互式 REPL（⚠️ 不能经 conda run：它不转发 stdin，REPL 会立即 EOF 退出）
 conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 env 内）
 
-# Web 平台三层（各自一个终端）
-BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3306/biopilot" biopilot --web   # 8300
-cd server && mvn install -DskipTests && cd bio-admin && mvn spring-boot:run        # 8080，install 只需一次
-cd web && npm run dev                                                              # 5173
+# Web 平台一键启动（容器 + 适配层 + SpringBoot + 前端，含就绪探测与日志跟随）
+./start.sh        # 停止：./stop.sh（容器与数据保留）；前端 http://localhost:5173
 
 # 服务端测试（bio-admin）
 cd server && mvn test -pl bio-admin
