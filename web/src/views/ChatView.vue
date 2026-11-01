@@ -26,12 +26,7 @@
                  @click="openSession(s)">
               <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
               <span class="s-time">{{ relTime(s.created_at) }}</span>
-              <span class="item-menu" @click.stop="menuFor = menuFor === s.agent_id ? null : (confirmDelete = null, s.agent_id)">⋯</span>
-              <div v-if="menuFor === s.agent_id" class="menu-pop" @click.stop>
-                <button class="menu-item danger" @click="deleteSession(s)">
-                  {{ confirmDelete === s.agent_id ? '再点一次确认删除' : '删除会话' }}
-                </button>
-              </div>
+              <span class="item-menu" @click.stop="openMenu(s, $event)">⋯</span>
             </div>
             <div class="empty-sessions" v-if="sessionsOf(p.projectId).length === 0">暂无会话</div>
           </template>
@@ -46,20 +41,16 @@
                @click="openSession(s)">
             <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
             <span class="s-time">{{ relTime(s.created_at) }}</span>
-            <span class="item-menu" @click.stop="menuFor = menuFor === s.agent_id ? null : (confirmDelete = null, s.agent_id)">⋯</span>
-            <div v-if="menuFor === s.agent_id" class="menu-pop" @click.stop>
-              <button class="menu-item danger" @click="deleteSession(s)">
-                {{ confirmDelete === s.agent_id ? '再点一次确认删除' : '删除会话' }}
-              </button>
-            </div>
+            <span class="item-menu" @click.stop="openMenu(s, $event)">⋯</span>
           </div>
         </template>
         <div class="empty-sessions" v-if="sessions.length === 0 && projects.length === 0">还没有会话</div>
       </div>
     </aside>
 
-    <!-- 右侧：聊天流 + 底部输入 -->
+    <!-- 右侧：标题栏 + 聊天流 + 底部输入 -->
     <section class="chat-main">
+      <div class="chat-title">{{ currentSessionName }}</div>
       <div class="messages" ref="msgsBox">
         <template v-if="messages.length === 0">
           <div class="hero">BioPilot 你的科研智能搭档</div>
@@ -89,6 +80,16 @@
         </div>
       </div>
     </section>
+
+    <!-- 会话 ⋯ 菜单：fixed 定位（滚动容器会裁剪 absolute 弹层），透明遮罩负责点外关闭 -->
+    <template v-if="menuFor">
+      <div class="menu-mask" @click="menuFor = null; confirmDelete = null"></div>
+      <div class="menu-pop" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }">
+        <button class="menu-item danger" @click="deleteSession(menuSession)">
+          {{ confirmDelete === menuFor ? '再点一次确认删除' : '删除会话' }}
+        </button>
+      </div>
+    </template>
 
     <!-- 确认弹框：唯一确认决策点的前端半边——批准/拒绝由用户点选，300 秒不选服务端自动拒绝 -->
     <div v-if="pendingConfirm" class="confirm-mask">
@@ -127,6 +128,8 @@ const projects = ref([])
 const currentProject = ref(null)     // 新会话归属的项目（null = 未分组）
 const expanded = ref(new Set())      // 展开的项目集合
 const menuFor = ref(null)            // 当前打开 ⋯ 菜单的会话 id
+const menuSession = ref(null)        // 菜单对应的会话对象（删除用）
+const menuPos = ref({ x: 0, y: 0 })  // 菜单弹层的屏幕坐标（fixed 定位，避开滚动裁剪）
 const confirmDelete = ref(null)      // 两步删除：第一次点记下会话 id，再点执行
 const showProjectInput = ref(false)
 const newProjectName = ref('')
@@ -143,6 +146,29 @@ const selectedModel = ref('')
 
 const currentProjectName = computed(() =>
   projects.value.find(p => p.projectId === currentProject.value)?.name || '')
+
+// 当前会话标题（顶栏展示）：会话已在列表里用它的名字；尚未落库的新会话叫「新会话」
+const currentSessionName = computed(() => {
+  const s = sessions.value.find(x => x.agent_id === conversationId)
+  if (s) return s.name || s.agent_id.slice(0, 8)
+  return messages.value.length ? '新会话' : '新任务'
+})
+
+function openMenu(s, evt) {
+  if (menuFor.value === s.agent_id) { menuFor.value = null; confirmDelete.value = null; return }
+  menuFor.value = s.agent_id
+  menuSession.value = s
+  confirmDelete.value = null
+  // 合成事件（无坐标）时从触发元素取位置兜底
+  const rect = (evt.clientX || evt.clientY)
+    ? null
+    : evt.currentTarget?.getBoundingClientRect?.() ?? null
+  const x = rect ? rect.right - 110 : evt.clientX
+  const y = rect ? rect.bottom + 4 : evt.clientY
+  // 菜单高约 44px：贴近视口底部时向上弹出
+  const flip = y + 60 > window.innerHeight
+  menuPos.value = { x, y: flip ? y - 54 : y + 8 }
+}
 
 onMounted(() => {
   loadSessions()
@@ -172,9 +198,7 @@ const ungroupedGroups = computed(() => {
 async function loadSessions() {
   try {
     const { data } = await http.get('/sessions', { params: { limit: 200 } })
-    const locals = sessions.value.filter(s => s.localOnly
-      && !(data.data || []).some(r => r.agent_id === s.agent_id))
-    sessions.value = [...locals, ...(data.data || [])]
+    sessions.value = data.data || []
   } catch { /* 列表拿不到就保持空态 */ }
 }
 
@@ -246,12 +270,6 @@ function newSessionFor(projectId) {
   resetChat()
   const next = new Set(expanded.value); next.add(projectId)
   expanded.value = next
-  if (!sessions.value.some(s => s.agent_id === conversationId)) {
-    sessions.value.unshift({
-      agent_id: conversationId, name: "新会话", project_id: projectId,
-      created_at: new Date().toISOString(), localOnly: true,
-    })
-  }
   input.value = ""
 }
 
@@ -433,7 +451,8 @@ async function answerConfirm(approved) {
 .item-menu { flex: none; font-size: 13px; color: #a6adbd; cursor: pointer; padding: 0 4px; border-radius: 4px; visibility: hidden; }
 .project-item .item-menu { margin-left: auto; visibility: visible; font-size: 15px; }
 .session-item:hover .item-menu { visibility: visible; }
-.menu-pop { position: absolute; right: 6px; top: 30px; background: #fff; border: 1px solid #e6e9ed; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); z-index: 20; min-width: 96px; }
+.menu-mask { position: fixed; inset: 0; z-index: 40; }
+.menu-pop { position: fixed; background: #fff; border: 1px solid #e6e9ed; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); z-index: 41; min-width: 132px; overflow: hidden; }
 .menu-item { display: block; width: 100%; border: none; background: transparent; text-align: left; padding: 8px 12px; font-size: 12px; cursor: pointer; }
 .menu-item.danger { color: #e5484d; }
 .menu-item:hover { background: #f8f9fc; }
@@ -441,6 +460,7 @@ async function answerConfirm(approved) {
 
 /* 右侧聊天区 */
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.chat-title { padding: 12px 20px; font-size: 14px; font-weight: 600; border-bottom: 1px solid #eef0f4; color: #2f3033; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .messages { flex: 1; overflow-y: auto; padding: 28px 32px; display: flex; flex-direction: column; gap: 14px; }
 .hero { font-size: 32px; font-weight: 700; text-align: center; margin-top: 8vh; }
 .cap-bar { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 20px 0 12px; }
