@@ -2,6 +2,7 @@ package com.biopilot.system.domain;
 
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.LocalDateTime;
 
 /** sys_user 表实体（用户账号；user_id 即全局隔离键，Python 侧同键）。 */
@@ -11,7 +12,8 @@ public class SysUser {
     @TableId
     private Long userId;
     private String userName;
-    /** BCrypt 摘要；明文永不落库。 */
+    /** BCrypt 摘要；明文永不落库；不随任何响应序列化出去。 */
+    @JsonIgnore
     private String password;
     /** 昵称/显示名（学生实名或花名）。 */
     private String nickName;

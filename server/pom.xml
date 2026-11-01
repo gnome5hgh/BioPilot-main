@@ -16,9 +16,8 @@
   <version>1.0.0</version>
   <packaging>pom</packaging>
   <modules>
-    <module>bio-common/bio-common-core</module>
-    <module>bio-modules/bio-system</module>
-    <module>bio-modules/bio-project</module>
+    <module>bio-common</module>
+    <module>bio-modules</module>
     <module>bio-admin</module>
   </modules>
   <properties>
