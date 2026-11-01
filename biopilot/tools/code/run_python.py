@@ -9,12 +9,15 @@
 兜底」编码进档位是混淆两条轴。环境不可用时返回可行动的错误文本（fail-closed），
 绝不退回进程内执行。
 """
+import logging
 import uuid
 from pathlib import Path
 
 from biopilot.core.security.services import sandbox as sb
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.tools.common.factory import semantic_roots
+
+logger = logging.getLogger(__name__)
 
 #: 容器内论文库的挂载点——只读挂载的固定去处，脚本据此定位 PDF。
 _CORPUS_MOUNT = "/corpus"
@@ -99,6 +102,37 @@ class RunPythonTool(Tool):
             pids_limit=s.pids_limit,
             timeout_s=s.timeout_s,
         )
+
+    def _persist_artifacts(self, files: list[dict]) -> None:
+        """把本次执行的产物推到用户 OSS（analysis/<run-id>/<文件名>）。
+
+        scratch 挂载在宿主、容器即弃——不推走的话产物随临时目录清理丢失。
+        存储不可用或无用户域时静默跳过（产物本地路径仍在 summary 里）。
+
+        Args:
+            files: summary["files"] 列表（就地补 oss_key）。
+        """
+        from biopilot.tools.memory.runtime_context import get_memory_context
+        ctx = get_memory_context()
+        user_id = getattr(ctx, "user_id", None) if ctx is not None else None
+        if not user_id or not files:
+            return
+        try:
+            from biopilot.config import BioPilotConfig
+            from biopilot.core.storage.user_files import make_user_file_store
+            cfg = BioPilotConfig.from_env()
+            store = make_user_file_store(
+                cfg, str(Path(cfg.runtime.workspace) / "user-files"))
+            run_id = Path(files[0]["path"]).parent.name
+            for f in files:
+                src = Path(f["path"])
+                if not src.exists() or not src.is_file():
+                    continue
+                key = store.put(user_id, f"analysis/{run_id}/{f['name']}",
+                                src.read_bytes())
+                f["oss_key"] = key
+        except Exception as e:
+            logger.warning("分析产物持久化失败（不阻断工具返回）：%r", e)
 
     @staticmethod
     def _policy_summary(policy: sb.SandboxPolicy) -> dict:

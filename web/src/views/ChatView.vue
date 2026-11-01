@@ -2,7 +2,6 @@
   <div class="chat-page">
     <!-- 左栏：项目 + 会话列表 -->
     <aside class="sessions">
-      <button class="new-session" @click="newSession">＋ 新建会话</button>
       <div class="session-scroll">
         <!-- 项目区：项目可选中（新会话归属它），展开显示其下会话 -->
         <div class="group-label row-between">
@@ -32,19 +31,23 @@
           </template>
         </div>
 
-        <!-- 未分组会话（按日期） -->
-        <div class="group-label">会话</div>
-        <template v-for="g in ungroupedGroups" :key="g.label">
-          <div class="sub-label">{{ g.label }}</div>
-          <div v-for="s in g.items" :key="s.agent_id"
-               class="session-item" :class="{ active: s.agent_id === conversationId }"
-               @click="openSession(s)">
-            <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
-            <span class="s-time">{{ relTime(s.created_at) }}</span>
-            <span class="item-menu" @click.stop="openMenu(s, $event)">⋯</span>
-          </div>
+        <!-- 未归项目的存量会话（新会话只能建在项目下） -->
+        <template v-if="ungroupedGroups.length">
+          <div class="group-label">未分组</div>
+          <template v-for="g in ungroupedGroups" :key="g.label">
+            <div class="sub-label">{{ g.label }}</div>
+            <div v-for="s in g.items" :key="s.agent_id"
+                 class="session-item" :class="{ active: s.agent_id === conversationId }"
+                 @click="openSession(s)">
+              <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
+              <span class="s-time">{{ relTime(s.created_at) }}</span>
+              <span class="item-menu" @click.stop="openMenu(s, $event)">⋯</span>
+            </div>
+          </template>
         </template>
-        <div class="empty-sessions" v-if="sessions.length === 0 && projects.length === 0">还没有会话</div>
+        <div class="empty-sessions" v-if="!projects.length && !ungroupedGroups.length">
+          先在上方新建一个项目，再通过项目行的 ⊕ 开始会话
+        </div>
       </div>
     </aside>
 
@@ -62,6 +65,10 @@
         </template>
         <div v-for="(m, i) in messages" :key="i" class="row" :class="m.role">
           <pre class="bubble">{{ m.text }}</pre>
+        </div>
+        <!-- 思考过程：agent 执行链路的工具活动行（完成后随消息保留，可回看） -->
+        <div v-if="activity.length" class="activity">
+          <div v-for="(a, i) in activity" :key="i" class="activity-line">{{ a }}</div>
         </div>
       </div>
 
@@ -133,8 +140,12 @@ const menuPos = ref({ x: 0, y: 0 })  // 菜单弹层的屏幕坐标（fixed 定�
 const confirmDelete = ref(null)      // 两步删除：第一次点记下会话 id，再点执行
 const showProjectInput = ref(false)
 const newProjectName = ref('')
-const placeholder = '给 BioPilot 发送消息…（Enter 发送，Shift+Enter 换行）'
+const placeholder = computed(() =>
+  currentProjectName.value
+    ? '给 BioPilot 发送消息…（Enter 发送，Shift+Enter 换行）'
+    : '请先在左侧选择或新建一个项目…')
 const pendingConfirm = ref(null)
+const activity = ref([])
 const msgsBox = ref(null)
 
 // 会话标识：默认开新会话；点左栏条目切到既有会话（历史经 /chat/history 回放）
@@ -254,12 +265,6 @@ function resetChat() {
   confirmDelete.value = null
 }
 
-function newSession() {
-  if (busy.value) return
-  conversationId = crypto.randomUUID()
-  currentProject.value = null
-  resetChat()
-}
 
 // 在指定项目下开新会话：先在列表里放一个本地占位条目（首条消息落库后
 // 被服务端数据替换，标题由首条任务自动生成）
@@ -336,6 +341,7 @@ async function send() {
   messages.value.push({ role: 'user', text: task })
   const reply = { role: 'assistant', text: '' }
   messages.value.push(reply)
+  activity.value = []
   busy.value = true
   await nextTick(); scrollBottom()
   try {
@@ -380,8 +386,15 @@ async function send() {
         for (const line of frame.split('\n')) {
           if (!line.startsWith('data: ')) continue
           const evt = JSON.parse(line.slice(6))
-          if (evt.type === 'token') { reply.text += evt.text; scrollBottom() }
-          else if (evt.type === 'done' && evt.text) { reply.text = evt.text; scrollBottom() }
+          if (evt.type === 'content' || evt.type === 'token') {
+            reply.text += evt.text; scrollBottom()
+          } else if (evt.type === 'tool_start') {
+            activity.value.push(`🔧 ${evt.tool_name || '工具调用'}…`)
+            scrollBottom()
+          } else if (evt.type === 'tool_end') {
+            activity.value.push(`✓ ${evt.tool_name || '工具'}${evt.duration_ms ? ` (${Math.round(evt.duration_ms / 100) / 10}s)` : ''}`)
+            scrollBottom()
+          } else if (evt.type === 'done' && evt.text) { reply.text = evt.text; scrollBottom() }
           else if (evt.type === 'error') reply.text = `出错：${evt.text}`
           else if (evt.type === 'confirm') {
             // 挂起弹框等用户裁决；流保持打开，回答在批准后继续下行
@@ -472,6 +485,7 @@ async function answerConfirm(approved) {
 .bubble { white-space: pre-wrap; font-family: inherit; margin: 0; padding: 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.65; max-width: 76%; }
 .row.user .bubble { background: #e8f8f5; }
 .row.assistant .bubble { background: #f5f6f9; }
+.activity { font-size: 12px; color: #818999; line-height: 1.9; padding-left: 4px; }
 .composer { border-top: 1px solid #e6e9ed; padding: 14px 20px; background: #fff; }
 .project-hint { font-size: 12px; color: #2ec5b1; margin-bottom: 8px; }
 .composer textarea { width: 100%; min-height: 56px; max-height: 160px; border: 1px solid #e6e9ed; border-radius: 12px; padding: 10px 12px; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; }

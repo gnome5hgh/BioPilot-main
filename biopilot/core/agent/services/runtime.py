@@ -548,7 +548,7 @@ class Agent:
         self._token_ratio = blend_token_ratio(
             self._token_ratio, actual, self._last_sent_estimate)
 
-    async def run(self, task: str) -> str:
+    async def run(self, task: str, stream_callback=None) -> str:
         """
         执行 ReAct 循环（跨进程会话运行互斥的入口），返回 LLM 的最终文本回答。
 
@@ -563,12 +563,17 @@ class Agent:
 
         调用方（CLI、Supervisor 的 SpawnSubAgentTool）只需要传入任务文本。
 
+        Args:
+            task: 用户任务文本。
+            stream_callback: 本次运行覆盖的流式事件回调（None = 用构造期回调）。
+                web 适配层按请求传入——同一缓存的 Agent 逐次运行可换回调。
+
         Raises:
             MaxTurnsExceeded: 超过 max_turns 轮仍未停止
         """
         lock_dsn = getattr(getattr(self.block_manager, "db", None), "dsn", None)
         if not lock_dsn:
-            return await self._run_react_bound(task)
+            return await self._run_react_bound(task, stream_callback)
         from biopilot.core.memory.storage.named_lock import NamedLock
         lock = NamedLock(lock_dsn)
         lock_name = f"run:{self.conversation_id}"
@@ -578,20 +583,24 @@ class Agent:
             # 锁机制故障（MySQL 抖动）不拦任务：降级为无锁执行并留痕。
             # 这是可用性守卫而非安全边界，放行不会破坏隔离或数据正确性。
             logger.warning("会话运行锁获取失败，本轮无锁执行: %r", e)
-            return await self._run_react_bound(task)
+            return await self._run_react_bound(task, stream_callback)
         if not acquired:
             return ("该会话正在运行中：上一个任务尚未结束，请等它完成后再发送新任务。")
         try:
-            return await self._run_react_bound(task)
+            return await self._run_react_bound(task, stream_callback)
         finally:
             await asyncio.to_thread(lock.release, lock_name)
 
-    async def _run_react_bound(self, task: str) -> str:
+    async def _run_react_bound(self, task: str, stream_callback=None) -> str:
         """在绑定记忆工具上下文的任务上下文里跑 ReAct 本体。
 
         多会话进程（web 适配层）里每个 Agent 持有自己的 MemoryToolsContext：
         绑定用 ContextVar、finally 复位——嵌套 spawn 的子 run 各绑各的、退出
         还原父绑定；单会话 REPL 语义不变（绑定值即装配期那一份）。
+
+        Args:
+            task: 用户任务文本。
+            stream_callback: 本次运行的流式回调覆盖（None = 保持构造期回调）。
         """
         token = None
         rag_token = None
@@ -602,9 +611,15 @@ class Agent:
         from biopilot.tools.rag.runtime_context import (
             reset_rag_domain, set_rag_domain)
         rag_token = set_rag_domain(getattr(self, "user_id", "local"))
+        # 流式回调按次覆盖：缓存的 Agent 逐次运行可换回调（会话锁保证同
+        # Agent 不并发，覆盖/恢复安全）
+        old_cb = self.stream_callback
+        if stream_callback is not None:
+            self.stream_callback = stream_callback
         try:
             return await self._run_react(task)
         finally:
+            self.stream_callback = old_cb
             if token is not None:
                 from biopilot.tools.memory.runtime_context import reset_memory_context
                 reset_memory_context(token)

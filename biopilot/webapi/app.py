@@ -22,6 +22,7 @@ import yaml as yaml_mod
 import uuid
 from dataclasses import dataclass
 
+from biopilot.core.storage.user_files import user_file_prefix
 from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import StreamingResponse
 
@@ -423,17 +424,18 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             def on_event(event) -> None:
                 # stream_callback 是同步回调（Agent 线程内直接调）：线程安全投递
                 queue.put_nowait({
-                    "type": getattr(event, "kind", "token"),
+                    "type": str(getattr(event, "kind", "content")).replace("AgentEventKind.", "").lower(),
                     "text": getattr(event, "text", "") or "",
                     "agent_type": getattr(event, "agent_type", ""),
+                    "tool_name": getattr(event, "tool_name", "") or "",
+                    "completion": getattr(event, "completion", "") or "",
+                    "duration_ms": getattr(event, "duration_ms", None),
                 })
 
             async def run_task() -> str:
                 # 全局并发闸（run 粒度）：多用户在途 run 总上限，批量派发占不满外部资源
                 async with llm_gate:
-                    answer = await agent.run(
-                        task, stream_callback=on_event) if _accepts_stream(
-                        agent.run) else await agent.run(task)
+                    answer = await agent.run(task, stream_callback=on_event)
                 await _autotitle(x_user_id, conversation_id, task)
                 # 轮末整合：与 REPL 同语义（一轮对话结束 → 沉淀进记忆）；
                 # 只 enqueue，防抖与游标推进由队列/DB 锁自理
@@ -708,15 +710,6 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     return app
 
 
-def _accepts_stream(run_callable) -> bool:
-    """判断 run 是否接受 stream_callback 参数（fake Agent 可能没有）。"""
-    import inspect
-    try:
-        return "stream_callback" in inspect.signature(run_callable).parameters
-    except (TypeError, ValueError):
-        return False
-
-
 async def _default_agent_factory(user_id: str, conversation_id: str,
                                  confirm_callback=None, project_id: str | None = None):
     # 模型选择读模块级 user_models（端点写入）——不进工厂签名，注入替身契约不变
@@ -846,6 +839,21 @@ def _schedule_user_index(user_id: str) -> None:
             reindex_running.discard(user_id)
 
     asyncio.get_running_loop().create_task(_runner())
+
+
+def _user_files():
+    """用户数据文件存取器（惰性单例；MinIO 不可达自动回退本地同键）。"""
+    global _user_files_instance
+    if _user_files_instance is None:
+        from biopilot.config import BioPilotConfig
+        from biopilot.core.storage.user_files import make_user_file_store
+        cfg = BioPilotConfig.from_env()
+        _user_files_instance = make_user_file_store(
+            cfg, str(pathlib.Path(cfg.runtime.workspace) / "user-files"))
+    return _user_files_instance
+
+
+_user_files_instance = None
 
 
 def _paper_store():
@@ -986,26 +994,47 @@ def _doc_endpoints(app: FastAPI) -> None:
 
     @app.get("/documents/{doc_id}")
     async def documents_get(doc_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+        """读文档：oss_key 有值时正文取自 OSS，content 列只兜底遗留行。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         db = _shared_db()
-        row = db.execute("SELECT id, name, content, updated_at FROM documents"
+        row = db.execute("SELECT id, name, content, oss_key, updated_at FROM documents"
                          " WHERE id=? AND user_id=?", (doc_id, x_user_id)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="文档不存在")
-        return dict(row)
+        doc = dict(row)
+        if doc.get("oss_key"):
+            data = _user_files().get(doc["oss_key"])
+            if data is not None:
+                doc["content"] = data.decode("utf-8", errors="replace")
+        doc.pop("oss_key", None)
+        return doc
 
     @app.put("/documents/{doc_id}")
     async def documents_save(
         doc_id: str, body: dict, x_user_id: str | None = Header(default=None),
     ) -> dict:
+        """保存文档：正文写 OSS（无 oss_key 的遗留行先补一个键）并更新行时间戳。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         from datetime import datetime, timezone
+        content = (body or {}).get("content", "")
         db = _shared_db()
+        row = db.execute("SELECT oss_key FROM documents WHERE id=? AND user_id=?",
+                         (doc_id, x_user_id)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        oss_key = row["oss_key"]
+        if not oss_key:
+            import uuid as _uuid
+            oss_key = f"documents/{_uuid.uuid4().hex}"
+            db.execute("UPDATE documents SET oss_key=? WHERE id=? AND user_id=?",
+                       (oss_key, doc_id, x_user_id))
+        data = content.encode("utf-8")
+        _user_files().put(x_user_id, oss_key.removeprefix(
+            user_file_prefix(x_user_id)), data, "text/markdown")
         db.execute("UPDATE documents SET content=?, updated_at=? WHERE id=? AND user_id=?",
-                   ((body or {}).get("content", ""), datetime.now(timezone.utc).isoformat(),
-                    doc_id, x_user_id))
+                   (content, datetime.now(timezone.utc).isoformat(), doc_id, x_user_id))
         return {"status": "ok"}
 
     @app.get("/literature/search")
