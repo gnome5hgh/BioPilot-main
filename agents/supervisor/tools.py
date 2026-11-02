@@ -8,9 +8,8 @@ supervisor 按交付物类型读各结果组织回答。
 **问用户不需要工具**:需要用户给信息时,把问题写进最终回答、本轮结束;
 交互时用户下一行输入就是下一轮的输入。因此这里没有提问工具。
 
-记忆写入工具一件不装:记忆读写全部归 memory-agent,supervisor 要记录只能派发它。
-只读召回（conversation_search / read_tool_result）是例外：它不产生领域产物，
-只是核对原文，装配给所有需要确认细节的 agent。
+记忆写入工具一件不装:长期记忆由轮末后台整合维护,supervisor 只通过只读召回
+（memory_read / read_tool_result）查阅。只读召回不产生领域产物,装配给所有 agent。
 """
 from biopilot.config import BioPilotConfig
 from biopilot.tools.orchestration.spawn import SpawnSubAgentTool

@@ -23,10 +23,10 @@ class IntentType(StrEnum):
     NOTE = "note"                  # 笔记事务：撰写/删除笔记
     RESEARCH = "research"          # 选题事务：选题发现/研究计划/删选题产物
     INDEX = "index"                # 语料索引事务：入库/重建/索引体检
-    MEMORY = "memory"              # 记忆事务：记忆与清单查询、记账；**用户陈述自身信息**也归此类
+    MEMORY = "memory"              # 记忆事务：长期记忆查询；**用户陈述自身信息**也归此类
     QUESTION = "question"          # 即问即答：先自答，需依据时取材料
 
-    # ── 系统：不派发领域角色（feedback 例外，只派 memory-agent）──
+    # ── 系统：不派发领域角色（feedback 由后台整合沉淀）──
     CHITCHAT = "chitchat"          # 寒暄应答
     OUT_OF_SCOPE = "out_of_scope"  # 非本系统任务：明确越界，或看不出要做什么
     HELP = "help"                  # 功能与方法询问

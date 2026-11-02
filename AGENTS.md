@@ -76,7 +76,7 @@ BioPilot-main/
 - **没有确定性 pipeline**：路由、工具选择、任务拆解全由 LLM 的 ReAct 循环驱动；工具只是喂给模型的 JSON Schema 定义。
 - **编排归 supervisor**：它按各子 agent 的 `description` 选型，顺序与并行由它自主决定。契约里写的「一个对象一路」是提示层的编排期望，不是闸门。
 - **意图只作信号**：意图识别是可选预处理层，产出一条类别信号注入根 agent 的 head，不参与任何决策（约束见下方硬红线）。
-- **领域产物各自归口**：记忆、语料索引各由一位领域 agent 独占读写，其余角色需要时派发它；引用库是平台功能（Java），agent 不读写。
+- **领域产物各自归口**：长期记忆由轮末后台整合独占写、所有 agent 只读（`memory_read`）；语料索引归 `rag-agent` 独占读写，其余角色需要时派发它；引用库是平台功能（Java），agent 不读写。
 - 会话跨轮靠 SQL 落盘 + `session_id` 一致；`docs/`、`scripts/`、`tests/` 不入库，**文档漂移不会被 git 顶出来**，改完要主动核对。
 
 ## Python 与 Java 的职责边界
@@ -114,7 +114,7 @@ BioPilot-main/
 - **知识库一致性以 `bio_paper` 为唯一真相**：引擎启动与每轮索引都对账向量库——不属于任何「已加入」论文的块直接清理，已就绪论文的向量块数与 `chunk_count` 不一致则重建；`failed` 不自动重试（用户重试由 Java 先置 `queued`），避免对账反复消耗解析与嵌入资源。
 - **压缩只改窗口，旧摘要并入重摘**：每次压缩把上一份摘要作为底稿送回摘要模型（Claude Code 式，集成指令约束漂移），窗口恒只有一份最新摘要、多次压缩不累积；摘要不携带用户原话（业界无代码插全量原话的先例，实测还会挤爆摘要预算）——硬约束、截止时间等边界由任务快照逐字保留（快照从不参与重摘），原话不作回溯；摘要失败时保持原窗口，不拿空摘要替换历史。
 - **摘要不携带用户原话与工具引用**：压缩摘要有损、用户原话不进摘要且不作回溯；跨会话知识只走记忆块（`bio_memory_block`）。工具结果外置后的指针只在窗口内可回取。
-- **领域产物的读写各自归口**：记忆写入归 `memory-agent`、语料索引归 `rag-agent`；这两类工具**其余 agent 一件不装**。引用库是平台功能（Java `bio-citation`），agent 既不读写也不做溯源标注。只读召回（工具结果回取）是例外：它不产生领域产物，装配给所有 agent；supervisor 因此持有 spawn + 只读召回，仍不持有执行类工具。
+- **领域产物的读写各自归口**：长期记忆写入归轮末后台整合（`MemoryConsolidator`），**不向任何 agent 暴露记忆写工具**；所有 agent 只通过只读召回（`memory_read` / `read_tool_result`）读取。语料索引归 `rag-agent` 独占读写。引用库是平台功能（Java `bio-citation`），agent 既不读写也不做溯源标注。supervisor 因此持有 spawn + 只读召回，仍不持有执行类工具。
 - **`allowed_spawns` 与风险档位由框架强制**，不靠提示词自律；批量同类对象**一个对象一路**派发。
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
 - **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_paper`/`bio_document`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。

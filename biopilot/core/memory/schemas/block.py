@@ -1,6 +1,6 @@
 """核心记忆块数据模型：BaseBlock（块内容与元数据）+ Block（含持久化字段）。
 
-一个 Block 就是一段「可被 LLM 编辑的命名记忆」——label 是名字（assistant、profile、unread_list、feedback_* 分册等），value 是内容（文件内容），
+一个 Block 就是一段「可被 LLM 编辑的命名记忆」——label 是名字（assistant、profile、feedback_* 分册等），value 是内容（文件内容），
 limit 是长度上限，read_only 表示保护块（不可改/删）。
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ class BaseBlock(BaseModel):
     Attributes:
         value: 块的核心文本内容（记忆主体）。
         limit: 字符长度上限（默认 2000），更新时超限将抛出 ValueError。
-        label: 块的名称标签（如 "assistant", "profile", "unread_list"），
+        label: 块的名称标签（如 "assistant", "profile"），
                通常作为唯一业务标识，但并非严格主键（主键为 id）。
         description: 可读描述（用于展示或索引，不参与逻辑）。
         metadata_: 可选的扩展元数据（dict），API 层暴露为 "metadata"。

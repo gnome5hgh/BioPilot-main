@@ -17,8 +17,7 @@
 - `review/` — 审查裁决、模板体检（helper 已并入工具文件）
 - `rag/` — 检索、看图、入库、全量收敛、索引体检（只装配给 `rag-agent`）
 - `vision/` — 图表提取与看图分析
-- `memory/` — 记忆读写/管理工具集（9 件，只装配给 `memory-agent`；编辑语义在 `core/memory/services/`）
-- `recall/` — 只读召回包（`read_tool_result`，装配给所有 agent）
+- `recall/` — 只读召回包（`memory_read` 读长期记忆 + `read_tool_result` 取回工具原文，装配给所有 agent）
 - `orchestration/` — 子 agent 派发（唯一的调度工具；按当前约定整文件保留）
 - `skills/` — 加载 skill 正文与资源
 
@@ -49,8 +48,7 @@
 - `cli/services/tool_assembly.py` — 工具装配工厂（`make_tools`）
 - `core/tool/services/runtime_context.py` — 工具运行时上下文（记忆管理器 + RAG 用户域）
 - `orchestration/spawn.py` — 派发工具与五道闸
-- `memory/` — 记忆写入/管理工具集（惰性单例，8 件）
-- `recall/` — 只读召回包（会话检索 + 工具结果回取）
+- `recall/` — 只读召回包（长期记忆读取 + 工具结果回取）
 - `__init__.py` — 全量再导出
 
 ## Usage And Change Notes
@@ -68,7 +66,7 @@
 ## Investigation Rule
 
 1. 先看目标工具的文件头与安全元数据声明，再看它的 `execute`。
-2. 装配问题看 `common/`；派发问题看 `orchestration/spawn.py`；记忆写入看 `memory/`，只读召回看 `recall/`。
+2. 装配问题看 `common/`；派发问题看 `orchestration/spawn.py`；长期记忆读取与工具结果回取看 `recall/`。
 3. 工具读 PDF / 抽标题的实现不在本层，在 `core/rag/parsers/`——本层只是把它封成 Tool。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -94,5 +92,5 @@ conda run -n biopilot python -m pytest tests/tools -q
 
 - [`common/`](common/)
 - [`orchestration/spawn.py`](orchestration/spawn.py)
-- [`memory/`](memory/)
+- [`recall/`](recall/)
 - [`../core/AGENTS.md`](../core/AGENTS.md)

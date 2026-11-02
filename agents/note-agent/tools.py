@@ -5,7 +5,7 @@ biopilot/tools/ 的集中式安全边界与风险语义)、glob/grep 定位工�
 SpawnSubAgentTool——AGENT.md 的审稿循环用它派发 review-agent 子 agent 审阅草稿,
 拿回裁决后经 edit_file 修订。
 delete_file：删除自己的笔记产物（笔记不进检索知识库,删除无需任何入库/收敛动作）。
-引用库是平台功能，由用户在网页维护与导出；本角色不写引用库。未读清单的写入已收归 memory-agent（本角色只报告事件，不再自己记账）。
+引用库是平台功能，由用户在网页维护与导出；本角色不写引用库。长期记忆由后台整合维护，本角色只读。
 偏好有歧义时把问题写进最终回答（问用户不需要工具），不自行猜。
 spawn 工具需要构造参数(agent_timeouts),故 make_tools 传已实例化的工具实例而非类。
 """

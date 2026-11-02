@@ -376,8 +376,8 @@ class Agent:
         """编译当前记忆为 system 消息（assistant/profile 核心块）。
 
         有 block_manager 时先从 BlockManager 重建 memory（Memory(blocks=...）——
-        记忆工具（memory_replace 等）在会话内编辑块后，下一轮 LLM 调用即见新内容
-        （块变更即时生效，而非重启才可见）。
+        后台整合在会话内改写块后，下一轮 LLM 调用即见新内容（块变更即时生效，
+        而非重启才可见）。
         """
         if self.memory is None:
             return None
@@ -488,10 +488,10 @@ class Agent:
         return head
 
     def _refresh_head_memory(self, head: list[Message]) -> None:
-        """会话内刷新 head 里的记忆 system 消息（memory 工具编辑后即时生效）。
+        """会话内刷新 head 里的记忆 system 消息（块被改写后即时生效）。
 
         有 block_manager 时在 ReAct 每轮开头重建记忆块并替换 head 中旧的
-        <memory_blocks> 消息——同一轮里 memory_replace 改的块,下一轮 LLM 调用即见。
+        <memory_blocks> 消息——同一轮里被后台整合改写的块,下一轮 LLM 调用即见。
         无记忆装配（memory 或 block_manager 为 None）时零开销空操作。
 
         Args:
@@ -729,7 +729,7 @@ class Agent:
         for turn in range(self.max_turns):
             # 记录当前轮次:spawn 摘要提取的 LLM 调用据此归属父 agent 的当前轮
             self._current_turn = turn
-            # 记忆块会话内即时生效:memory 工具编辑后,下一轮 LLM 调用即见新块
+            # 记忆块会话内即时生效:后台整合改块后,下一轮 LLM 调用即见新块
             # (head 是本地列表,_refresh_head_memory 就地替换记忆消息)。
             self._refresh_head_memory(head)
 

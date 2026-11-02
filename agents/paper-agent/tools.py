@@ -3,7 +3,7 @@
 检索走 SearchLiteratureTool：它只把参数转发给 SpringBoot 的内部检索端点，Europe PMC、
 MCP 多源与管理员新增检索源都在 Java 侧实现。下载用 FetchPdfTool（落到工作区供本轮
 阅读）、定位用 glob/grep、读整篇用 read_pdf、图表用 analyze_figures；SpawnSubAgentTool
-用于派发 rag-agent（入库与收敛索引）与 memory-agent（未读清单）。spawn 工具需要构造
+用于派发 rag-agent（入库与收敛索引）。spawn 工具需要构造
 参数 (agent_timeouts)，故 make_tools 传已实例化的工具实例而非类。
 
 需要用户拿主意时把问题写进最终回答（问用户不需要工具），不自行猜。

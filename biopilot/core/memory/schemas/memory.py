@@ -54,7 +54,7 @@ class Memory:
 
         设计意图：
             - 常驻核心块（assistant/profile）每轮都完整注入，保障基本身份和用户画像。
-            - 其他块（如 unread_list、feedback_* 分册等）不直接包含内容，经记忆
+            - 其他块（如 feedback_* 分册等）不直接包含内容，经记忆
               工具按 label 读写，节省上下文窗口同时保持全量记忆可访问。
         """
         # 筛选出 system 核心块（assistant 和 profile）

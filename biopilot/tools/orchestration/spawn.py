@@ -2,7 +2,7 @@
 
 子 agent 派发与结构化结果摘要的实现。装配给 supervisor（硬编码放行所有子 agent）
 与需要内部审稿/补料的 paper-agent/note-agent/research-agent（按各自 allowed_spawns 白名单）；
-叶子 agent（review-agent/memory-agent）不装配、不递归调度。需父 agent 注入
+叶子 agent（review-agent）不装配、不递归调度。需父 agent 注入
 (needs_parent),见 Tool 约定。
 
 派发前 _admit 的五道闸（未知类型 / spawn 白名单 /

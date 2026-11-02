@@ -1,14 +1,15 @@
-"""BlockManager：记忆块 CRUD + 写前快照 + 单调版本号（撤销/重做的历史链）。
+"""记忆块服务：块 CRUD + 写前快照 + 并发保护。
 
-更新块前把旧值整体快照进 block_history、版本号 +1；写入走 CAS（带期望版本的
-条件更新），版本被并发推进时拒绝而非静默覆盖。读-改-写类操作（追加/替换/删除
-行）必须走 mutate_block——它把整段序列放进一次持锁事务，避免两个并发写者各自
-基于同一份旧值计算后互相抹掉。
+长期记忆的写入统一由后台整合（`MemoryConsolidator`）完成，任何 agent 都不持有
+写工具；本模块是它唯一的写入口。更新块前把旧值整体快照进 block_history、版本号
++1；写入走 CAS（带期望版本的条件更新），版本被并发推进时拒绝而非静默覆盖。
+读-改-写类操作（追加/替换/删除行）必须走 `mutate_block`——它把整段序列放进一次
+持锁事务，避免两个并发写者各自基于同一份旧值计算后互相抹掉。
 """
 from __future__ import annotations
 
+import json
 import logging
-from pathlib import Path
 from typing import Callable
 
 from biopilot.core.memory.constants import DEFAULT_ASSISTANT, DEFAULT_PROFILE
@@ -31,7 +32,7 @@ _LEGACY_LABELS = {"human": "profile", "persona": "assistant"}
 
 #: 已下线功能的块 label：启动时一次性清除（幂等）。这些块的写入者已退役，
 #: 留着既没有读者、又会误导模型。
-_REMOVED_BLOCKS = ("history_list",)
+_REMOVED_BLOCKS = ("history_list", "unread_list")
 
 
 class BlockManager:
@@ -69,7 +70,6 @@ class BlockManager:
 
         注意：metadata_ 在 DB 中为 JSON 字符串，需反序列化为 dict。
         """
-        import json
         return Block(
             id=row["id"], label=row["label"], value=row["value"], limit=row["limit"],
             description=row["description"],

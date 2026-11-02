@@ -20,8 +20,9 @@ memory/
 ├─ schemas/      # 表实体与持久化模型：块 / 记忆 / 消息 / Agent 状态
 ├─ storage/      # SQLite 持久化（库、表结构、增量迁移）
 ├─ common/       # 领域异常（并发写冲突、块字符上限、整合指令校验失败、编号定位失败）
-└─ services/     # 各管理器 + compaction.py（上下文压缩）+ consolidation.py（记忆整合）
-                 #   + consolidation_queue.py（轮末 debounce 队列）
+└─ services/     # 四个职责模块：blocks（块存储与编辑语义，在 block_manager.py）
+                 #   + session 管理器（message/agent_manager.py）+ compaction.py + consolidation.py
+                 #   （整合 + 轮末 debounce 队列）
 ```
 
 ## Responsibilities
@@ -47,28 +48,27 @@ memory/
 ## Key Entry Points
 
 - `storage/` — 库、表结构与增量迁移
+- `services/block_manager.py` — 块 CRUD、CAS、写前快照与编辑语义（重写/插行/替换/补丁/增删改名）
+- `services/message_manager.py` / `services/agent_manager.py` — 会话状态：消息落盘与回放、AgentState 与窗口 id
 - `services/compaction.py` — 上下文压缩（8 节摘要、任务快照、旧摘要并入重摘）
-- `services/consolidation_queue.py` — 轮末 debounce 整合队列
-- `services/message_manager.py` — 落盘、窗口回放、会话内检索
-- `services/consolidation.py` — 记忆整合
-- `services/` — 块与会话管理器（记忆工具的底座）
+- `services/consolidation.py` — 记忆整合 + 轮末 debounce 队列（`MemoryConsolidator` / `ConsolidationQueue`）
 
 ## Usage And Change Notes
 
 - **给已有表加列，必须同时登记到增量迁移表**：建表脚本只管新库。**漏登记的症状是老库读写时报「没有那一列」，新库上完全测不出来**——所以这类改动要拿旧库试一次。
 - **落盘不做 JSON 类型猜测**：持久化消息的正文恒为字符串或空，别按内容形状去猜类型。响应信封以 JSON 一列存放，旧行为空是正常的，不要当成脏数据。
-- 记忆工具的运行时上下文在 `biopilot/tools/memory/`；本包只提供管理器，不提供工具封装。
+- 长期记忆的只读工具在 `biopilot/tools/recall/memory_read.py`（装配给所有 agent）；写入统一由 `MemoryConsolidator` 完成，不向 agent 暴露写工具。本包只提供管理器，不提供工具封装。
 
 ## Dependencies And Collaboration
 
-- 消费方：`core/agent`（in-context 窗口与压缩）、`tools/memory/` 与 `tools/recall/`（记忆工具 / 只读召回）、`terminal/repl`（轮末 enqueue 与退出 flush）。
+- 消费方：`core/agent`（in-context 窗口与压缩）、`tools/recall/`（长期记忆只读 + 工具结果回取）、`terminal/repl`（轮末 enqueue 与退出 flush）。
 - 与 `core/llm` 的关系是单向的：消费它的消息类型做落盘与回放。
 - 与 RAG 无耦合：记忆检索是 SQL，不用向量。
 
 ## Investigation Rule
 
 1. 先读本文件，再按问题落到具体服务。
-2. 库、表结构与增量迁移看 `storage/`；块读写与并发控制看 `services/`；压缩看 `services/compaction.py`；整合看 `services/consolidation.py`。
+2. 库、表结构与增量迁移看 `storage/`；块读写、并发控制与编辑语义看 `services/block_manager.py`；会话状态看 `services/message_manager.py` 与 `services/agent_manager.py`；压缩看 `services/compaction.py`；整合与轮末队列看 `services/consolidation.py`。
 3. 排查「改了没生效」先确认改动是否走了持锁入口；排查老库报错先看增量迁移登记。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -95,6 +95,8 @@ conda run -n biopilot python -m pytest tests/memory -q
 - [`storage/`](storage/)
 - [`domain/entity/`](domain/entity/)
 - [`domain/dto/`](domain/dto/)
+- [`services/block_manager.py`](services/block_manager.py)
+- [`services/message_manager.py`](services/message_manager.py) / [`services/agent_manager.py`](services/agent_manager.py)
 - [`services/compaction.py`](services/compaction.py)
 - [`services/consolidation.py`](services/consolidation.py)
 - [`schemas/`](schemas/)

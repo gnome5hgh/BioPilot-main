@@ -37,7 +37,7 @@ from biopilot.core.tool.services.runtime_context import (
     set_memory_context, MemoryToolsContext)
 from biopilot.core.memory.services.agent_manager import AgentManager
 from biopilot.core.memory.services.consolidation import MemoryConsolidator
-from biopilot.core.memory.services.consolidation_queue import ConsolidationQueue
+from biopilot.core.memory.services.consolidation import ConsolidationQueue
 from biopilot.core.intent.services.jev import JevClient, JevUnavailable
 from biopilot.core.intent.services.service import IntentService
 from biopilot.core.intent.rules.taxonomy import TaxonomyError, load_taxonomy
@@ -135,7 +135,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     from biopilot.core.memory.services.agent_manager import AgentManager
     from biopilot.core.memory.services.block_manager import BlockManager
     from biopilot.core.memory.services.consolidation import MemoryConsolidator
-    from biopilot.core.memory.services.consolidation_queue import ConsolidationQueue
+    from biopilot.core.memory.services.consolidation import ConsolidationQueue
     from biopilot.core.memory.services.message_manager import MessageManager
     from biopilot.core.memory.storage.database import MemoryDB
     from biopilot.core.security.middleware.audit import AuditMiddleware

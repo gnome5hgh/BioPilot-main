@@ -12,7 +12,7 @@
 
 ## 功能特性
 
-- **多 Agent 协作**：supervisor 单根调度，读子 agent 能力清单（`<available_agents>`）按需拆解子任务并派发（paper-agent 文献检索与阅读 / review-agent 审稿评阅 / note-agent 论文笔记 / research-agent 选题与研究计划 / rag-agent 语料索引与检索 / memory-agent 记忆与清单 / bio-agent 沙箱代码执行与数据分析），各子 agent 返回结构化摘要后聚合回答
+- **多 Agent 协作**：supervisor 单根调度，读子 agent 能力清单（`<available_agents>`）按需拆解子任务并派发（paper-agent 文献检索与阅读 / review-agent 审稿评阅 / note-agent 论文笔记 / research-agent 选题与研究计划 / rag-agent 语料索引与检索 / bio-agent 沙箱代码执行与数据分析），各子 agent 返回结构化摘要后聚合回答
 - **意图识别（可选预处理层，默认关）**：规则层高精度模式命中即定类，不命中交给结合对话史的判定服务，产出一条单类别信号注入根 agent；它只作信号，不决定派发顺序
 - **RAG 检索栈**：本地版面解析 PDF（PyMuPDF 还原章节与坐标，不依赖外部服务）→ 学术分块（按节切 + 句界滑窗，丢弃参考文献/样板章节残渣）→ Milvus 向量 + BM25 混合检索 → RRF 融合 → 云端重排
 - **引用库**：平台侧的文献条目集合（从文件管理勾选论文/手工维护），支持 author-year / GB/T 7714 复制与 `.bib` 导出；不参与 agent 溯源

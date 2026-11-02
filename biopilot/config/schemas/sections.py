@@ -741,8 +741,8 @@ class AgentsConfig:
     timeouts 是自由 dict（agent 类型 → 秒数），仅 YAML 可配（dict 无自然 env 形态）。
     各值按该 agent 完整任务的典型时长留余量设定：note-agent 覆盖含内审重试的纯笔记
     端到端，paper-agent 覆盖大批量新颖性检索，review-agent 覆盖全文审阅，research-agent
-    覆盖完整研究链路；paper-agent 还要覆盖读整篇与图表问题，memory-agent 要覆盖
-    记忆与清单的读写，bio-agent 要覆盖读数据、多步分析执行与失败重试的整轮。表里没有的类型落回
+    覆盖完整研究链路；paper-agent 还要覆盖读整篇与图表问题，bio-agent 要覆盖读数据、
+    多步分析执行与失败重试的整轮。表里没有的类型落回
     SpawnSubAgentTool.timeout 的类默认（120s）——新增角色时一并补进本表，别让它在表外
     静默用类默认。某 agent 反复撞帽说明任务时长需要重新评估，而不是继续调大。
 
@@ -762,7 +762,7 @@ class AgentsConfig:
         default_factory=lambda: {
             "note-agent": 900, "paper-agent": 420, "review-agent": 300,
             "research-agent": 1800, "rag-agent": 900,
-            "memory-agent": 180, "bio-agent": 1800,
+            "bio-agent": 1800,
         })
 
     #: 只有单次派发内需要串联多阶段的角色才提额度；表外角色一律用 Agent 的默认 20 轮。
