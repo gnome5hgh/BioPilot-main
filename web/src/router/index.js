@@ -14,9 +14,11 @@ const routes = [
       { path: 'admin', component: () => import('../views/AdminView.vue'),
         meta: { roles: ['ADMIN'] } },
       { path: 'papers', component: () => import('../views/PapersView.vue') },
-      { path: 'docs', component: () => import('../views/DocEditorView.vue') },
+      // 文档编辑器已并入文件管理（/papers）；旧路径重定向保持收藏夹不落空
+      { path: 'docs', redirect: '/papers' },
       { path: 'literature', component: () => import('../views/LiteratureView.vue') },
-      { path: 'terminal', component: () => import('../views/TerminalView.vue') },
+      { path: 'citations', component: () => import('../views/CitationsView.vue') },
+      { path: 'terminal', redirect: '/' },
       { path: 'settings', component: () => import('../views/SettingsView.vue'),
         meta: { roles: ['ADMIN'] } },
       { path: 'kb', component: () => import('../views/KBView.vue') },

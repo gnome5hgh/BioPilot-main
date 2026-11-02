@@ -9,6 +9,7 @@ export const useAuthStore = defineStore('auth', {
     token: localStorage.getItem('biopilot_token') || '',
     role: localStorage.getItem('biopilot_role') || '',
     nickName: localStorage.getItem('biopilot_nick') || '',
+    userId: localStorage.getItem('biopilot_uid') || '',
   }),
   actions: {
     async login(userName, password) {
@@ -17,9 +18,11 @@ export const useAuthStore = defineStore('auth', {
       this.token = data.data.token
       this.role = data.data.role
       this.nickName = data.data.nickName
+      this.userId = String(data.data.userId || '')
       localStorage.setItem('biopilot_token', this.token)
       localStorage.setItem('biopilot_role', this.role)
       localStorage.setItem('biopilot_nick', this.nickName)
+      localStorage.setItem('biopilot_uid', this.userId)
       http.defaults.headers.common['satoken'] = this.token
     },
     async register(userName, password, nickName) {
@@ -33,6 +36,7 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('biopilot_token')
       localStorage.removeItem('biopilot_role')
       localStorage.removeItem('biopilot_nick')
+      localStorage.removeItem('biopilot_uid')
     },
   },
 })
@@ -42,5 +46,21 @@ http.interceptors.request.use((cfg) => {
   if (auth.token) cfg.headers['satoken'] = auth.token
   return cfg
 })
+
+// 401 统一跳登录：否则页面会把「登录态失效」当成空数据渲染（会话/文件全空），
+// 用户看不出是掉登录了。登录页自身不跳，避免循环。
+http.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('biopilot_token')
+      localStorage.removeItem('biopilot_role')
+      localStorage.removeItem('biopilot_nick')
+      localStorage.removeItem('biopilot_uid')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  },
+)
 
 export default http

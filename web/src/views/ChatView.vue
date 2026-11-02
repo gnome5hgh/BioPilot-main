@@ -1,700 +1,1226 @@
 <template>
   <div class="chat-page">
-    <!-- 左栏：项目 + 会话列表 -->
-    <aside class="sessions">
-      <div class="session-scroll">
-        <!-- 项目区：项目可选中（新会话归属它），展开显示其下会话 -->
-        <div class="group-label row-between">
-          <span>项目</span>
-          <button class="mini-add" title="新建项目" @click="showProjectInput = !showProjectInput">＋</button>
-        </div>
-        <div class="project-input" v-if="showProjectInput">
-          <input v-model="newProjectName" placeholder="项目名称，回车确认"
-                 @keydown.enter.exact.prevent="createProject" />
-        </div>
-        <div v-for="p in projects" :key="p.projectId" class="project-block">
-          <div class="project-item" :class="{ selected: p.projectId === currentProject }"
-               @click="selectProject(p)">
-            <span class="p-name">📁 {{ p.name }}</span>
-            <span class="item-menu" :title="'在「' + p.name + '」下新建会话'"
-                  @click.stop="newSessionFor(p.projectId)">⊕</span>
-          </div>
-          <template v-if="expanded.has(p.projectId)">
-            <div v-for="s in sessionsOf(p.projectId)" :key="s.agent_id"
-                 class="session-item sub" :class="{ active: s.agent_id === conversationId }"
-                 @click="openSession(s)">
-              <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
-              <span class="s-time">{{ relTime(s.created_at) }}</span>
-              <span class="item-menu" @click.stop="openMenu(s, $event)">⋯</span>
-            </div>
-            <div class="empty-sessions" v-if="sessionsOf(p.projectId).length === 0">暂无会话</div>
-          </template>
-        </div>
-
-        <!-- 未归项目的存量会话（新会话只能建在项目下） -->
-        <template v-if="ungroupedGroups.length">
-          <div class="group-label">未分组</div>
-          <template v-for="g in ungroupedGroups" :key="g.label">
-            <div class="sub-label">{{ g.label }}</div>
-            <div v-for="s in g.items" :key="s.agent_id"
-                 class="session-item" :class="{ active: s.agent_id === conversationId }"
-                 @click="openSession(s)">
-              <span class="s-name">{{ s.name || s.agent_id.slice(0, 8) }}</span>
-              <span class="s-time">{{ relTime(s.created_at) }}</span>
-              <span class="item-menu" @click.stop="openMenu(s, $event)">⋯</span>
-            </div>
-          </template>
-        </template>
-        <div class="empty-sessions" v-if="!projects.length && !ungroupedGroups.length">
-          先在上方新建一个项目，再通过项目行的 ⊕ 开始会话
-        </div>
+    <header class="chat-head">
+      <div class="title-wrap">
+        <h1 class="chat-title">{{ store.currentTitle }}</h1>
+        <span v-if="store.currentProject" class="project-chip">📁 {{ store.currentProject.name }}</span>
+        <span v-else-if="!store.isDraft" class="project-chip muted">未归属项目</span>
       </div>
-    </aside>
+      <div class="head-right">
+        <button class="terminal-btn" title="打开终端（会话会保留）" aria-label="打开终端"
+                @click="terminalStore.toggle()">&gt;_</button>
+        <select v-if="store.models.length > 1" class="select model-select"
+                :value="store.selectedModel" @change="changeModel">
+          <option v-for="model in store.models" :key="model.name" :value="model.name">
+            {{ model.name }}
+          </option>
+        </select>
+      </div>
+    </header>
 
-    <!-- 右侧：标题栏 + 聊天流 + 底部输入 -->
-    <section class="chat-main">
-      <div class="chat-title">{{ currentSessionName }}</div>
-      <div class="messages" ref="msgsBox">
-        <template v-if="messages.length === 0">
-          <div class="hero">BioPilot 你的科研智能搭档</div>
+    <div ref="msgBox" class="messages" @scroll="onScroll">
+      <div v-if="store.loadingHistory" class="empty">正在读取会话…</div>
+
+      <template v-else-if="store.messages.length === 0">
+        <div class="hero">
+          <div class="hero-title">今天想让 BioPilot 做什么？</div>
+          <div class="hero-sub">找论文、读论文、分析数据、写笔记、管引用。直接开始，不必先建项目。</div>
           <div class="cap-bar">
-            <button v-for="(c, i) in caps" :key="c.name" class="cap"
-                    :class="{ active: i === curCap }" @click="fillExample(c)">{{ c.name }}</button>
+            <button v-for="cap in caps" :key="cap.name" class="cap"
+                    :class="{ active: cap === currentCap }" @click="fillExample(cap)">
+              {{ cap.name }}
+            </button>
           </div>
-          <button class="example" @click="fillExample(caps[curCap])">{{ caps[curCap].example }}</button>
-        </template>
-        <div v-for="(m, i) in messages" :key="i" class="row" :class="m.role">
-          <pre class="bubble">{{ m.text }}</pre>
+          <button class="example" @click="fillExample(currentCap)">
+            {{ currentCap.example }}
+          </button>
         </div>
-        <!-- 思考过程：agent 执行链路的工具活动行（完成后随消息保留，可回看） -->
-        <div v-if="activity.length" class="activity">
-          <div v-for="(a, i) in activity" :key="i" class="activity-line">{{ a }}</div>
-        </div>
-      </div>
+      </template>
 
-      <div class="composer">
-        <div class="project-hint" v-if="currentProjectName">
-          📁 {{ currentProjectName }} · 本会话的消息将归入该项目
-        </div>
-        <div class="attach-chips" v-if="attachments.length">
-          <span v-for="a in attachments" :key="a.file_id || a.paper_id" class="chip chip-file">
-            <span class="chip-icon">{{ fileIcon(a) }}</span>
-            <span class="chip-body">
-              <span class="chip-name">{{ a.name }}</span>
-              <span class="chip-meta">{{ chipMeta(a) }}</span>
-            </span>
-            <button class="chip-x" @click="removeAttachment(a)">×</button>
-          </span>
-        </div>
-        <div class="input-box">
-          <textarea v-model="input" :placeholder="placeholder"
-                    @keydown.enter.exact.prevent="send"></textarea>
-          <div class="input-controls">
-            <div class="controls-left">
-              <input ref="fileInput" type="file" class="file-hidden" multiple
-                     accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
-                     @change="uploadFiles" />
-              <button class="icon-btn" title="添加数据文件" @click="fileInput?.click()">＋</button>
-              <button class="icon-btn" title="引用已上传的文件" @click="togglePaperPick">📎</button>
-              <select v-if="paperPickOpen" class="model-select" @change="pickPaper($event)">
-                <option value="" disabled selected>选择文件…</option>
-                <optgroup label="论文" v-if="papers.length">
-                  <option v-for="p in papers" :key="p.id" :value="'paper:' + p.id">
-                    📄 {{ p.file_name || p.title || p.id.slice(0, 8) }}{{ p.indexed ? '（已索引）' : '' }}
-                  </option>
-                </optgroup>
-                <optgroup label="数据文件" v-if="dataFiles.length">
-                  <option v-for="f in dataFiles" :key="f.id" :value="'file:' + f.id">
-                    📎 {{ f.name }}
-                  </option>
-                </optgroup>
-              </select>
-              <div class="ctx-wrap" v-if="usage"
-                   @mouseenter="usageHover = true" @mouseleave="usageHover = false">
-                <span class="ctx-icon" :class="usageLevel">{{ usagePercent }}%</span>
-                <div class="ctx-panel" v-if="usageHover">
-                  <div class="ctx-head">上下文容量 {{ usage.total }}/{{ usage.limit }}</div>
-                  <div class="ctx-bar"><div class="ctx-fill" :style="{ width: usagePercent + '%' }"></div></div>
-                  <div v-for="(v, k) in usage.parts" :key="k" class="ctx-row">
-                    <span>{{ ctxLabel(k) }}</span><span>{{ v }}</span>
+      <div v-for="(message, index) in store.messages" :key="index"
+           class="row" :class="message.role">
+        <template v-if="message.role === 'user'">
+          <div class="user-stack">
+            <div v-if="message.attachments?.length" class="msg-files">
+              <button v-for="(item, i) in message.attachments" :key="`${attachmentKey(item)}-${i}`"
+                      class="file-card" :title="`预览 ${item.name}`" @click="openAttachment(item)">
+                <span class="file-card-icon">{{ fileIcon(item) }}</span>
+                <span class="file-card-body">
+                  <span class="file-card-name">{{ item.name }}</span>
+                  <span class="file-card-meta">{{ chipMeta(item) }}</span>
+                </span>
+              </button>
+            </div>
+            <div class="bubble user-bubble">{{ message.text }}</div>
+          </div>
+        </template>
+        <template v-else>
+          <div class="assistant-block">
+            <div v-if="hasProcess(message)" class="thinking">
+              <button class="thinking-head" @click="toggleThinking(message)">
+                <span class="thinking-icon">{{ message.streaming && !message.text ? '◌' : '✓' }}</span>
+                <span>{{ thinkingLabel(message) }}</span>
+                <span class="thinking-chev">{{ message.thinkingOpen ? '▾' : '▸' }}</span>
+              </button>
+              <div v-if="message.thinkingOpen" class="thinking-body">
+                <pre v-if="message.reasoning" class="reasoning">{{ message.reasoning }}</pre>
+                <div v-if="message.activity.length" class="activity">
+                  <div v-for="(item, i) in message.activity" :key="i" class="activity-line">
+                    <span class="activity-state" :class="item.state">
+                      {{ item.state === 'running' ? '◌' : item.state === 'error' ? '✕' : '✓' }}
+                    </span>
+                    <span class="activity-name">{{ prettyTool(item.name) }}</span>
+                    <span v-if="item.duration" class="activity-time">{{ item.duration }}s</span>
                   </div>
                 </div>
+                <div v-if="!message.reasoning && !message.activity.length" class="reasoning muted">
+                  正在思考…
+                </div>
               </div>
-              <select v-if="models.length > 1" v-model="selectedModel" class="model-select" @change="selectModel">
-                <option v-for="m in models" :key="m.name" :value="m.name">{{ m.name }}</option>
-              </select>
             </div>
-            <button class="send" :class="{ stop: busy }" @click="busy ? stopStreaming() : send()"
-                    :title="busy ? '中断回答' : '发送'">{{ busy ? '■' : '↑' }}</button>
+
+            <div v-if="message.error" class="error-banner">{{ message.error }}</div>
+
+            <div v-if="message.text" class="bubble assistant-bubble">
+              <MarkdownView :content="message.text" />
+              <span v-if="message.streaming" class="cursor" aria-hidden="true">▌</span>
+            </div>
+            <div v-else-if="message.streaming && !hasProcess(message)" class="waiting">
+              <span class="waiting-dot"></span>
+              正在思考… {{ message.elapsed ? `(${message.elapsed}s)` : '' }}
+            </div>
+
+            <div v-if="message.text && !message.streaming" class="msg-actions">
+              <button class="btn-link" @click="copyMessage(message)">复制</button>
+              <span class="msg-time">{{ message.elapsed ? `用时 ${message.elapsed}s` : '' }}</span>
+            </div>
           </div>
+        </template>
+      </div>
+      <div v-if="!shouldStick && busy" class="stick-btn" @click="forceScroll">
+        回到最新 ↓
+      </div>
+    </div>
+
+    <footer class="composer">
+      <div v-if="store.isDraft" class="composer-hint">
+        <span v-if="store.currentProject">📁 将归入「{{ store.currentProject.name }}」</span>
+        <span v-else>未选择项目，发送后进入任务列表</span>
+      </div>
+      <div v-else-if="store.currentProject" class="composer-hint">
+        📁 {{ store.currentProject.name }}
+      </div>
+
+      <div v-if="attachments.length" class="attach-chips">
+        <span v-for="item in attachments" :key="attachmentKey(item)" class="chip">
+          <span class="chip-icon">{{ fileIcon(item) }}</span>
+          <span class="chip-body">
+            <span class="chip-name">{{ item.name }}</span>
+            <span class="chip-meta">
+              {{ chipMeta(item) }}
+              <span v-if="item.notIndexed" class="chip-warn">未加入知识库</span>
+            </span>
+          </span>
+          <button class="chip-x" title="移除附件" @click="removeAttachment(item)">×</button>
+        </span>
+      </div>
+
+      <div class="input-box">
+        <textarea v-model="input" :placeholder="placeholder" :disabled="busy"
+                  @keydown.enter.exact.prevent="send"></textarea>
+        <div class="input-controls">
+          <div class="controls-left">
+            <input ref="fileInput" type="file" class="file-hidden" multiple
+                   accept=".csv,.tsv,.xlsx,.xls,.h5ad,.json,.txt,.md,.fasta,.fastq,.pdf"
+                   @change="uploadFiles" />
+            <button class="icon-btn" title="上传数据文件" :disabled="uploading"
+                    @click="fileInput?.click()">{{ uploading ? '…' : '＋' }}</button>
+            <button class="icon-btn" title="引用已上传的文件" @click="togglePicker">📎</button>
+            <select v-if="store.isDraft" class="select project-select"
+                    :value="store.currentProjectId" @change="changeProject">
+              <option value="">不归属项目</option>
+              <option v-for="project in store.projects" :key="project.projectId"
+                      :value="project.projectId">{{ project.name }}</option>
+            </select>
+
+            <div class="ctx-wrap" @mouseenter="usageHover = true" @mouseleave="usageHover = false">
+              <span class="ctx-pill" :class="usageLevel">
+                上下文 {{ store.usage ? usagePercent + '%' : '—' }}
+              </span>
+              <div v-if="store.usage && usageHover" class="ctx-panel">
+                <div class="ctx-head">上下文容量 {{ store.usage.total }}/{{ store.usage.limit }}</div>
+                <div class="ctx-bar"><div class="ctx-fill" :style="{ width: usagePercent + '%' }"></div></div>
+                <div v-for="(value, key) in store.usage.parts" :key="key" class="ctx-row">
+                  <span>{{ ctxLabel(key) }}</span><span>{{ value }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button class="send" :class="{ stop: busy }" :title="busy ? '中断回答' : '发送'"
+                  @click="busy ? stopStreaming() : send()">{{ busy ? '■' : '↑' }}</button>
         </div>
       </div>
-    </section>
 
-    <!-- 会话 ⋯ 菜单：fixed 定位（滚动容器会裁剪 absolute 弹层），透明遮罩负责点外关闭 -->
-    <template v-if="menuFor">
-      <div class="menu-mask" @click="menuFor = null; confirmDelete = null"></div>
-      <div class="menu-pop" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }">
-        <button class="menu-item danger" @click="deleteSession(menuSession)">
-          {{ confirmDelete === menuFor ? '再点一次确认删除' : '删除会话' }}
-        </button>
-      </div>
-    </template>
+      <template v-if="pickerOpen">
+        <div class="picker-mask" @click="pickerOpen = false"></div>
+        <div class="picker">
+          <div class="picker-head">
+            <input v-model="pickerQuery" class="input picker-search" placeholder="搜索论文或数据文件…" />
+            <button class="btn btn-sm" @click="pickerOpen = false">完成</button>
+          </div>
+          <div class="picker-body">
+            <div class="picker-group" v-if="visiblePapers.length">
+              <div class="picker-label">论文</div>
+              <button v-for="paper in visiblePapers" :key="paper.id" class="picker-item"
+                      :class="{ picked: isPickedPaper(paper) }" @click="togglePaper(paper)">
+                <span class="picker-check">{{ isPickedPaper(paper) ? '✓' : '' }}</span>
+                <span class="picker-main">
+                  <span class="picker-name">{{ paper.file_name || paper.title || '未命名论文' }}</span>
+                  <span class="picker-meta">{{ paperMeta(paper) }}</span>
+                </span>
+              </button>
+            </div>
+            <div class="picker-group" v-if="visibleFiles.length">
+              <div class="picker-label">数据文件</div>
+              <button v-for="file in visibleFiles" :key="file.id" class="picker-item"
+                      :class="{ picked: isPickedFile(file) }" @click="toggleFile(file)">
+                <span class="picker-check">{{ isPickedFile(file) ? '✓' : '' }}</span>
+                <span class="picker-main">
+                  <span class="picker-name">{{ file.name }}</span>
+                  <span class="picker-meta">{{ fileMeta(file) }}</span>
+                </span>
+              </button>
+            </div>
+            <div v-if="!visiblePapers.length && !visibleFiles.length" class="empty picker-empty">
+              <div>{{ pickerQuery ? '没有匹配的文件' : '还没有可引用的论文或数据文件' }}</div>
+              <router-link to="/papers">去文件管理上传 →</router-link>
+            </div>
+          </div>
+        </div>
+      </template>
+    </footer>
 
-    <!-- 确认弹框：唯一确认决策点的前端半边——批准/拒绝由用户点选，300 秒不选服务端自动拒绝 -->
     <div v-if="pendingConfirm" class="confirm-mask">
-      <div class="confirm-card">
-        <div class="confirm-title">安全确认</div>
-        <pre class="confirm-body">{{ pendingConfirm.summary || pendingConfirm.tool_name || '本次操作需要你的确认' }}</pre>
+      <div class="confirm-card" role="alertdialog" aria-modal="true">
+        <div class="confirm-title">需要你确认</div>
+        <div class="confirm-summary">
+          {{ pendingConfirm.tool_name || '工具调用' }}
+          <span v-if="pendingConfirm.risk_level" class="badge badge-danger">{{ riskLabel(pendingConfirm.risk_level) }}</span>
+        </div>
+        <div v-if="pendingConfirm.cause" class="confirm-cause">{{ causeLabel(pendingConfirm.cause) }}</div>
+        <div v-if="pendingConfirm.side_effects?.length" class="confirm-effects">
+          副作用：{{ pendingConfirm.side_effects.join('、') }}
+        </div>
+        <div v-if="paramRows.length" class="confirm-params">
+          <div v-for="row in paramRows" :key="row.key" class="param-row">
+            <span class="param-key">{{ row.key }}</span>
+            <pre class="param-value">{{ row.value }}</pre>
+          </div>
+        </div>
+        <div class="confirm-timer">自动拒绝倒计时 {{ confirmRemaining }}s</div>
         <div class="confirm-actions">
-          <button class="reject" @click="answerConfirm(false)">拒绝</button>
-          <button class="ok" @click="answerConfirm(true)">批准</button>
+          <button class="btn" @click="answerConfirm(false)">拒绝</button>
+          <button class="btn btn-primary" @click="answerConfirm(true)">批准</button>
         </div>
       </div>
     </div>
+
+    <FilePreviewModal :target="previewTarget" @close="previewTarget = null" />
   </div>
 </template>
 
 <script setup>
-// 对话主界面：左侧项目 + 会话列表（点会话经 /chat/history 回放；⋯ 菜单删除），
-// 右侧聊天流 + 底部输入。选中项目后，新会话的第一条消息会把会话归入该项目。
-// confirm 帧挂起等用户裁决后回传 /chat/confirm；300 秒无操作由服务端按拒绝处理。
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import FilePreviewModal from '../components/FilePreviewModal.vue'
+import MarkdownView from '../components/MarkdownView.vue'
 import http from '../api/auth'
+import { useChatStore } from '../stores/chat'
+import { useTerminalStore } from '../stores/terminal'
+import { toast } from '../utils/toast'
+import { errText } from '../utils/errors'
+import { fmtBytes } from '../utils/time'
+
+const store = useChatStore()
+const terminalStore = useTerminalStore()
 
 const caps = [
   { name: '生信分析', example: '示例：帮我整理单细胞 QC 的标准流程要点' },
   { name: '文献解析', example: '示例：帮我总结一篇论文的核心观点与图表结论' },
   { name: '知识解读', example: '示例：什么是单细胞测序技术？' },
   { name: '文档写作', example: '示例：帮我写一份空间组学的综述大纲' },
-  { name: '平台搭建', example: '示例：帮我搭一个数据分析工具的静态展示页' },
 ]
-const curCap = ref(0)
+
 const input = ref('')
 const busy = ref(false)
-const messages = ref([])
-const sessions = ref([])
-const projects = ref([])
-const currentProject = ref(null)     // 新会话归属的项目（null = 未分组）
-const expanded = ref(new Set())      // 展开的项目集合
-const menuFor = ref(null)            // 当前打开 ⋯ 菜单的会话 id
-const menuSession = ref(null)        // 菜单对应的会话对象（删除用）
-const menuPos = ref({ x: 0, y: 0 })  // 菜单弹层的屏幕坐标（fixed 定位，避开滚动裁剪）
-const confirmDelete = ref(null)      // 两步删除：第一次点记下会话 id，再点执行
-const papers = ref([])               // 论文清单（📄 选择器）
-const dataFiles = ref([])            // 数据文件清单（📄 选择器）
-const paperPickOpen = ref(false)
-const usage = ref(null)
-const usageHover = ref(false)     // 📄 选择下拉开关
-const showProjectInput = ref(false)
-const newProjectName = ref('')
-const placeholder = computed(() =>
-  currentProjectName.value
-    ? '给 BioPilot 发送消息…（Enter 发送，Shift+Enter 换行）'
-    : '请先在左侧选择或新建一个项目…')
-const pendingConfirm = ref(null)
-const activity = ref([])
-const msgsBox = ref(null)
-
-// 会话标识：默认开新会话；点左栏条目切到既有会话（历史经 /chat/history 回放）
-let conversationId = crypto.randomUUID()
-
-// 多模型选择：清单不含 key；切换只写会话偏好，下一 run 生效
-const models = ref([])
-const selectedModel = ref('')
+const currentCap = ref(caps[0])
 const attachments = ref([])
+const papers = ref([])
+const dataFiles = ref([])
+const pickerOpen = ref(false)
+const pickerQuery = ref('')
+const usageHover = ref(false)
+const pendingConfirm = ref(null)
+const previewTarget = ref(null)
+const confirmRemaining = ref(0)
+const shouldStick = ref(true)
+const uploading = ref(false)
+const msgBox = ref(null)
 const fileInput = ref(null)
 
-const currentProjectName = computed(() =>
-  projects.value.find(p => p.projectId === currentProject.value)?.name || '')
+let abortController = null
+let tickTimer = null
+let confirmTimer = null
 
-// 当前会话标题（顶栏展示）：会话已在列表里用它的名字；尚未落库的新会话叫「新会话」
-const currentSessionName = computed(() => {
-  const s = sessions.value.find(x => x.agent_id === conversationId)
-  if (s) return s.name || s.agent_id.slice(0, 8)
-  return messages.value.length ? '新会话' : '新任务'
-})
+const placeholder = '给 BioPilot 发送消息…（Enter 发送，Shift+Enter 换行）'
 
 const usagePercent = computed(() => {
-  if (!usage.value || !usage.value.limit) return 0
-  return Math.min(100, Math.round(usage.value.total / usage.value.limit * 1000) / 10)
+  const usage = store.usage
+  if (!usage || !usage.limit) return 0
+  return Math.min(100, Math.round((usage.total / usage.limit) * 1000) / 10)
 })
 
 const usageLevel = computed(() => {
-  const p = usagePercent.value
-  return p > 80 ? 'danger' : p > 50 ? 'warn' : 'ok'
+  const percent = usagePercent.value
+  return percent > 80 ? 'danger' : percent > 50 ? 'warn' : 'ok'
 })
 
-function ctxLabel(k) {
-  return { system_prompt: '系统提示词', skills: '技能', agents_list: '可派发清单',
-           memory: '记忆块', intent: '意图规则', tools_schema: '工具定义',
-           messages: '消息' }[k] || k
-}
-
-async function refreshUsage() {
-  try {
-    const { data } = await http.get('/agent/chat/context-usage', {
-      params: { conversationId: conversationId },
-    })
-    usage.value = data.usage
-  } catch { /* 静默 */ }
-}
-
-function fileIcon(a) {
-  const n = (a.name || '').toLowerCase()
-  if (n.endsWith('.pdf')) return '📕'
-  if (/\.(csv|tsv|xlsx|xls)$/.test(n)) return '📊'
-  if (n.endsWith('.h5ad')) return '🧬'
-  if (n.endsWith('.md') || n.endsWith('.txt')) return '📝'
-  if (/\.(py|r)$/.test(n)) return '🐍'
-  return '📎'
-}
-
-function chipMeta(a) {
-  const parts = []
-  const n = (a.name || '').toLowerCase()
-  const ext = n.includes('.') ? n.split('.').pop().toUpperCase() : ''
-  if (ext) parts.push(ext)
-  if (a.size) parts.push(a.size > 1048576 ? (a.size / 1048576).toFixed(1) + 'MB' : Math.round(a.size / 1024) + 'KB')
-  return parts.join(' · ')
-}
-
-function openMenu(s, evt) {
-  if (menuFor.value === s.agent_id) { menuFor.value = null; confirmDelete.value = null; return }
-  menuFor.value = s.agent_id
-  menuSession.value = s
-  confirmDelete.value = null
-  // 合成事件（无坐标）时从触发元素取位置兜底
-  const rect = (evt.clientX || evt.clientY)
-    ? null
-    : evt.currentTarget?.getBoundingClientRect?.() ?? null
-  const x = rect ? rect.right - 110 : evt.clientX
-  const y = rect ? rect.bottom + 4 : evt.clientY
-  // 菜单高约 44px：贴近视口底部时向上弹出
-  const flip = y + 60 > window.innerHeight
-  menuPos.value = { x, y: flip ? y - 54 : y + 8 }
-}
-
-onMounted(() => {
-  loadSessions()
-  loadProjects()
-  loadModels()
-  loadPapers()
+const paramRows = computed(() => {
+  const params = pendingConfirm.value?.params || {}
+  return Object.entries(params).map(([key, value]) => ({ key, value: String(value) }))
 })
 
-async function loadPapers() {
-  try {
-    papers.value = (await http.get('/agent/papers')).data.papers || []
-  } catch { /* 论文清单拿不到就空态 */ }
-  try {
-    const f = await http.get('/agent/files')
-    dataFiles.value = (f.data.files || []).filter(
-      x => !x.name.toLowerCase().endsWith('.pdf'))
-  } catch { /* 数据文件清单拿不到就空态 */ }
-}
-
-function togglePaperPick() {
-  paperPickOpen.value = !paperPickOpen.value
-  if (paperPickOpen.value) loadPapers()   // 打开时刷新（含刚上传的）
-}
-
-function pickPaper(evt) {
-  const val = evt.target.value
-  if (!val) return
-  const isPaper = val.startsWith('paper:')
-  const id = val.replace(/^(paper|file):/, '')
-  if (isPaper) {
-    const p = papers.value.find(x => x.id === id)
-    if (p && !attachments.value.some(a => a.paper_id === id)) {
-      attachments.value.push({ paper_id: id, name: p.name || id.slice(0, 8) })
-    }
-  } else {
-    const f = dataFiles.value.find(x => x.id === id)
-    if (f && !attachments.value.some(a => a.file_id === id)) {
-      attachments.value.push({ file_id: id, name: f.name })
-    }
-  }
-  paperPickOpen.value = false
-  evt.target.value = ''
-}
-
-function dateGroup(t) {
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
-  const yStart = new Date(dayStart); yStart.setDate(yStart.getDate() - 1)
-  if (t >= dayStart) return '今天'
-  if (t >= yStart) return '昨天'
-  return '更早'
-}
-
-const ungroupedGroups = computed(() => {
-  const groups = {}
-  for (const s of sessions.value) {
-    if (s.project_id) continue
-    const label = dateGroup(new Date(s.created_at))
-    ;(groups[label] = groups[label] || { label, items: [] }).items.push(s)
-  }
-  const order = ['今天', '昨天', '更早']
-  return order.map(l => groups[l]).filter(Boolean)
+const visiblePapers = computed(() => {
+  const text = pickerQuery.value.trim().toLowerCase()
+  if (!text) return papers.value
+  return papers.value.filter((paper) =>
+    (paper.file_name || paper.title || '').toLowerCase().includes(text))
 })
 
-async function loadSessions() {
-  try {
-    const { data } = await http.get('/sessions', { params: { limit: 200 } })
-    sessions.value = data.data || []
-  } catch { /* 列表拿不到就保持空态 */ }
+const visibleFiles = computed(() => {
+  const text = pickerQuery.value.trim().toLowerCase()
+  if (!text) return dataFiles.value
+  return dataFiles.value.filter((file) => file.name.toLowerCase().includes(text))
+})
+
+onMounted(async () => {
+  if (!store.initialized) await store.init()
+  else if (!store.currentId) store.newDraft()
+  applyPendingPrompt()
+})
+
+watch(() => store.pendingPrompt, applyPendingPrompt)
+
+function applyPendingPrompt() {
+  if (!store.pendingPrompt) return
+  input.value = store.pendingPrompt
+  store.pendingPrompt = ''
+  nextTick(() => {
+    scrollBottom()
+  })
 }
 
-async function loadProjects() {
-  try {
-    const { data } = await http.get('/project')
-    projects.value = data.data || []
-  } catch { /* 拿不到就空态 */ }
-}
+onBeforeUnmount(() => {
+  stopTicker()
+  stopConfirmTimer()
+})
 
-async function createProject() {
-  const name = newProjectName.value.trim()
-  if (!name) return
-  try {
-    const { data } = await http.post('/project', { name })
-    showProjectInput.value = false
-    newProjectName.value = ''
-    await loadProjects()
-    currentProject.value = data.data?.projectId || null
-    expanded.value = new Set([...expanded.value, currentProject.value])
-  } catch (e) {
-    window.alert(e?.response?.data?.msg || '新建项目失败')
-  }
-}
-
-function selectProject(p) {
-  currentProject.value = p.projectId
-  const next = new Set(expanded.value)
-  next.add(p.projectId)
-  expanded.value = next
-}
-
-function sessionsOf(pid) {
-  return sessions.value.filter(s => s.project_id === pid)
-}
-
-async function loadModels() {
-  try {
-    const { data } = await http.get('/agent/models')
-    models.value = data.models || []
-    selectedModel.value = data.selected || data.models?.[0]?.name || ''
-  } catch { /* 清单拿不到就不显示选择器（单模型部署） */ }
-}
-
-async function selectModel() {
-  await http.post('/agent/models/select', { name: selectedModel.value })
-}
-
-// 附件：选择即上传（先入 OSS 登记元数据），发送时把 file_id 引用随消息体下行
-async function uploadFiles(evt) {
-  const files = Array.from(evt.target.files || [])
-  if (!files.length) return
-  for (const f of files) {
-    if (f.size > 100 * 1024 * 1024) {
-      window.alert(`「${f.name}」超过 100MB 上限，已跳过`)
-      continue
-    }
-    const form = new FormData()
-    form.append('file', f)
-    try {
-      const { data } = await http.post('/agent/files/upload', form)
-      attachments.value.push(data)
-    } catch (e) {
-      window.alert(e?.response?.data?.detail || `「${f.name}」上传失败`)
-    }
-  }
-  evt.target.value = ''
-}
-
-function removeAttachment(a) {
-  attachments.value = attachments.value.filter(x => x.file_id !== a.file_id)
-}
-
-function resetChat() {
-  messages.value = []
+watch(() => store.currentId, () => {
   pendingConfirm.value = null
-  menuFor.value = null
-  confirmDelete.value = null
+  previewTarget.value = null
+  pickerOpen.value = false
+  attachments.value = []
+  stopConfirmTimer()
+  nextTick(scrollBottom)
+})
+
+function fillExample(cap) {
+  currentCap.value = cap
+  input.value = cap.example.replace(/^示例：/, '')
 }
 
-
-// 在指定项目下开新会话：先在列表里放一个本地占位条目（首条消息落库后
-// 被服务端数据替换，标题由首条任务自动生成）
-function newSessionFor(projectId) {
-  if (busy.value) return
-  conversationId = crypto.randomUUID()
-  currentProject.value = projectId
-  resetChat()
-  const next = new Set(expanded.value); next.add(projectId)
-  expanded.value = next
-  input.value = ""
-}
-
-// 相对时间标签（与参考图一致：刚刚 / N 天前）
-function relTime(iso) {
-  if (!iso) return ""
-  const t = new Date(iso)
-  if (Number.isNaN(t.getTime())) return ""
-  const day = 24 * 3600 * 1000
-  const startToday = new Date(); startToday.setHours(0, 0, 0, 0)
-  if (t >= startToday) return "刚刚"
-  const days = Math.floor((startToday - t) / day) + 1
-  if (days === 1) return "昨天"
-  return `${days}天`
-}
-
-async function openSession(s) {
-  if (busy.value || s.agent_id === conversationId) return
-  conversationId = s.agent_id
-  pendingConfirm.value = null
-  menuFor.value = null
-  try {
-    const { data } = await http.get('/agent/chat/history', {
-      params: { conversationId: s.agent_id },
-    })
-    messages.value = (data.messages || []).map(m => ({ role: m.role, text: m.content }))
-  } catch {
-    messages.value = []
-  }
-  refreshUsage()
-  await nextTick()
-  scrollBottom()
-}
-
-async function deleteSession(s) {
-  // 两步确认（不弹原生框）：第一次点标记，再点执行
-  if (confirmDelete.value !== s.agent_id) {
-    confirmDelete.value = s.agent_id
-    return
-  }
-  confirmDelete.value = null
-  menuFor.value = null
-  try {
-    await http.delete('/agent/chat/session', { params: { conversationId: s.agent_id } })
-    if (s.agent_id === conversationId) newSession()
-    await loadSessions()
-  } catch (e) {
-    window.alert(e?.response?.data?.msg || '删除失败')
-  }
-}
-
-function fillExample(c) {
-  input.value = c.example.replace(/^示例：/, '')
-  curCap.value = caps.indexOf(c)
+function ctxLabel(key) {
+  return {
+    system_prompt: '系统提示词',
+    skills: '技能',
+    agents_list: '可派发清单',
+    memory: '记忆块',
+    intent: '意图规则',
+    tools_schema: '工具定义',
+    messages: '消息',
+  }[key] || key
 }
 
 function scrollBottom() {
-  if (msgsBox.value) msgsBox.value.scrollTop = msgsBox.value.scrollHeight
+  if (!msgBox.value) return
+  msgBox.value.scrollTop = msgBox.value.scrollHeight
 }
 
-let abortController = null
+function forceScroll() {
+  shouldStick.value = true
+  scrollBottom()
+}
 
-function stopStreaming() {
-  if (abortController) abortController.abort()
+function onScroll() {
+  const box = msgBox.value
+  if (!box) return
+  shouldStick.value = box.scrollHeight - box.scrollTop - box.clientHeight < 80
+}
+
+function maybeScroll() {
+  if (!shouldStick.value) return
+  // 数据刚改完时 DOM 还没长高，直接量 scrollHeight 会永远差一截；
+  // 等一帧让浏览器完成布局再贴底。
+  window.requestAnimationFrame(() => {
+    if (shouldStick.value) scrollBottom()
+  })
+}
+
+function startTicker(message) {
+  stopTicker()
+  tickTimer = window.setInterval(() => {
+    if (message?.streaming) {
+      message.elapsed = Math.floor((Date.now() - message.startedAt) / 1000)
+    }
+  }, 1000)
+}
+
+function stopTicker() {
+  if (tickTimer) window.clearInterval(tickTimer)
+  tickTimer = null
+}
+
+function hasProcess(message) {
+  return Boolean(message.reasoning) || Boolean(message.activity?.length)
+}
+
+function thinkingLabel(message) {
+  if (message.streaming && !message.text) {
+    return `正在思考… ${message.elapsed ? `${message.elapsed}s` : ''}`
+  }
+  return message.reasoning
+    ? `已思考（用时 ${message.elapsed || 0} 秒）`
+    : `执行过程（用时 ${message.elapsed || 0} 秒）`
+}
+
+function toggleThinking(message) {
+  message.thinkingOpen = !message.thinkingOpen
+  message.thinkingTouched = true
+}
+
+function prettyTool(name) {
+  const map = {
+    rag_retrieve: '检索知识库',
+    read_pdf: '读取论文',
+    view_image: '查看图表',
+    save_document: '保存文档',
+    run_python: '执行分析代码',
+    fetch_pdf: '下载论文',
+    add_citation: '登记引用',
+    glob: '查找文件',
+    grep: '搜索文件内容',
+    spawn_sub_agent: '派发子任务',
+  }
+  return map[name] || name || '工具调用'
+}
+
+function riskLabel(level) {
+  return { low: '低风险', medium: '中风险', high: '高风险', critical: '严重' }[level] || level
+}
+
+function causeLabel(cause) {
+  return {
+    risk_threshold: '风险档位超过免问上限',
+    path_fence: '写入位置超出允许范围',
+    command: '命令需要人工判断',
+  }[cause] || ''
+}
+
+function fileIcon(item) {
+  const name = (item.name || '').toLowerCase()
+  if (name.endsWith('.pdf')) return '📕'
+  if (/\.(csv|tsv|xlsx|xls)$/.test(name)) return '📊'
+  if (name.endsWith('.h5ad')) return '🧬'
+  if (name.endsWith('.md') || name.endsWith('.txt')) return '📝'
+  if (/\.(py|r)$/.test(name)) return '🐍'
+  return '📎'
+}
+
+function chipMeta(item) {
+  const name = (item.name || '').toLowerCase()
+  const ext = name.includes('.') ? name.split('.').pop().toUpperCase() : ''
+  const parts = []
+  if (ext) parts.push(ext)
+  if (item.size) parts.push(fmtBytes(item.size))
+  return parts.join(' · ')
+}
+
+function attachmentKey(item) {
+  return item.paper_id || item.file_id || item.name
+}
+
+function openAttachment(item) {
+  if (item.paper_id) {
+    previewTarget.value = { kind: 'paper', id: item.paper_id, name: item.name }
+  } else if (item.file_id) {
+    previewTarget.value = { kind: 'file', id: item.file_id, name: item.name }
+  }
+}
+
+function isPickedPaper(paper) {
+  return attachments.value.some((item) => item.paper_id === paper.id)
+}
+
+function isPickedFile(file) {
+  return attachments.value.some((item) => item.file_id === file.id)
+}
+
+function paperMeta(paper) {
+  const parts = []
+  if (paper.kb_enabled === 1 || paper.indexed === 1) parts.push('已加入知识库')
+  else parts.push('未加入知识库')
+  if (paper.title && paper.file_name && paper.title !== paper.file_name) parts.push(paper.title)
+  return parts.join(' · ')
+}
+
+function fileMeta(file) {
+  return [file.content_type, file.size_bytes ? fmtBytes(file.size_bytes) : ''].filter(Boolean).join(' · ')
+}
+
+function togglePaper(paper) {
+  if (isPickedPaper(paper)) {
+    attachments.value = attachments.value.filter((item) => item.paper_id !== paper.id)
+    return
+  }
+  attachments.value.push({
+    paper_id: paper.id,
+    oss_key: paper.oss_key,
+    name: paper.file_name || paper.title || '未命名论文',
+    size: paper.size_bytes,
+    notIndexed: !(paper.kb_enabled === 1 || paper.indexed === 1),
+  })
+}
+
+function toggleFile(file) {
+  if (isPickedFile(file)) {
+    attachments.value = attachments.value.filter((item) => item.file_id !== file.id)
+    return
+  }
+  attachments.value.push({
+    file_id: file.id,
+    oss_key: file.oss_key,
+    name: file.name,
+    size: file.size_bytes,
+    notIndexed: false,
+  })
+}
+
+function removeAttachment(item) {
+  attachments.value = attachments.value.filter((entry) => entry !== item)
+}
+
+async function togglePicker() {
+  pickerOpen.value = !pickerOpen.value
+  if (!pickerOpen.value) return
+  pickerQuery.value = ''
+  try {
+    const [paperResp, fileResp] = await Promise.all([
+      http.get('/agent/papers'),
+      http.get('/agent/files'),
+    ])
+    papers.value = paperResp.data.papers || []
+    dataFiles.value = fileResp.data.files || []
+  } catch (error) {
+    toast(errText(error, '文件清单加载失败'), 'error')
+  }
+}
+
+async function uploadFiles(event) {
+  const files = Array.from(event.target.files || [])
+  if (!files.length) return
+  uploading.value = true
+  try {
+    for (const file of files) {
+      if (file.size > 100 * 1024 * 1024) {
+        toast(`「${file.name}」超过 100MB 上限，已跳过`, 'error')
+        continue
+      }
+      const form = new FormData()
+      form.append('file', file)
+      try {
+        const { data } = await http.post('/agent/files/upload', form)
+        attachments.value.push({ ...data, name: data.name || file.name, size: data.size || file.size })
+        toast(`「${file.name}」已上传`, 'success')
+      } catch (error) {
+        toast(errText(error, `「${file.name}」上传失败`), 'error')
+      }
+    }
+  } finally {
+    uploading.value = false
+    event.target.value = ''
+  }
+}
+
+function changeProject(event) {
+  store.setDraftProject(event.target.value)
+}
+
+async function changeModel(event) {
+  await store.selectModel(event.target.value)
+}
+
+async function copyMessage(message) {
+  try {
+    await navigator.clipboard.writeText(message.text || '')
+    toast('回答已复制', 'success', 1600)
+  } catch {
+    toast('复制失败，请手动选择文本', 'error')
+  }
 }
 
 async function send() {
-  if (!input.value.trim() || busy.value) return
-  const task = input.value
+  const task = input.value.trim()
+  if (!task || busy.value) return
+  if (!store.currentId) store.newDraft(store.currentProjectId)
+
   input.value = ''
-  messages.value.push({ role: 'user', text: task })
-  const reply = { role: 'assistant', text: '' }
-  messages.value.push(reply)
-  activity.value = []
+  const startedAt = Date.now()
+  // 附件快照：request 末尾会清空附件栏，消息里要留一份用于渲染文件卡片与历史回放定位
+  const sentAttachments = attachments.value.map((item) => ({
+    ...(item.paper_id ? { paper_id: item.paper_id } : { file_id: item.file_id }),
+    ...(item.oss_key ? { oss_key: item.oss_key } : {}),
+    name: item.name,
+    size: item.size || item.size_bytes || 0,
+  }))
+  const userMessage = { role: 'user', text: task, attachments: sentAttachments }
+  // 必须是 reactive 代理：push 进数组后再经原始对象改字段不会触发视图更新
+  const assistant = reactive({
+    role: 'assistant',
+    text: '',
+    reasoning: '',
+    activity: [],
+    thinkingOpen: true,
+    thinkingTouched: false,
+    streaming: true,
+    startedAt,
+    elapsed: 0,
+    error: '',
+  })
+  if (!store.currentSession && !store.draftTitle) store.draftTitle = task.slice(0, 20)
+  store.messages.push(userMessage, assistant)
   busy.value = true
-  await nextTick(); scrollBottom()
+  store.running = true
+  shouldStick.value = true
+  await nextTick()
+  scrollBottom()
+  startTicker(assistant)
+
   abortController = new AbortController()
   try {
-    const resp = await fetch('/api/agent/chat/stream', {
+    const response = await fetch('/api/agent/chat/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'satoken': localStorage.getItem('biopilot_token') || '',
-        'X-Conversation-Id': conversationId,
+        satoken: localStorage.getItem('biopilot_token') || '',
+        'X-Conversation-Id': store.currentId,
       },
       body: JSON.stringify({
-        task, conversation_id: conversationId, project_id: currentProject.value,
+        task,
+        conversation_id: store.currentId,
+        project_id: store.currentProjectId || null,
         attachments: attachments.value,
       }),
       signal: abortController.signal,
     })
-    if (resp.status === 401) {
-      // 登录态失效（服务重启/过期）：跳登录页重新拿 token
-      reply.text = '登录已失效，正在跳转登录页…'
+
+    if (response.status === 401) {
+      toast('登录已失效，正在跳转登录页', 'error')
       setTimeout(() => { window.location.href = '/login' }, 800)
       return
     }
-    if (!resp.ok || !resp.body) {
-      // 非 200：读 JSON 错误体给用户看（429 配额/422 缺参/装配失败在此分支）
-      let detail = `HTTP ${resp.status}`
+    if (!response.ok || !response.body) {
+      let detail = `HTTP ${response.status}`
       try {
-        const data = await resp.json()
-        detail = data.msg || (typeof data.detail === 'string' ? data.detail : detail)
-      } catch { /* 非 JSON 响应体保持状态码提示 */ }
-      reply.text = `对话失败：${detail}`
+        const data = await response.json()
+        detail = data.msg || detail
+      } catch { /* 非 JSON 错误体保留状态码 */ }
+      assistant.error = `对话失败：${detail}`
       return
     }
-    const reader = resp.body.getReader()
+
+    const reader = response.body.getReader()
     const decoder = new TextDecoder()
-    let buf = ''
+    let buffer = ''
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let idx
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, idx)
-        buf = buf.slice(idx + 2)
+      buffer += decoder.decode(value, { stream: true })
+      let index
+      while ((index = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, index)
+        buffer = buffer.slice(index + 2)
         for (const line of frame.split('\n')) {
           if (!line.startsWith('data: ')) continue
-          const evt = JSON.parse(line.slice(6))
-          if (evt.type === 'content' || evt.type === 'token') {
-            reply.text += evt.text; scrollBottom()
-          } else if (evt.type === 'tool_start') {
-            activity.value.push(`🔧 ${evt.tool_name || '工具调用'}…`)
-            scrollBottom()
-          } else if (evt.type === 'tool_end') {
-            activity.value.push(`✓ ${evt.tool_name || '工具'}${evt.duration_ms ? ` (${Math.round(evt.duration_ms / 100) / 10}s)` : ''}`)
-            scrollBottom()
-          } else if (evt.type === 'done' && evt.text) { reply.text = evt.text; scrollBottom() }
-          else if (evt.type === 'error') reply.text = `出错：${evt.text}`
-          else if (evt.type === 'confirm') {
-            // 挂起弹框等用户裁决；流保持打开，回答在批准后继续下行
-            pendingConfirm.value = evt
-            reply.text = `待确认：${evt.summary || evt.tool_name || '危险操作'}`
+          let event
+          try {
+            event = JSON.parse(line.slice(6))
+          } catch {
+            continue
           }
+          handleEvent(event, assistant)
         }
       }
     }
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      // 用户点停止：保留已流式输出的内容，追加中断标记
-      reply.text = reply.text ? `${reply.text}\n\n[已中断]` : '[已中断]'
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      assistant.text = assistant.text ? `${assistant.text}\n\n[已中断]` : '[已中断]'
     } else {
-      // 已流式输出的内容保留（断网丢掉全部回答不可接受），只追加中断原因
-      reply.text = reply.text ? `${reply.text}\n\n[连接中断：${e.message}]` : `对话失败：${e.message}`
+      assistant.error = assistant.text ? `连接中断：${error.message}` : `对话失败：${error.message}`
     }
   } finally {
     busy.value = false
-    attachments.value = []   // 已随消息下行
-    loadSessions()   // 新会话/新标题/项目归属进左栏
-    refreshUsage()   // 上下文用量随轮次增长
-    await nextTick(); scrollBottom()
+    store.running = false
+    assistant.streaming = false
+    assistant.elapsed = Math.floor((Date.now() - assistant.startedAt) / 1000)
+    stopTicker()
+    attachments.value = []
+    await store.loadSessions()
+    store.refreshUsage()
+    await nextTick()
+    maybeScroll()
   }
 }
 
-// 确认回传：批准=true / 拒绝=false；服务端计时，超时未回传视为拒绝
-async function answerConfirm(approved) {
-  const evt = pendingConfirm.value
-  pendingConfirm.value = null
-  if (!evt) return
-  const last = messages.value[messages.value.length - 1]
-  if (last && last.text?.startsWith('待确认：')) {
-    last.text = approved ? '已批准，继续执行…' : '已拒绝'
+function handleEvent(event, assistant) {
+  switch (event.type) {
+    case 'reasoning':
+      assistant.reasoning += event.text || ''
+      if (!assistant.thinkingTouched) assistant.thinkingOpen = true
+      break
+    case 'content':
+      assistant.text += event.text || ''
+      // 回答开始后自动收起思考块，用户手动展开过就不再抢
+      if (assistant.reasoning && !assistant.thinkingTouched && assistant.thinkingOpen) {
+        assistant.thinkingOpen = false
+      }
+      break
+    case 'tool_start':
+      assistant.activity.push({
+        name: event.tool_name || '工具',
+        state: 'running',
+        startedAt: Date.now(),
+      })
+      if (!assistant.reasoning && !assistant.thinkingTouched) assistant.thinkingOpen = true
+      break
+    case 'tool_end': {
+      const running = [...assistant.activity].reverse().find(
+        (item) => item.state === 'running' && (!event.tool_name || item.name === event.tool_name))
+      if (running) {
+        running.state = event.error ? 'error' : 'done'
+        running.duration = event.duration_ms ? Math.round(event.duration_ms / 100) / 10 : 0
+      }
+      break
+    }
+    case 'done':
+      if (event.text) assistant.text = event.text
+      assistant.streaming = false
+      break
+    case 'error':
+      assistant.error = `出错：${event.text || '未知错误'}`
+      break
+    case 'confirm':
+      openConfirm(event)
+      break
+    default:
+      break
   }
-  await fetch('/api/agent/chat/confirm', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'satoken': localStorage.getItem('biopilot_token') || '',
-    },
-    body: JSON.stringify({ req_id: evt.req_id, conversation_id: conversationId, approved }),
-  })
+  maybeScroll()
+}
+
+function openConfirm(event) {
+  pendingConfirm.value = event
+  confirmRemaining.value = 300
+  stopConfirmTimer()
+  confirmTimer = window.setInterval(() => {
+    confirmRemaining.value -= 1
+    if (confirmRemaining.value <= 0) {
+      stopConfirmTimer()
+      pendingConfirm.value = null
+      toast('确认已超时，服务端已按拒绝处理', 'error')
+    }
+  }, 1000)
+}
+
+function stopConfirmTimer() {
+  if (confirmTimer) window.clearInterval(confirmTimer)
+  confirmTimer = null
+}
+
+async function answerConfirm(approved) {
+  const event = pendingConfirm.value
+  pendingConfirm.value = null
+  stopConfirmTimer()
+  if (!event) return
+  try {
+    await fetch('/api/agent/chat/confirm', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        satoken: localStorage.getItem('biopilot_token') || '',
+      },
+      body: JSON.stringify({
+        req_id: event.req_id,
+        conversation_id: store.currentId,
+        approved,
+      }),
+    })
+  } catch (error) {
+    toast(errText(error, '确认回传失败'), 'error')
+  }
+}
+
+function stopStreaming() {
+  abortController?.abort()
 }
 </script>
 
 <style scoped>
-.chat-page { display: flex; height: 100vh; overflow: hidden; }
-/* 左栏：项目 + 会话 */
-.sessions { width: 240px; flex: none; border-right: 1px solid #e6e9ed; padding: 14px 10px; display: flex; flex-direction: column; gap: 6px; background: #fafbfc; }
-.new-session { border: 1px solid #e6e9ed; background: #fff; border-radius: 10px; padding: 10px; cursor: pointer; font-size: 13px; }
-.new-session:hover { border-color: #2ec5b1; color: #2ec5b1; }
-.session-scroll { overflow-y: auto; margin-top: 4px; }
-.group-label { font-size: 11px; color: #a6adbd; margin: 10px 4px 4px; }
-.row-between { display: flex; justify-content: space-between; align-items: center; }
-.mini-add { border: none; background: transparent; cursor: pointer; color: #2ec5b1; font-size: 13px; padding: 0 4px; }
-.project-input { margin: 2px 0 6px; }
-.project-input input { width: 100%; box-sizing: border-box; border: 1px solid #2ec5b1; border-radius: 8px; padding: 7px 9px; font-size: 12px; outline: none; }
-.sub-label { font-size: 11px; color: #b7bdc9; margin: 6px 4px 2px 18px; }
-.project-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
-.project-item:hover { background: #f0f1f5; }
-.project-item.selected { background: #e8f8f5; }
-.project-item.selected .p-name { color: #2ec5b1; font-weight: 600; }
-.p-count { font-size: 11px; color: #a6adbd; }
-.session-item { position: relative; padding: 9px 10px; border-radius: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.session-item.sub { margin-left: 16px; }
-.session-item:hover { background: #f0f1f5; }
-.session-item.active { background: #e8f8f5; }
-.session-item.active .s-name { color: #2ec5b1; font-weight: 600; }
-.s-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.s-count { font-size: 11px; color: #a6adbd; flex: none; }
-.s-time { font-size: 11px; color: #a6adbd; flex: none; }
-.p-count { font-size: 11px; color: #a6adbd; flex: none; }
-.item-menu { flex: none; font-size: 13px; color: #a6adbd; cursor: pointer; padding: 0 4px; border-radius: 4px; visibility: hidden; }
-.project-item .item-menu { margin-left: auto; visibility: visible; font-size: 15px; }
-.session-item:hover .item-menu { visibility: visible; }
-.menu-mask { position: fixed; inset: 0; z-index: 40; }
-.menu-pop { position: fixed; background: #fff; border: 1px solid #e6e9ed; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.12); z-index: 41; min-width: 132px; overflow: hidden; }
-.menu-item { display: block; width: 100%; border: none; background: transparent; text-align: left; padding: 8px 12px; font-size: 12px; cursor: pointer; }
-.menu-item.danger { color: #e5484d; }
-.menu-item:hover { background: #f8f9fc; }
-.empty-sessions { font-size: 12px; color: #a6adbd; text-align: center; padding: 16px 0; }
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+}
 
-/* 右侧聊天区 */
-.chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.chat-title { padding: 12px 20px; font-size: 14px; font-weight: 600; border-bottom: 1px solid #eef0f4; color: #2f3033; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.messages { flex: 1; overflow-y: auto; padding: 28px 32px; display: flex; flex-direction: column; gap: 14px; }
-.hero { font-size: 32px; font-weight: 700; text-align: center; margin-top: 8vh; }
-.cap-bar { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 20px 0 12px; }
-.cap { background: #f8f9fc; border: none; border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; }
+.chat-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.title-wrap { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.chat-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-chip {
+  flex: none;
+  font-size: 11px;
+  color: #1f9e8c;
+  background: #e8f8f5;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.project-chip.muted { color: #818999; background: #f1f3f7; }
+.head-right { display: flex; align-items: center; gap: 8px; }
+.terminal-btn {
+  border: 1px solid #e6e9ed;
+  background: #fff;
+  border-radius: 8px;
+  height: 30px;
+  padding: 0 9px;
+  color: #4a5160;
+  cursor: pointer;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+.terminal-btn:hover { border-color: #2ec5b1; color: #1f9e8c; }
+.model-select { height: 30px; font-size: 12px; }
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: relative;
+}
+
+.hero { margin-top: 8vh; text-align: center; }
+.hero-title { font-size: 30px; font-weight: 750; letter-spacing: 0.2px; }
+.hero-sub { margin-top: 10px; color: #818999; font-size: 13px; }
+.cap-bar { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 26px 0 14px; }
+.cap {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: #f4f6f9;
+  color: #4a5160;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cap:hover { background: #e8f8f5; color: #1f9e8c; }
 .cap.active { background: #2ec5b1; color: #fff; }
-.example { display: block; margin: 0 auto; border: 1px solid #e6e9ed; border-radius: 10px; padding: 10px 16px; background: #fff; cursor: pointer; font-size: 13px; color: #818999; }
+.example {
+  border: 1px solid #e6e9ed;
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px 16px;
+  color: #818999;
+  font-size: 13px;
+  cursor: pointer;
+  max-width: 560px;
+}
+
 .row { display: flex; }
 .row.user { justify-content: flex-end; }
-.bubble { white-space: pre-wrap; font-family: inherit; margin: 0; padding: 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.65; max-width: 76%; }
-.row.user .bubble { background: #e8f8f5; }
-.row.assistant .bubble { background: #f5f6f9; }
-.activity { font-size: 12px; color: #818999; line-height: 1.9; padding-left: 4px; }
-.composer { border-top: 1px solid #e6e9ed; padding: 14px 20px; background: #fff; }
-.input-box { border: 1px solid #e6e9ed; border-radius: 14px; padding: 10px 12px; }
-.input-box:focus-within { border-color: #2ec5b1; }
-.composer textarea { width: 100%; min-height: 48px; max-height: 160px; border: none; font-size: 14px; outline: none; resize: vertical; box-sizing: border-box; }
-.input-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px; }
-.controls-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.icon-btn { border: 1px solid #e6e9ed; background: #fff; border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 15px; color: #4a5160; flex: none; }
-.icon-btn:hover { border-color: #2ec5b1; color: #2ec5b1; }
-.ctx-wrap { position: relative; }
-.ctx-icon { font-size: 11px; color: #818999; cursor: default; padding: 2px 6px; border-radius: 6px; border: 1px solid #e6e9ed; }
-.ctx-icon.ok { color: #2ec5b1; border-color: #bfeee7; }
-.ctx-icon.warn { color: #d97706; border-color: #fde68a; }
-.ctx-icon.danger { color: #e5484d; border-color: #fecaca; }
-.ctx-panel { position: absolute; bottom: calc(100% + 8px); left: 0; background: #fff; border: 1px solid #e6e9ed; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.12); padding: 12px 14px; width: 260px; z-index: 45; font-size: 12px; }
-.ctx-head { font-weight: 600; margin-bottom: 8px; }
-.ctx-bar { height: 6px; background: #f0f1f5; border-radius: 3px; margin-bottom: 10px; overflow: hidden; }
-.ctx-fill { height: 100%; background: #2ec5b1; border-radius: 3px; }
-.ctx-row { display: flex; justify-content: space-between; padding: 2px 0; color: #4a5160; }
-.project-hint { font-size: 12px; color: #2ec5b1; margin-bottom: 8px; }
-.hint { font-size: 12px; color: #a6adbd; }
-.send { background: #2ec5b1; color: #fff; border: none; border-radius: 50%; width: 36px; height: 36px; cursor: pointer; flex: none; font-size: 16px; line-height: 1; }
-.send.stop { background: #e5484d; }
-.send:disabled { opacity: .6; cursor: default; }
-.model-select { border: 1px solid #e6e9ed; border-radius: 8px; padding: 4px 8px; font-size: 12px; color: #4a5160; background: #fff; }
-.file-hidden { display: none; }
-.attach-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-.chip { font-size: 12px; background: #f0f1f5; border-radius: 6px; padding: 3px 8px; display: inline-flex; align-items: center; gap: 4px; }
-.chip-x { border: none; background: transparent; cursor: pointer; color: #818999; padding: 0 2px; }
+.user-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 76%;
+  min-width: 0;
+}
+.msg-files {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 9px 12px;
+  background: #fff;
+  border: 1px solid #e6e9ed;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.file-card:hover { border-color: #2ec5b1; box-shadow: 0 2px 10px rgba(46, 197, 177, 0.14); }
+.file-card-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #f4f6f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+}
+.file-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.file-card-name {
+  font-size: 13px;
+  color: #2f3033;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-card-meta { font-size: 11px; color: #a6adbd; }
+.user-bubble {
+  white-space: pre-wrap;
+  background: #e8f8f5;
+  border-radius: 14px 14px 4px 14px;
+  padding: 11px 15px;
+  font-size: 14px;
+  line-height: 1.7;
+  max-width: 100%;
+}
+.assistant-block { max-width: 100%; min-width: 0; flex: 1; }
+.assistant-bubble {
+  background: #f7f8fa;
+  border-radius: 4px 14px 14px 14px;
+  padding: 12px 16px;
+  max-width: 100%;
+}
 
-/* 确认弹框 */
-.confirm-mask { position: fixed; inset: 0; background: rgba(20, 24, 34, .45); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.confirm-card { background: #fff; border-radius: 14px; padding: 20px 22px; width: min(520px, 90vw); box-shadow: 0 12px 40px rgba(0,0,0,.18); }
-.confirm-title { font-weight: 700; margin-bottom: 10px; }
-.confirm-body { white-space: pre-wrap; font-family: inherit; background: #f8f9fc; border-radius: 10px; padding: 12px; font-size: 13px; margin: 0 0 14px; }
-.confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
-.confirm-actions button { border: none; border-radius: 8px; padding: 8px 18px; cursor: pointer; font-size: 13px; }
-.confirm-actions .ok { background: #2ec5b1; color: #fff; }
-.confirm-actions .reject { background: #f1f3f7; color: #4a5160; }
+.thinking { margin-bottom: 8px; }
+.thinking-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  color: #818999;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.thinking-icon { color: #2ec5b1; }
+.thinking-chev { color: #b7bdc9; }
+.thinking-body {
+  margin-top: 6px;
+  border-left: 2px solid #e6e9ed;
+  padding: 2px 0 2px 12px;
+}
+.reasoning {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #818999;
+}
+.activity-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #4a5160;
+  padding: 2px 0;
+}
+.activity-state { color: #2ec5b1; width: 12px; }
+.activity-state.error { color: #e5484d; }
+.activity-time { color: #b7bdc9; font-size: 11px; }
+
+.error-banner {
+  margin: 6px 0;
+  background: #fef2f2;
+  color: #b42318;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #818999;
+  font-size: 13px;
+}
+.waiting-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2ec5b1;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+.cursor { color: #2ec5b1; animation: blink 1s step-end infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b7bdc9;
+}
+.msg-time { font-size: 11px; color: #b7bdc9; }
+.stick-btn {
+  position: sticky;
+  bottom: 8px;
+  align-self: center;
+  background: #fff;
+  border: 1px solid #e6e9ed;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: #4a5160;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(20, 24, 34, 0.1);
+}
+
+.composer {
+  flex: none;
+  border-top: 1px solid #e6e9ed;
+  padding: 12px 24px 16px;
+  background: #fff;
+  position: relative;
+}
+.composer-hint { font-size: 11px; color: #a6adbd; margin-bottom: 6px; }
+.input-box {
+  border: 1px solid #e6e9ed;
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fff;
+}
+.input-box:focus-within { border-color: #2ec5b1; }
+.input-box textarea {
+  width: 100%;
+  min-height: 42px;
+  max-height: 160px;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.6;
+  background: transparent;
+}
+.input-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.controls-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.icon-btn {
+  border: 1px solid #e6e9ed;
+  background: #fff;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  color: #4a5160;
+}
+.icon-btn:hover { border-color: #2ec5b1; color: #2ec5b1; }
+.icon-btn:disabled { opacity: 0.5; cursor: default; }
+.project-select { height: 30px; font-size: 12px; max-width: 170px; }
+
+.ctx-wrap { position: relative; }
+.ctx-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #e6e9ed;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #818999;
+  cursor: default;
+  white-space: nowrap;
+}
+.ctx-pill.ok { color: #1f9e8c; border-color: #bfeee7; }
+.ctx-pill.warn { color: #b45309; border-color: #fde68a; }
+.ctx-pill.danger { color: #e5484d; border-color: #fecaca; }
+.ctx-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 260px;
+  background: #fff;
+  border: 1px solid #e6e9ed;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(20, 24, 34, 0.12);
+  padding: 12px 14px;
+  z-index: 45;
+  font-size: 12px;
+}
+.ctx-head { font-weight: 600; margin-bottom: 8px; }
+.ctx-bar { height: 6px; background: #f0f1f5; border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
+.ctx-fill { height: 100%; background: #2ec5b1; }
+.ctx-row { display: flex; justify-content: space-between; padding: 2px 0; color: #4a5160; }
+
+.send {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: #2ec5b1;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+.send.stop { background: #e5484d; font-size: 12px; }
+
+.attach-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #f4f6f9;
+  border: 1px solid #e6e9ed;
+  border-radius: 9px;
+  padding: 5px 8px;
+  max-width: 320px;
+}
+.chip-icon { font-size: 14px; }
+.chip-body { display: flex; flex-direction: column; min-width: 0; }
+.chip-name { font-size: 12px; color: #2f3033; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-meta { font-size: 10px; color: #a6adbd; display: flex; gap: 6px; }
+.chip-warn { color: #b45309; }
+.chip-x { border: none; background: transparent; color: #a6adbd; cursor: pointer; font-size: 14px; padding: 0 2px; }
+
+.file-hidden { display: none; }
+
+.picker-mask { position: fixed; inset: 0; z-index: 40; }
+.picker {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  left: 24px;
+  width: min(440px, calc(100% - 48px));
+  max-height: 420px;
+  background: #fff;
+  border: 1px solid #e6e9ed;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(20, 24, 34, 0.14);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+}
+.picker-head { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid #eef0f4; }
+.picker-search { flex: 1; height: 32px; }
+.picker-body { overflow-y: auto; padding: 6px; }
+.picker-label { font-size: 11px; color: #a6adbd; padding: 8px 8px 4px; }
+.picker-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.picker-item:hover { background: #f7f8fa; }
+.picker-item.picked { background: #e8f8f5; }
+.picker-check { width: 14px; color: #2ec5b1; font-size: 12px; padding-top: 1px; }
+.picker-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.picker-name { font-size: 13px; color: #2f3033; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-meta { font-size: 11px; color: #a6adbd; }
+.picker-empty a { display: block; margin-top: 6px; }
+
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 34, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 70;
+  padding: 24px;
+}
+.confirm-card {
+  width: min(560px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 16px 48px rgba(20, 24, 34, 0.2);
+}
+.confirm-title { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+.confirm-summary { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.confirm-cause { margin-top: 4px; color: #818999; font-size: 12px; }
+.confirm-effects { margin-top: 4px; color: #b45309; font-size: 12px; }
+.confirm-params {
+  margin-top: 12px;
+  background: #f8f9fc;
+  border-radius: 10px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.param-row { display: flex; gap: 10px; padding: 4px 0; font-size: 12px; }
+.param-key { flex: none; width: 92px; color: #818999; }
+.param-value { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, Menlo, monospace; }
+.confirm-timer { margin-top: 10px; font-size: 11px; color: #b7bdc9; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 </style>

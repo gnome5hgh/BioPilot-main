@@ -1,58 +1,127 @@
 <template>
-  <div class="store">
-    <h2>技能</h2>
-    <div class="cards">
-      <div v-for="s in skills" :key="s.name" class="card">
-        <div class="card-name">{{ s.name }} <span class="ver">{{ s.version }}</span>
-          <span class="state" :class="{ on: s.enabled }">{{ s.enabled ? '已启用' : '已禁用' }}</span>
-          <button v-if="auth.role === 'ADMIN'" class="toggle" @click="toggle(s)">
-            {{ s.enabled ? '禁用' : '启用' }}
-          </button>
-        </div>
-        <div class="card-desc">{{ s.description }}</div>
+  <div class="page">
+    <div class="page-head">
+      <div>
+        <h2 class="page-title">技能</h2>
+        <p class="page-sub">技能是 Agent 的工作流程包；卡片写明了触发条件与边界。</p>
+      </div>
+      <div class="toolbar">
+        <input v-model="query" class="input" placeholder="搜索技能" />
       </div>
     </div>
-    <div class="empty" v-if="skills.length === 0">无数据</div>
+
+    <div v-if="loading" class="empty">正在读取技能…</div>
+    <div v-else-if="!visibleSkills.length" class="empty">没有匹配的技能。</div>
+
+    <div v-else class="cards">
+      <article v-for="skill in visibleSkills" :key="skill.name" class="card">
+        <div class="card-head">
+          <span class="card-name">{{ skill.name }}</span>
+          <span v-if="skill.version" class="faint">{{ skill.version }}</span>
+          <span class="badge" :class="skill.enabled ? 'badge-brand' : 'badge-muted'">
+            {{ skill.enabled ? '已启用' : '已禁用' }}
+          </span>
+          <span class="spacer"></span>
+          <button v-if="auth.role === 'ADMIN'" class="btn btn-sm" @click="toggle(skill)">
+            {{ skill.enabled ? '禁用' : '启用' }}
+          </button>
+        </div>
+        <div class="card-desc" :class="{ expanded: expanded.has(skill.name) }">{{ skill.description }}</div>
+        <div class="card-actions">
+          <button v-if="needExpand(skill)" class="btn-link" @click="toggleExpand(skill.name)">
+            {{ expanded.has(skill.name) ? '收起' : '展开全文' }}
+          </button>
+          <span class="spacer"></span>
+          <button class="btn btn-sm" @click="useSkill(skill)">用这个技能发起对话</button>
+        </div>
+      </article>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import http from '../api/auth'
-import { useAuthStore } from '../api/auth'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import http, { useAuthStore } from '../api/auth'
+import { useChatStore } from '../stores/chat'
+import { errText } from '../utils/errors'
+import { toast } from '../utils/toast'
 
 const auth = useAuthStore()
+const chatStore = useChatStore()
+const router = useRouter()
 const skills = ref([])
+const loading = ref(true)
+const query = ref('')
+const expanded = reactive(new Set())
+
+const visibleSkills = computed(() => {
+  const text = query.value.trim().toLowerCase()
+  if (!text) return skills.value
+  return skills.value.filter((skill) =>
+    skill.name.toLowerCase().includes(text)
+    || (skill.description || '').toLowerCase().includes(text))
+})
 
 onMounted(load)
 
 async function load() {
+  loading.value = true
   try {
-    const s = await http.get('/agent/store/skills')
-    skills.value = s.data.skills
-  } catch { /* 请求失败时留空态 */ }
+    const { data } = await http.get('/agent/store/skills')
+    skills.value = data.skills || []
+  } catch (error) {
+    toast(errText(error, '技能清单读取失败'), 'error')
+  } finally {
+    loading.value = false
+  }
 }
 
-// 启停是管理动作（Java 侧 ADMIN 守卫）：切换后重拉清单
-async function toggle(s) {
+function needExpand(skill) {
+  return (skill.description || '').length > 140
+}
+
+function toggleExpand(name) {
+  if (expanded.has(name)) expanded.delete(name)
+  else expanded.add(name)
+}
+
+async function toggle(skill) {
   try {
-    await http.post(`/agent/store/skills/${s.name}/toggle`, { enabled: !s.enabled })
+    await http.post(`/agent/store/skills/${skill.name}/toggle`, { enabled: !skill.enabled })
+    toast(skill.enabled ? '技能已禁用' : '技能已启用', 'success')
     await load()
-  } catch (e) {
-    window.alert(e?.response?.data?.msg || '操作失败')
+  } catch (error) {
+    toast(errText(error, '操作失败'), 'error')
   }
+}
+
+async function useSkill(skill) {
+  chatStore.newDraft()
+  chatStore.pendingPrompt = `请按技能「${skill.name}」的流程完成以下任务：`
+  await router.push('/')
 }
 </script>
 
 <style scoped>
-.store { padding: 24px; }
-.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.card { border: 1px solid #e6e9ed; border-radius: 12px; padding: 16px; }
-.card-name { font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; }
-.ver { font-size: 12px; color: #a6adbd; margin-left: 6px; }
-.state { font-size: 11px; border-radius: 4px; padding: 1px 6px; margin-left: 6px; background: #f0f1f5; color: #818999; }
-.state.on { background: #e8f8f5; color: #2ec5b1; }
-.toggle { margin-left: auto; border: 1px solid #e6e9ed; background: #fff; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
-.card-desc { font-size: 13px; color: #818999; line-height: 1.5; }
-.empty { color: #a6adbd; font-size: 13px; padding: 40px 0; text-align: center; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+}
+.card { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.card-head { display: flex; align-items: center; gap: 8px; }
+.card-name { font-weight: 650; font-size: 14px; }
+.card-desc {
+  font-size: 12.5px;
+  color: #818999;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-desc.expanded { display: block; -webkit-line-clamp: unset; }
+.card-actions { display: flex; align-items: center; gap: 8px; }
 </style>
