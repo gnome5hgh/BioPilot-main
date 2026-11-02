@@ -45,7 +45,7 @@ BioPilot-main/
 
 - 三层调用链：`web/`（5173，Vite 代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 内网代理）→ `biopilot/webapi/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
 - `biopilot/` 是引擎主包；`cli/` 是装配根（`--web` 分流到适配层），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`core/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `core/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-catalog`。
-- `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（启动类 + 控制器）、`bio-modules`（业务域：bio-system / bio-project / bio-catalog / bio-schedule / bio-literature）、`bio-common`（core/web/mybatis/satoken/oss 五个共享模块）。
+- `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（启动类 + 控制器）、`bio-modules`（业务域：bio-system / bio-project / bio-catalog / bio-schedule / bio-literature / bio-citation）、`bio-common`（core/web/net/mybatis/satoken/oss/pdf/mcp 八个共享模块）。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
 - `.biopilot/` 同时是运行时数据根与静态资产根：`skills/` 与 `intent/` 入库，`infra/` 是 docker 数据卷，其余都是运行期产物。
 - `.agents/skills/` 与 `.biopilot/skills/` 是**两条不相干的线**：前者给编码代理用，后者是 BioPilot 运行时的能力包。
@@ -83,7 +83,7 @@ BioPilot-main/
 
 三层平台的分工不是「按语言分」，而是「按职责分」。新增代码前先回答：它属于平台业务，还是 agent 运行时？
 
-- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_paper` 统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、管理端查询（用户/会话/审计读取）。
+- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_paper` 统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）。
 - **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、技能、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、引擎配置（`config.yaml`）。
 - **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_paper` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
 - **单写者规则（按表/列）**：
@@ -96,7 +96,7 @@ BioPilot-main/
   - `bio_user_file`（同名约束表）：Java/Python 都通过数据库唯一键写入，**禁止应用层「先查再插」**。
   - `sys_*`、`bio_project`、`bio_literature_mcp_server`：Java 独占。
 - **表命名规范**：系统表 `sys_<entity>`；BioPilot 业务表 `bio_<domain>_<entity>`，域内用单数实体名（如 `bio_paper`、`bio_file_upload`、`bio_schedule_task`）。平台表 DDL 只在 `server/script/sql/` 与 `docker/mysql-init/` 维护；Python 的 `_SCHEMA` 只建引擎自己的表。
-- **禁止事项**：Java 不实现 agent 编排/记忆/检索/切块/嵌入；Python 不新增平台 CRUD（新增前先判断是否属于 agent 运行时），不自建文献检索/MCP 客户端/调度循环，也不直连 OSS 取平台文件——检索调 `/internal/literature/search`、文件字节调 `/internal/attachments/*`、产物登记调 `/internal/files/artifacts`、定时任务只接收 `/internal/schedule/run`；Web 不直连 8300，全部经 `/api` → Java。
+- **禁止事项**：Java 不实现 agent 编排/记忆/检索/切块/嵌入；Python 不新增平台 CRUD（新增前先判断是否属于 agent 运行时），不自建文献检索/MCP 客户端/调度循环/外部 URL 抓取，也不直连 OSS 取平台文件——检索调 `/internal/literature/search`、PDF 下载调 `/internal/literature/fetch-pdf`（SSRF 与 `%PDF` 校验在 Java `bio-common-net`）、文件字节调 `/internal/attachments/*`、产物登记调 `/internal/files/artifacts`、定时任务只接收 `/internal/schedule/run`；Web 不直连 8300，全部经 `/api` → Java。
 
 ## 硬红线
 
