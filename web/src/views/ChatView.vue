@@ -524,8 +524,8 @@ async function togglePicker() {
   pickerQuery.value = ''
   try {
     const [paperResp, fileResp] = await Promise.all([
-      http.get('/agent/papers'),
-      http.get('/agent/files'),
+      http.get('/papers'),
+      http.get('/files'),
     ])
     papers.value = paperResp.data.papers || []
     dataFiles.value = fileResp.data.files || []
@@ -547,7 +547,7 @@ async function uploadFiles(event) {
       const form = new FormData()
       form.append('file', file)
       try {
-        const { data } = await http.post('/agent/files/upload', form)
+        const { data } = await http.post('/files', form)
         attachments.value.push({ ...data, name: data.name || file.name, size: data.size || file.size })
         toast(`「${file.name}」已上传`, 'success')
       } catch (error) {
@@ -618,7 +618,7 @@ async function send() {
 
   abortController = new AbortController()
   try {
-    const response = await fetch('/api/agent/chat/stream', {
+    const response = await fetch('/api/v1/chat/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -763,7 +763,7 @@ async function answerConfirm(approved) {
   stopConfirmTimer()
   if (!event) return
   try {
-    await fetch('/api/agent/chat/confirm', {
+    await fetch('/api/v1/chat/confirm', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

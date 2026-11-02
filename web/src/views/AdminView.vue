@@ -257,10 +257,10 @@ onMounted(load)
 async function load() {
   try {
     const [userResp, sessionResp, eventResp, loginResp] = await Promise.all([
-      http.get('/admin/api/users'),
-      http.get('/admin/api/sessions'),
-      http.get('/admin/api/audit-events'),
-      http.get('/admin/api/audit'),
+      http.get('/admin/users'),
+      http.get('/admin/conversations'),
+      http.get('/admin/audit/events'),
+      http.get('/admin/audit/login-logs'),
     ])
     users.value = userResp.data.data || []
     sessions.value = sessionResp.data.data || []
@@ -293,7 +293,7 @@ async function toggleStatus(user) {
   })
   if (!ok) return
   try {
-    await http.post(`/admin/api/users/${user.userId}`, { status: next })
+    await http.patch(`/admin/users/${user.userId}`, { status: next })
     toast(next === '1' ? '账号已停用' : '账号已启用', 'success')
     await load()
   } catch (error) {
@@ -312,7 +312,7 @@ async function changeRole(user) {
   })
   if (!ok) return
   try {
-    await http.post(`/admin/api/users/${user.userId}`, { role: next })
+    await http.patch(`/admin/users/${user.userId}`, { role: next })
     toast('角色已更新', 'success')
     await load()
   } catch (error) {
@@ -331,7 +331,7 @@ async function submitReset() {
   if (!reset.user || reset.password.length < 8) return
   reset.saving = true
   try {
-    await http.post(`/admin/api/users/${reset.user.userId}/reset-password`, {
+    await http.put(`/admin/users/${reset.user.userId}/password`, {
       password: reset.password,
     })
     toast('密码已重置，请把新密码交给本人', 'success')

@@ -266,8 +266,8 @@ async function load() {
   loadError.value = ''
   // 两个接口分别成败：一个失败不该把另一个的结果也丢掉，更不能让页面停在默认 0。
   const [statusResp, papersResp] = await Promise.allSettled([
-    http.get('/agent/kb/status', { timeout: 20000 }),
-    http.get('/agent/kb/papers', { params: { filter: 'all' }, timeout: 20000 }),
+    http.get('/kb/status', { timeout: 20000 }),
+    http.get('/kb/papers', { params: { filter: 'all' }, timeout: 20000 }),
   ])
   if (statusResp.status === 'fulfilled') Object.assign(status, statusResp.value.data)
   if (papersResp.status === 'fulfilled') {
@@ -318,7 +318,7 @@ async function addSelected() {
   const ids = [...outSelected]
   if (!ids.length) return
   try {
-    await http.post('/agent/kb/papers/add', { ids })
+    await http.post('/kb/papers', { ids })
     toast(`已加入 ${ids.length} 篇，正在后台索引`, 'success')
     outSelected.clear()
     await load()
@@ -336,7 +336,7 @@ async function removeKb(paper) {
   })
   if (!ok) return
   try {
-    await http.post('/agent/kb/papers/remove', { ids: [paper.id] })
+    await http.delete('/kb/papers', { data: { ids: [paper.id] } })
     toast('已移出知识库（文件保留）', 'success')
     await load()
   } catch (error) {
@@ -346,7 +346,7 @@ async function removeKb(paper) {
 
 async function retry(paper) {
   try {
-    await http.post('/agent/kb/papers/retry', { ids: [paper.id] })
+    await http.post('/kb/papers/retry', { ids: [paper.id] })
     toast('已重新排队索引', 'success')
     await load()
   } catch (error) {
@@ -363,7 +363,7 @@ async function rebuildAll() {
   })
   if (!ok) return
   try {
-    await http.post('/agent/kb/reindex?force=true', {})
+    await http.post('/kb/reindex?force=true', {})
     toast('已开始重建，进度会自动刷新', 'success')
     await load()
   } catch (error) {
@@ -377,7 +377,7 @@ async function showChunks(paper) {
   chunks.items = []
   chunks.paper = paper
   try {
-    const { data } = await http.get(`/agent/kb/papers/${paper.id}/chunks`)
+    const { data } = await http.get(`/kb/papers/${paper.id}/chunks`)
     chunks.items = data.chunks || []
   } catch (error) {
     toast(errText(error, '分块读取失败'), 'error')
@@ -393,7 +393,7 @@ async function runSearch() {
   searchError.value = ''
   searchRan.value = true
   try {
-    const { data } = await http.post('/agent/kb/search', { query, top_k: topK.value })
+    const { data } = await http.post('/kb/search', { query, top_k: topK.value })
     searchResults.value = data.results || []
     searchMeta.value = { elapsed_ms: data.elapsed_ms, query: data.query }
   } catch (error) {

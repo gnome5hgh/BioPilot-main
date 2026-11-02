@@ -30,9 +30,9 @@ web/src/
 
 ## 硬规则
 
-- **SSE 用 fetch 流式读**（axios 不支持流式读取）：`/api/agent/chat/stream` 的帧契约是 `content`/`reasoning`/`tool_start`/`tool_end`/`confirm`/`done`/`error`，**`done` 恒发**——以它收尾才允许复用连接；断开即视为取消（重连重发），不做断点续传。
+- **SSE 用 fetch 流式读**（axios 不支持流式读取）：`/api/v1/chat/stream` 的帧契约是 `content`/`reasoning`/`tool_start`/`tool_end`/`confirm`/`done`/`error`，**`done` 恒发**——以它收尾才允许复用连接；断开即视为取消（重连重发），不做断点续传。
 - **思考过程不落库**：`reasoning` 帧只实时追加到当前回答上方；历史会话只回放最终回答，不要在前端自行持久化思维链。
-- **确认弹框**：收到 `confirm` 帧暂停渲染后续 token，展示 `tool_name/risk_level/cause/side_effects/params` 后由用户裁决，POST `/api/agent/chat/confirm` 回传；300 秒无操作服务端自动拒绝，前端倒计时只作展示。
+- **确认弹框**：收到 `confirm` 帧暂停渲染后续 token，展示 `tool_name/risk_level/cause/side_effects/params` 后由用户裁决，POST `/api/v1/chat/confirm` 回传；300 秒无操作服务端自动拒绝，前端倒计时只作展示。
 - **会话标识**：`conversation_id` 由前端生成（`crypto.randomUUID()`）并经 `X-Conversation-Id` 头携带；换会话必须换 id，不复用。会话归属只在草稿态可选（发送后只读）。
 - **上传**：multipart `FormData` 直接交给 axios（**不要手动设 Content-Type**，会丢 boundary）；PDF ≤200MB、其他文件 ≤100MB；同名文件由后端 409 拦截，前端只展示原因。
 - **预览/下载**：带 `satoken` fetch 成 blob 再预览或触发下载；不要拼裸 URL 直接 `window.open`（会丢鉴权头）。预览统一走 `components/FilePreviewModal.vue` + `utils/files.js`，新页面不要复制一套 fetch/objectURL/类型分流逻辑。
@@ -42,7 +42,7 @@ web/src/
 - **终端面板是全局单例**：`TerminalPanel` 挂在 `MainLayout`，关闭只隐藏；服务端按 `user_id`
   复用同一条 shell，切换会话看到的必须是同一份终端内容。客户端输入用 JSON 帧
   （`input`/`resize`），服务端回原始输出；不要为每个会话/页面新建终端。
-- 终端是否可用读 `/agent/terminal/config`；`runtime.allow_host_shell=false` 时展示提示，
+- 终端是否可用读 `/api/v1/terminal/config`；`runtime.allow_host_shell=false` 时展示提示，
   不要偷偷回退到别的执行通道。宿主 shell 拥有服务账号权限，共享部署保持关闭。
 
 ## 常用命令

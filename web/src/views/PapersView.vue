@@ -320,9 +320,9 @@ async function load() {
   loading.value = true
   try {
     const [paperResp, fileResp, docResp] = await Promise.all([
-      http.get('/agent/papers'),
-      http.get('/agent/files'),
-      http.get('/agent/documents'),
+      http.get('/papers'),
+      http.get('/files'),
+      http.get('/documents'),
     ])
     papers.value = paperResp.data.papers || []
     files.value = fileResp.data.files || []
@@ -407,20 +407,20 @@ async function uploadList(list) {
       try {
         if (lower.endsWith('.md')) {
           const content = await file.text()
-          await http.post('/agent/documents', { name: file.name, content })
+          await http.post('/documents', { name: file.name, content })
           toast(`文档「${file.name}」已创建`, 'success')
         } else if (lower.endsWith('.pdf')) {
           const form = new FormData()
           form.append('file', file)
           form.append('add_to_kb', addToKb.value ? 'true' : 'false')
-          await http.post('/agent/papers/upload', form)
+          await http.post('/papers', form)
           toast(addToKb.value
             ? `论文「${file.name}」已上传，正在后台索引`
             : `论文「${file.name}」已加入文件管理（未加入知识库）`, 'success')
         } else {
           const form = new FormData()
           form.append('file', file)
-          await http.post('/agent/files/upload', form)
+          await http.post('/files', form)
           toast(`数据文件「${file.name}」已上传`, 'success')
         }
       } catch (error) {
@@ -436,7 +436,7 @@ async function uploadList(list) {
 
 async function addKb(row) {
   try {
-    await http.post('/agent/kb/papers/add', { ids: [row.id] })
+    await http.post('/kb/papers', { ids: [row.id] })
     toast('已加入知识库，正在后台索引', 'success')
     await load()
   } catch (error) {
@@ -453,7 +453,7 @@ async function removeKb(row) {
   })
   if (!ok) return
   try {
-    await http.post('/agent/kb/papers/remove', { ids: [row.id] })
+    await http.delete('/kb/papers', { data: { ids: [row.id] } })
     toast('已移出知识库（文件保留）', 'success')
     await load()
   } catch (error) {
@@ -464,7 +464,7 @@ async function removeKb(row) {
 async function addCitation(row) {
   citing.value = row.id
   try {
-    await http.post('/agent/citations/from-paper', { paper_id: row.id })
+    await http.post('/citations/from-paper', { paper_id: row.id })
     toast('已加入引用库（可在引用库页面复制格式）', 'success')
     await load()
   } catch (error) {
@@ -483,7 +483,7 @@ async function removeCitation(row) {
   })
   if (!ok) return
   try {
-    await http.post('/agent/citations/remove-by-paper', { paper_id: row.id })
+    await http.delete(`/citations/by-paper/${row.id}`)
     toast('已移出引用库', 'success')
     await load()
   } catch (error) {
@@ -505,7 +505,7 @@ async function saveMeta() {
   if (!metaEditing.value) return
   savingMeta.value = true
   try {
-    await http.patch(`/agent/papers/${metaEditing.value.id}`, {
+    await http.patch(`/papers/${metaEditing.value.id}`, {
       title: metaEditing.value.title,
       authors: metaEditing.value.authors,
       year: metaEditing.value.year,
@@ -522,7 +522,7 @@ async function saveMeta() {
 }
 
 async function retryKb(row) {  try {
-    await http.post('/agent/kb/papers/retry', { ids: [row.id] })
+    await http.post('/kb/papers/retry', { ids: [row.id] })
     toast('已重新排队索引', 'success')
     await load()
   } catch (error) {
@@ -536,7 +536,7 @@ async function showChunks(row) {
   chunks.items = []
   chunks.paper = row.raw
   try {
-    const { data } = await http.get(`/agent/kb/papers/${row.id}/chunks`)
+    const { data } = await http.get(`/kb/papers/${row.id}/chunks`)
     chunks.items = data.chunks || []
     chunks.paper = data.paper || row.raw
   } catch (error) {
@@ -561,9 +561,9 @@ async function removeRow(row) {
 
 async function deleteOne(row) {
   const urls = {
-    paper: `/agent/papers/${row.id}`,
-    file: `/agent/files/${row.id}`,
-    doc: `/agent/documents/${row.id}`,
+    paper: `/papers/${row.id}`,
+    file: `/files/${row.id}`,
+    doc: `/documents/${row.id}`,
   }
   try {
     await http.delete(urls[row.kind])
@@ -597,7 +597,7 @@ function newDoc() {
 
 async function openDoc(row) {
   try {
-    const { data } = await http.get(`/agent/documents/${row.id}`)
+    const { data } = await http.get(`/documents/${row.id}`)
     editing.value = { id: data.id, name: data.name, content: data.content || '' }
     editingOrigin.value = { name: data.name, content: data.content || '' }
     docPreview.value = false
@@ -630,12 +630,12 @@ async function saveDoc() {
   saving.value = true
   try {
     if (editing.value.id) {
-      await http.put(`/agent/documents/${editing.value.id}`, {
+      await http.put(`/documents/${editing.value.id}`, {
         name: editing.value.name,
         content: editing.value.content,
       })
     } else {
-      const { data } = await http.post('/agent/documents', {
+      const { data } = await http.post('/documents', {
         name: editing.value.name || '新文档.md',
         content: editing.value.content,
       })

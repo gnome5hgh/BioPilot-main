@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { defineStore } from 'pinia'
 
-const http = axios.create({ baseURL: '/api' })
+const http = axios.create({ baseURL: '/api/v1' })
 
 /** 登录态存储：token 持久化到 localStorage（登出清除）。 */
 export const useAuthStore = defineStore('auth', {

@@ -149,7 +149,7 @@ onMounted(load)
 
 async function load() {
   try {
-    const { data } = await http.get('/agent/settings')
+    const { data } = await http.get('/admin/settings')
     intentEnabled.value = Boolean(data.intent_enabled)
     confirmAbove.value = data.confirm_above || 'medium'
   } catch (error) {
@@ -161,7 +161,7 @@ async function load() {
 async function save() {
   saving.value = true
   try {
-    await http.post('/agent/settings', {
+    await http.patch('/admin/settings', {
       intent_enabled: intentEnabled.value,
       confirm_above: confirmAbove.value,
     })
@@ -175,7 +175,7 @@ async function save() {
 
 async function loadMcp() {
   try {
-    const { data } = await http.get('/agent/admin/mcp-servers')
+    const { data } = await http.get('/admin/literature/sources')
     mcpServers.value = data.data || []
   } catch (error) {
     toast(errText(error, '检索源读取失败'), 'error')
@@ -184,7 +184,7 @@ async function loadMcp() {
 
 async function loadMcpStatus() {
   try {
-    const { data } = await http.get('/agent/admin/mcp-servers/status')
+    const { data } = await http.get('/admin/literature/sources/status')
     mcpStatuses.value = data.data || {}
   } catch {
     mcpStatuses.value = {}
@@ -264,9 +264,9 @@ async function saveMcp() {
   mcpSaving.value = true
   try {
     if (mcpForm.id) {
-      await http.put(`/agent/admin/mcp-servers/${mcpForm.id}`, body)
+      await http.put(`/admin/literature/sources/${mcpForm.id}`, body)
     } else {
-      await http.post('/agent/admin/mcp-servers', body)
+      await http.post('/admin/literature/sources', body)
     }
     mcpForm.open = false
     toast('检索源已保存，正在重连', 'success')
@@ -280,7 +280,7 @@ async function saveMcp() {
 
 async function testMcp(server) {
   try {
-    const { data } = await http.post(`/agent/admin/mcp-servers/${server.id}/test`)
+    const { data } = await http.post(`/admin/literature/sources/${server.id}/test`)
     const status = data.data
     mcpStatuses.value = { ...mcpStatuses.value, [server.name]: status }
     toast(status.state === 'CONNECTED'
@@ -293,7 +293,7 @@ async function testMcp(server) {
 
 async function toggleMcp(server) {
   try {
-    await http.put(`/agent/admin/mcp-servers/${server.id}`,
+    await http.put(`/admin/literature/sources/${server.id}`,
       payload(server, { enabled: !server.enabled }))
     await Promise.all([loadMcp(), loadMcpStatus()])
   } catch (error) {
@@ -304,7 +304,7 @@ async function toggleMcp(server) {
 async function removeMcp(server) {
   if (!window.confirm(`删除检索源 ${server.name}？`)) return
   try {
-    await http.delete(`/agent/admin/mcp-servers/${server.id}`)
+    await http.delete(`/admin/literature/sources/${server.id}`)
     await Promise.all([loadMcp(), loadMcpStatus()])
     toast('已删除', 'success')
   } catch (error) {

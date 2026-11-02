@@ -58,7 +58,7 @@ export const useChatStore = defineStore('chat', {
     async loadSessions() {
       this.loadingSessions = true
       try {
-        const { data } = await http.get('/sessions', { params: { limit: 200 } })
+        const { data } = await http.get('/conversations', { params: { limit: 200 } })
         this.sessions = data.data || []
       } catch {
         // 列表拿不到时保持已有数据，不把页面变成空
@@ -69,7 +69,7 @@ export const useChatStore = defineStore('chat', {
 
     async loadProjects() {
       try {
-        const { data } = await http.get('/project')
+        const { data } = await http.get('/projects')
         this.projects = data.data || []
       } catch {
         this.projects = []
@@ -78,7 +78,7 @@ export const useChatStore = defineStore('chat', {
 
     async loadModels() {
       try {
-        const { data } = await http.get('/agent/models')
+        const { data } = await http.get('/models')
         this.models = data.models || []
         this.selectedModel = data.selected || data.models?.[0]?.name || ''
       } catch {
@@ -133,9 +133,9 @@ export const useChatStore = defineStore('chat', {
       this.draftTitle = ''
       this.loadingHistory = true
       try {
-        const { data } = await http.get('/agent/chat/history', {
-          params: { conversationId: session.agent_id },
-        })
+        const { data } = await http.get(
+          `/conversations/${encodeURIComponent(session.agent_id)}/messages`,
+        )
         this.messages = (data.messages || []).map((message) => ({
           role: message.role,
           text: message.content || '',
@@ -156,9 +156,9 @@ export const useChatStore = defineStore('chat', {
     async refreshUsage() {
       if (!this.currentId) return
       try {
-        const { data } = await http.get('/agent/chat/context-usage', {
-          params: { conversationId: this.currentId },
-        })
+        const { data } = await http.get(
+          `/conversations/${encodeURIComponent(this.currentId)}/context-usage`,
+        )
         this.usage = data.usage
       } catch {
         // 用量只是辅助信息，失败静默
@@ -167,9 +167,7 @@ export const useChatStore = defineStore('chat', {
 
     /** 删除会话；删的是当前会话时回到空白草稿（不保留项目归属）。 */
     async deleteSession(session) {
-      await http.delete('/agent/chat/session', {
-        params: { conversationId: session.agent_id },
-      })
+      await http.delete(`/conversations/${encodeURIComponent(session.agent_id)}`)
       this.sessions = this.sessions.filter((item) => item.agent_id !== session.agent_id)
       if (session.agent_id === this.currentId) {
         this.newDraft()
@@ -179,18 +177,18 @@ export const useChatStore = defineStore('chat', {
     async createProject(name) {
       const trimmed = (name || '').trim()
       if (!trimmed) return null
-      const { data } = await http.post('/project', { name: trimmed })
+      const { data } = await http.post('/projects', { name: trimmed })
       await this.loadProjects()
       return data.data
     },
 
     async renameProject(projectId, name) {
-      await http.put(`/project/${projectId}`, { name })
+      await http.patch(`/projects/${projectId}`, { name })
       await this.loadProjects()
     },
 
     async deleteProject(projectId) {
-      await http.delete(`/project/${projectId}`)
+      await http.delete(`/projects/${projectId}`)
       this.projects = this.projects.filter((item) => item.projectId !== projectId)
       if (this.currentProjectId === projectId) this.currentProjectId = ''
       await this.loadSessions()
@@ -202,7 +200,7 @@ export const useChatStore = defineStore('chat', {
 
     async selectModel(name) {
       this.selectedModel = name
-      await http.post('/agent/models/select', { name })
+      await http.put('/models/selection', { name })
     },
   },
 })

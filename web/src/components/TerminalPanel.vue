@@ -96,7 +96,7 @@ watch(() => store.enabled, async (enabled) => {
 
 async function loadConfig() {
   try {
-    const { data } = await http.get('/agent/terminal/config')
+    const { data } = await http.get('/terminal/config')
     store.setConfig(data)
   } catch {
     // 配置读不到时仍允许尝试连接；WS 会给出最终裁决
@@ -193,7 +193,7 @@ async function restart() {
   })
   if (!ok) return
   try {
-    await http.post('/agent/terminal/restart')
+    await http.post('/terminal/restart')
     closeSocket()
     term?.reset()
     disconnected.value = false

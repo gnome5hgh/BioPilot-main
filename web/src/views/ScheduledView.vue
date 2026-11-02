@@ -92,8 +92,8 @@ onMounted(load)
 async function load() {
   try {
     const [scheduleResp, sessionResp] = await Promise.all([
-      http.get('/agent/schedules'),
-      http.get('/sessions', { params: { limit: 100 } }),
+      http.get('/schedules'),
+      http.get('/conversations', { params: { limit: 100 } }),
     ])
     schedules.value = scheduleResp.data.schedules || []
     sessions.value = sessionResp.data.data || []
@@ -122,7 +122,7 @@ async function create() {
     return
   }
   try {
-    await http.post('/agent/schedules', {
+    await http.post('/schedules', {
       name: name.value,
       task: task.value,
       conversation_id: conversationId.value,
@@ -140,7 +140,7 @@ async function create() {
 async function runNow(item) {
   acting.value = item.id
   try {
-    await http.post(`/agent/schedules/${item.id}/run`)
+    await http.post(`/schedules/${item.id}/run`)
     toast('已加入立即执行队列，最多 60 秒后开始', 'success')
   } catch (error) {
     toast(errText(error, '触发失败'), 'error')
@@ -152,7 +152,7 @@ async function runNow(item) {
 async function toggle(item) {
   acting.value = item.id
   try {
-    await http.post(`/agent/schedules/${item.id}/${item.paused ? 'resume' : 'pause'}`)
+    await http.patch(`/schedules/${item.id}`, { paused: !item.paused })
     toast(item.paused ? '任务已恢复' : '任务已暂停', 'success')
     await load()
   } catch (error) {
@@ -173,7 +173,7 @@ async function del(item) {
   if (!ok) return
   acting.value = item.id
   try {
-    await http.delete(`/agent/schedules/${item.id}`)
+    await http.delete(`/schedules/${item.id}`)
     toast('定时任务已删除', 'success')
     await load()
   } catch (error) {

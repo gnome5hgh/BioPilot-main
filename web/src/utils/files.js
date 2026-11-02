@@ -12,7 +12,7 @@ const TOKEN_KEY = 'biopilot_token'
  */
 export function fileContentUrl(kind, id, download = false) {
   const base = kind === 'paper' ? 'papers' : 'files'
-  return `/api/agent/${base}/${id}/file${download ? '?download=true' : ''}`
+  return `/api/v1/${base}/${id}/content${download ? '?download=true' : ''}`
 }
 
 /**

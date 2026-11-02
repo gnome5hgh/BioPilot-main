@@ -79,7 +79,7 @@ async function search() {
   error.value = ''
   searched.value = true
   try {
-    const { data } = await http.get('/agent/literature/search', { params: { q: text } })
+    const { data } = await http.get('/literature/search', { params: { q: text } })
     results.value = data.results || []
     if (data.error) error.value = '检索服务暂时不可用，请稍后重试。'
   } catch (err) {
@@ -99,7 +99,7 @@ function shortAuthors(authors) {
 async function importPaper(item) {
   importing.value = item.id
   try {
-    const { data } = await http.post('/agent/literature/import', item)
+    const { data } = await http.post('/literature/import', item)
     imported[item.id] = data.paper_id
     toast('已加入文件管理（未加入知识库），可在文件管理中预览或加入知识库', 'success', 4200)
   } catch (err) {

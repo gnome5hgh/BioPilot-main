@@ -67,7 +67,7 @@ onMounted(load)
 async function load() {
   loading.value = true
   try {
-    const { data } = await http.get('/agent/citations', { params: { q: query.value } })
+    const { data } = await http.get('/citations', { params: { q: query.value } })
     items.value = data.entries || []
   } catch (error) {
     toast(errText(error, '引用库读取失败'), 'error')
@@ -79,7 +79,7 @@ async function load() {
 async function copy(item) {
   currentItem.value = item
   try {
-    const { data } = await http.post('/agent/citations/format', {
+    const { data } = await http.post('/citations/format', {
       keys: [item.key],
       style: format.value,
     })
@@ -101,7 +101,7 @@ async function remove(item) {
   })
   if (!ok) return
   try {
-    await http.delete(`/agent/citations/${encodeURIComponent(item.key)}`)
+    await http.delete(`/citations/${encodeURIComponent(item.key)}`)
     toast('引用条目已删除', 'success')
     await load()
   } catch (error) {
@@ -111,7 +111,7 @@ async function remove(item) {
 
 async function exportBib() {
   try {
-    const { data } = await http.get('/agent/citations/export')
+    const { data } = await http.get('/citations/export')
     const blob = new Blob([data.text || ''], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
