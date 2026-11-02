@@ -33,7 +33,8 @@ public class SaTokenConfigure implements WebMvcConfigurer {
                 .addInclude("/**")
                 // /internal/** 是引擎内部调用，没有浏览器登录态；由 InternalTokenFilter
                 // 单独校验内部 token 与 X-User-Id，不能只靠这里的排除。
-                .addExclude("/health", "/auth/login", "/auth/register", "/error", "/internal/**")
+                .addExclude("/health", "/api/v1/auth/login", "/api/v1/auth/register",
+                        "/error", "/internal/**")
                 .setAuth(obj -> StpUtil.checkLogin())
                 .setError(e -> {
                     try {

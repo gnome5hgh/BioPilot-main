@@ -19,4 +19,4 @@
 
 ## Dependencies And Collaboration
 
-- 被 `bio-catalog`（上传/登记）与 `bio-citation`（from-paper）使用。
+- 被 `bio-file`（上传/登记）与 `bio-citation`（from-paper）使用。

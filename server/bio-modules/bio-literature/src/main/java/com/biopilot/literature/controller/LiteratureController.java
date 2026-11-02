@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 文献搜索与导入（路径与响应结构保持前端既有契约）。 */
 @RestController
-@RequestMapping("/agent/literature")
+@RequestMapping("/api/v1/literature")
 public class LiteratureController {
 
     private final LiteratureSearchService searchService;

@@ -6,6 +6,7 @@ import com.biopilot.literature.domain.LiteratureSearchResult;
 import com.biopilot.literature.domain.PaperCandidate;
 import com.biopilot.literature.domain.SearchQuery;
 import com.biopilot.literature.service.LiteratureSearchService;
+import com.biopilot.literature.service.impl.LiteratureSearchServiceImpl;
 import com.biopilot.literature.service.provider.LiteratureProvider;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class LiteratureSearchServiceTest {
                 List.of(paper("1", "10.1/x", "T1"), paper("2", "10.1/y", "T2")));
         LiteratureProvider p2 = new FakeProvider("b",
                 List.of(paper("3", "10.1/x", "T1 duplicate"), paper("4", "", "T3")));
-        LiteratureSearchService service = new LiteratureSearchService(List.of(p1, p2));
+        LiteratureSearchService service = new LiteratureSearchServiceImpl(List.of(p1, p2));
 
         LiteratureSearchResult result = service.searchForAgent(
                 new SearchQuery("q", List.of(), null, null, 2));
@@ -48,7 +49,7 @@ class LiteratureSearchServiceTest {
                 throw new IllegalStateException("timeout");
             }
         };
-        LiteratureSearchService service = new LiteratureSearchService(List.of(ok, bad));
+        LiteratureSearchService service = new LiteratureSearchServiceImpl(List.of(ok, bad));
 
         LiteratureSearchResult result = service.searchForAgent(
                 new SearchQuery("q", List.of(), null, null, 10));
@@ -60,7 +61,7 @@ class LiteratureSearchServiceTest {
 
     @Test
     void unknownSourceReturnsError() {
-        LiteratureSearchService service = new LiteratureSearchService(
+        LiteratureSearchService service = new LiteratureSearchServiceImpl(
                 List.of(new FakeProvider("ok", List.of())));
         LiteratureSearchResult result = service.searchForAgent(
                 new SearchQuery("q", List.of("missing"), null, null, 10));

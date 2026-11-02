@@ -9,7 +9,7 @@
 
 - 角色：`business-domain`
 - 职责：`bio_citation` 行 + `bio_paper.citation_id` 的单向关联；加入/移出/论文删除/书目变更的联动。
-- 不写 `bio_paper` 的索引状态列（归 `bio-catalog` 的 `KbStateService`）；不参与 RAG 索引与检索。
+- 不写 `bio_paper` 的索引状态列（归 `bio-kb` 的 `KbStateService`）；不参与 RAG 索引与检索。
 
 ## Core Logic
 
@@ -22,5 +22,5 @@
 
 ## Dependencies And Collaboration
 
-- 依赖 `bio-catalog`（论文查询与 Hook 契约）、`bio-common-pdf`、`bio-common-oss`。
-- 被 `bio-admin` 聚合启动；前端路径保持 `/agent/citations/*`。
+- 依赖 `bio-file`（论文查询与 Hook 契约）、`bio-common-pdf`、`bio-common-oss`。
+- 被 `bio-admin` 聚合启动；前端路径 `/api/v1/citations/*`。

@@ -13,7 +13,7 @@
   <dependencies>
     <dependency>
       <groupId>com.biopilot</groupId>
-      <artifactId>bio-catalog</artifactId>
+      <artifactId>bio-file</artifactId>
     </dependency>
     <dependency>
       <groupId>com.biopilot</groupId>

@@ -103,9 +103,9 @@ class CatalogFlowTest {
     }
 
     private String tokenFor(String userName) {
-        rest.postForEntity("/auth/register",
+        rest.postForEntity("/api/v1/auth/register",
                 Map.of("userName", userName, "password", "secret123", "nickName", userName), Map.class);
-        ResponseEntity<Map> login = rest.postForEntity("/auth/login",
+        ResponseEntity<Map> login = rest.postForEntity("/api/v1/auth/login",
                 Map.of("userName", userName, "password", "secret123"), Map.class);
         return (String) ((Map) login.getBody().get("data")).get("token");
     }
@@ -142,39 +142,39 @@ class CatalogFlowTest {
     @Order(1)
     void paper_upload_list_duplicate_delete() {
         String token = tokenFor("catalog-user");
-        ResponseEntity<Map> uploaded = upload(token, "/agent/papers/upload",
+        ResponseEntity<Map> uploaded = upload(token, "/api/v1/papers",
                 "paper.pdf", "%PDF-1.4 test", Map.of("add_to_kb", "true"));
         assertThat(uploaded.getStatusCode().value()).isEqualTo(200);
         assertThat(uploaded.getBody().get("file_name")).isEqualTo("paper.pdf");
         String paperId = (String) uploaded.getBody().get("id");
         verify(internal, org.mockito.Mockito.atLeastOnce()).kbSync(anyLong());
 
-        List<Map<String, Object>> papers = list(token, "/agent/papers", "papers");
+        List<Map<String, Object>> papers = list(token, "/api/v1/papers", "papers");
         assertThat(papers).hasSize(1);
         assertThat(papers.get(0).get("kb_enabled")).isEqualTo(1);
         assertThat(papers.get(0).get("title")).isEqualTo("");
 
-        ResponseEntity<Map> duplicate = upload(token, "/agent/papers/upload",
+        ResponseEntity<Map> duplicate = upload(token, "/api/v1/papers",
                 "paper.pdf", "%PDF-1.4 other", Map.of());
         assertThat(duplicate.getStatusCode().value()).isEqualTo(409);
 
-        ResponseEntity<Map> deleted = rest.exchange("/agent/papers/" + paperId,
+        ResponseEntity<Map> deleted = rest.exchange("/api/v1/papers/" + paperId,
                 HttpMethod.DELETE, new HttpEntity<>(authHeaders(token)), Map.class);
         assertThat((String) deleted.getBody().get("status")).isEqualTo("ok");
         verify(internal, org.mockito.Mockito.atLeastOnce()).kbSync(anyLong());
-        assertThat(list(token, "/agent/papers", "papers")).isEmpty();
+        assertThat(list(token, "/api/v1/papers", "papers")).isEmpty();
     }
 
     @Test
     @Order(2)
     void data_file_upload_is_listed() {
         String token = tokenFor("catalog-file");
-        ResponseEntity<Map> uploaded = upload(token, "/agent/files/upload",
+        ResponseEntity<Map> uploaded = upload(token, "/api/v1/files",
                 "counts.csv", "a,b\n1,2\n", Map.of());
         assertThat(uploaded.getStatusCode().value()).isEqualTo(200);
         assertThat(uploaded.getBody().get("name")).isEqualTo("counts.csv");
 
-        List<Map<String, Object>> files = list(token, "/agent/files", "files");
+        List<Map<String, Object>> files = list(token, "/api/v1/files", "files");
         assertThat(files).hasSize(1);
         assertThat(files.get(0).get("name")).isEqualTo("counts.csv");
     }
@@ -185,25 +185,25 @@ class CatalogFlowTest {
         String token = tokenFor("catalog-doc");
         HttpHeaders headers = authHeaders(token);
         headers.setContentType(MediaType.APPLICATION_JSON);
-        ResponseEntity<Map> created = rest.exchange("/agent/documents", HttpMethod.POST,
+        ResponseEntity<Map> created = rest.exchange("/api/v1/documents", HttpMethod.POST,
                 new HttpEntity<>(Map.of("name", "笔记.md", "content", "初始内容"), headers), Map.class);
         assertThat((String) created.getBody().get("status")).isEqualTo("ok");
         String docId = (String) created.getBody().get("id");
 
-        ResponseEntity<Map> fetched = rest.exchange("/agent/documents/" + docId,
+        ResponseEntity<Map> fetched = rest.exchange("/api/v1/documents/" + docId,
                 HttpMethod.GET, new HttpEntity<>(headers), Map.class);
         assertThat(fetched.getBody().get("name")).isEqualTo("笔记.md");
         assertThat(fetched.getBody().get("content")).isEqualTo("正文");
 
-        ResponseEntity<Map> saved = rest.exchange("/agent/documents/" + docId, HttpMethod.PUT,
+        ResponseEntity<Map> saved = rest.exchange("/api/v1/documents/" + docId, HttpMethod.PUT,
                 new HttpEntity<>(Map.of("content", "改后的内容"), headers), Map.class);
         assertThat((String) saved.getBody().get("status")).isEqualTo("ok");
         verify(minio, org.mockito.Mockito.atLeast(2))
                 .putObject(anyString(), org.mockito.ArgumentMatchers.any(byte[].class), anyString());
 
-        rest.exchange("/agent/documents/" + docId, HttpMethod.DELETE,
+        rest.exchange("/api/v1/documents/" + docId, HttpMethod.DELETE,
                 new HttpEntity<>(headers), Map.class);
-        assertThat(list(token, "/agent/documents", "documents")).isEmpty();
+        assertThat(list(token, "/api/v1/documents", "documents")).isEmpty();
     }
 
     @Test
@@ -211,14 +211,14 @@ class CatalogFlowTest {
     void papers_are_isolated_per_user() {
         String owner = tokenFor("catalog-owner");
         String other = tokenFor("catalog-other");
-        upload(owner, "/agent/papers/upload", "owner.pdf", "%PDF-1.4 owner", Map.of());
-        String paperId = (String) list(owner, "/agent/papers", "papers").get(0).get("id");
+        upload(owner, "/api/v1/papers", "owner.pdf", "%PDF-1.4 owner", Map.of());
+        String paperId = (String) list(owner, "/api/v1/papers", "papers").get(0).get("id");
 
-        assertThat(list(other, "/agent/papers", "papers")).isEmpty();
-        ResponseEntity<Map> foreignDelete = rest.exchange("/agent/papers/" + paperId,
+        assertThat(list(other, "/api/v1/papers", "papers")).isEmpty();
+        ResponseEntity<Map> foreignDelete = rest.exchange("/api/v1/papers/" + paperId,
                 HttpMethod.DELETE, new HttpEntity<>(authHeaders(other)), Map.class);
         assertThat(foreignDelete.getStatusCode().value()).isEqualTo(404);
-        assertThat(list(owner, "/agent/papers", "papers")).hasSize(1);
+        assertThat(list(owner, "/api/v1/papers", "papers")).hasSize(1);
     }
 
     @Test
@@ -240,7 +240,7 @@ class CatalogFlowTest {
         insertKbPaper("k3", uid, 1, "failed", null, 0);
         insertKbPaper("k4", uid, 0, "indexed", "2026-01-03T00:00:00Z", 9);
 
-        ResponseEntity<Map> response = rest.exchange("/agent/kb/status", HttpMethod.GET,
+        ResponseEntity<Map> response = rest.exchange("/api/v1/kb/status", HttpMethod.GET,
                 new HttpEntity<>(authHeaders(token)), Map.class);
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         Map body = response.getBody();
@@ -258,7 +258,7 @@ class CatalogFlowTest {
         assertThat(body.get("running")).isEqualTo(true);
 
         String other = tokenFor("catalog-kb-other");
-        ResponseEntity<Map> isolated = rest.exchange("/agent/kb/status", HttpMethod.GET,
+        ResponseEntity<Map> isolated = rest.exchange("/api/v1/kb/status", HttpMethod.GET,
                 new HttpEntity<>(authHeaders(other)), Map.class);
         assertThat(isolated.getBody().get("total_papers")).isEqualTo(0);
         assertThat(isolated.getBody().get("kb_enabled")).isEqualTo(0);

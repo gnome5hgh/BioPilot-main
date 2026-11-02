@@ -50,7 +50,7 @@ class AuthFlowTest {
 
     @SuppressWarnings("unchecked")
     private String loginAndGetToken(String userName, String password) {
-        ResponseEntity<Map> r = post("/auth/login", Map.of("userName", userName, "password", password));
+        ResponseEntity<Map> r = post("/api/v1/auth/login", Map.of("userName", userName, "password", password));
         assertThat((Integer) r.getBody().get("code")).isEqualTo(200);
         return (String) ((Map) r.getBody().get("data")).get("token");
     }
@@ -65,24 +65,24 @@ class AuthFlowTest {
     @Order(1)
     void register_login_logout_full_flow() {
         // 注册
-        ResponseEntity<Map> reg = post("/auth/register",
+        ResponseEntity<Map> reg = post("/api/v1/auth/register",
                 Map.of("userName", "student1", "password", "secret123", "nickName", "小张"));
         assertThat((Integer) reg.getBody().get("code")).isEqualTo(200);
         // 重复注册拒绝
-        ResponseEntity<Map> dup = post("/auth/register",
+        ResponseEntity<Map> dup = post("/api/v1/auth/register",
                 Map.of("userName", "student1", "password", "x", "nickName", ""));
         assertThat((Integer) dup.getBody().get("code")).isEqualTo(500);
         // 登录拿 token
         String token = loginAndGetToken("student1", "secret123");
         assertThat(token).isNotBlank();
         // 资料：带 token 可读，且角色是 USER
-        ResponseEntity<Map> profile = rest.exchange("/user/profile", HttpMethod.GET,
+        ResponseEntity<Map> profile = rest.exchange("/api/v1/users/me", HttpMethod.GET,
                 authed(token), Map.class);
         assertThat((Integer) profile.getBody().get("code")).isEqualTo(200);
         assertThat((String) ((Map) profile.getBody().get("data")).get("role")).isEqualTo("USER");
         // 登出后 token 失效
-        rest.exchange("/auth/logout", HttpMethod.POST, authed(token), Map.class);
-        ResponseEntity<Map> after = rest.exchange("/user/profile", HttpMethod.GET,
+        rest.exchange("/api/v1/auth/logout", HttpMethod.POST, authed(token), Map.class);
+        ResponseEntity<Map> after = rest.exchange("/api/v1/users/me", HttpMethod.GET,
                 authed(token), Map.class);
         assertThat(after.getStatusCode().value()).isEqualTo(401);
         // 登录日志：成功 1 条 + 登出轮无失败
@@ -95,8 +95,8 @@ class AuthFlowTest {
     @Test
     @Order(2)
     void login_failure_is_recorded_and_rejected() {
-        post("/auth/register", Map.of("userName", "student2", "password", "secret123"));
-        ResponseEntity<Map> bad = post("/auth/login",
+        post("/api/v1/auth/register", Map.of("userName", "student2", "password", "secret123"));
+        ResponseEntity<Map> bad = post("/api/v1/auth/login",
                 Map.of("userName", "student2", "password", "wrong!"));
         assertThat((Integer) bad.getBody().get("code")).isEqualTo(500);
         Integer failed = jdbc.queryForObject(
@@ -108,11 +108,11 @@ class AuthFlowTest {
     @Test
     @Order(3)
     void role_guard_rejects_student_and_admits_admin() {
-        post("/auth/register", Map.of("userName", "student3", "password", "secret123"));
+        post("/api/v1/auth/register", Map.of("userName", "student3", "password", "secret123"));
         String userToken = loginAndGetToken("student3", "secret123");
 
         // 学生（USER）调管理接口 → 403/失败体
-        ResponseEntity<Map> denied = rest.exchange("/admin/api/roles", HttpMethod.GET,
+        ResponseEntity<Map> denied = rest.exchange("/api/v1/admin/roles", HttpMethod.GET,
                 authed(userToken), Map.class);
         System.out.println("[debug] denied=" + denied.getBody() + " status=" + denied.getStatusCode());
         assertThat(denied.getStatusCode().value()).isEqualTo(403);
@@ -120,7 +120,7 @@ class AuthFlowTest {
         // 提升为 ADMIN（直接改库；角色分配的管理接口在管理端展开）
         jdbc.execute("UPDATE sys_user SET role='ADMIN' WHERE user_name='student3'");
         String adminToken = loginAndGetToken("student3", "secret123");
-        ResponseEntity<Map> allowed = rest.exchange("/admin/api/roles", HttpMethod.GET,
+        ResponseEntity<Map> allowed = rest.exchange("/api/v1/admin/roles", HttpMethod.GET,
                 authed(adminToken), Map.class);
         assertThat((Integer) allowed.getBody().get("code")).isEqualTo(200);
     }
@@ -128,7 +128,7 @@ class AuthFlowTest {
     @Test
     @Order(4)
     void unauthenticated_requests_are_rejected() {
-        ResponseEntity<Map> noToken = rest.getForEntity("/user/profile", Map.class);
+        ResponseEntity<Map> noToken = rest.getForEntity("/api/v1/users/me", Map.class);
         System.out.println("[debug] no-token=" + noToken.getBody() + " status=" + noToken.getStatusCode());
         assertThat(noToken.getStatusCode().value()).isEqualTo(401);
         assertThat((Integer) noToken.getBody().get("code")).isEqualTo(401);

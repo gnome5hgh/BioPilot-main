@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.biopilot</groupId>
+    <artifactId>bio-modules</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>bio-gateway</artifactId>
+  <!-- 引擎接入层（技术模块，非业务域）：浏览器 ↔ Python 适配层的全部转发都在这里。 -->
+  <dependencies>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-satoken</artifactId>
+    </dependency>
+    <!-- 会话列表直查引擎表（只读，显式 user_id） -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-mybatis</artifactId>
+    </dependency>
+    <!-- 知识库分块透传前做论文归属校验（复用文件域的公开读服务） -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-file</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <!-- 终端面板：浏览器 ⇄ SpringBoot ⇄ 适配层 PTY 的 WebSocket 中继 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-websocket</artifactId>
+    </dependency>
+  </dependencies>
+</project>

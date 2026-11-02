@@ -14,10 +14,11 @@
 
 ## Directory Structure
 
-- `controller/` — ScheduleController（路径保持 `/agent/schedules`）
+- `controller/` — ScheduleController（`/api/v1/schedules`）
 - `domain/` — `bio_schedule_task` 实体
 - `mapper/` — MyBatis-Plus Mapper
-- `service/` — ScheduleService（定义维护）、ScheduleDispatchService（到期扫描与投递）
+- `service/` — 接口：ScheduleService（定义维护）、ScheduleDispatchService（到期扫描与投递）；
+  `service/impl/` — 对应实现
 - `dto/` — ScheduleView（snake_case 字段与前端契约一致）
 
 ## Core Logic
@@ -30,6 +31,7 @@
 - **失败也推进**：认领时即写 `last_run_at` 与新的 `next_run_at`，投递失败只记日志——
   与旧语义一致，防止失败任务每轮重试刷爆。
 - **立即执行**：只把 `next_run_at` 提前到当前时刻，由下一轮扫描取走，不直接跑 agent。
+- **暂停/恢复**：`PATCH /api/v1/schedules/{id}`（body `{paused}`），是状态更新而不是动作端点。
 - **行级隔离**：控制器路径参与 MyBatis-Plus 租户插件，不手写 user_id 过滤；只有
   调度扫描是显式的系统级跨用户查询。
 

@@ -69,6 +69,39 @@ public class AgentInternalClient {
         }
     }
 
+    /** 内部端点的一次调用结果：状态码 + 原始响应体（调用方决定如何回传）。 */
+    public record InternalResponse(int status, String body) {
+    }
+
+    /**
+     * 同步 POST 内部端点：需要拿上游结果决定后续动作（如删户）时使用。
+     *
+     * @param path   适配层路径（以 `/internal/` 开头）。
+     * @param userId 调用者归属用户。
+     * @param body   请求体。
+     * @return 上游状态码与响应体；网络错误/构造失败返回 {@code null}，由调用方降级。
+     */
+    public InternalResponse postSync(String path, long userId, Map<String, Object> body) {
+        try {
+            String json = mapper.writeValueAsString(body);
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(adapterBase + path))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "application/json")
+                    .header("X-User-Id", String.valueOf(userId))
+                    .POST(HttpRequest.BodyPublishers.ofString(json));
+            if (internalToken != null && !internalToken.isBlank()) {
+                builder.header("X-Internal-Token", internalToken);
+            }
+            HttpResponse<String> resp = client.send(builder.build(),
+                    HttpResponse.BodyHandlers.ofString());
+            return new InternalResponse(resp.statusCode(), resp.body());
+        } catch (Exception e) {
+            log.warn("内部调用失败 {}: {}", path, e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * 同步 GET 内部端点；失败返回空 Map（调用方按缺省值降级，不因引擎不可达报错）。
      *

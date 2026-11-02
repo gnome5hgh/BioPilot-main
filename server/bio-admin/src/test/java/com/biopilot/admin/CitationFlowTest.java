@@ -95,7 +95,7 @@ class CitationFlowTest {
         Session user = login("citation-user");
         registerPaper(user, "p1", "Attention Is All You Need");
 
-        Map<String, Object> added = post(user, "/agent/citations/from-paper",
+        Map<String, Object> added = post(user, "/api/v1/citations/from-paper",
                 Map.of("paper_id", "p1"));
         Map<String, Object> result = (Map<String, Object>) added.get("result");
         String key = (String) result.get("key");
@@ -105,15 +105,14 @@ class CitationFlowTest {
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).get("title")).isEqualTo("Attention Is All You Need");
 
-        Map<String, Object> formatted = post(user, "/agent/citations/format",
+        Map<String, Object> formatted = post(user, "/api/v1/citations/format",
                 Map.of("keys", List.of(key), "style", "author-year"));
         assertThat((String) formatted.get("text")).contains("Attention Is All You Need");
 
-        Map<String, Object> exported = get(user, "/agent/citations/export");
+        Map<String, Object> exported = get(user, "/api/v1/citations/export");
         assertThat((String) exported.get("text")).startsWith("@article{" + key);
 
-        Map<String, Object> removed = post(user, "/agent/citations/remove-by-paper",
-                Map.of("paper_id", "p1"));
+        Map<String, Object> removed = delete(user, "/api/v1/citations/by-paper/p1");
         assertThat(removed.get("removed")).isEqualTo(true);
         assertThat(list(user)).isEmpty();
         assertThat(citationIdOf("p1")).isNull();
@@ -125,11 +124,11 @@ class CitationFlowTest {
         Session user = login("citation-remove");
         registerPaper(user, "p2", "A Second Paper Title");
 
-        Map<String, Object> added = post(user, "/agent/citations/from-paper",
+        Map<String, Object> added = post(user, "/api/v1/citations/from-paper",
                 Map.of("paper_id", "p2"));
         String key = (String) ((Map<String, Object>) added.get("result")).get("key");
 
-        Map<String, Object> removed = delete(user, "/agent/citations/" + key);
+        Map<String, Object> removed = delete(user, "/api/v1/citations/" + key);
         assertThat(removed.get("removed")).isEqualTo(true);
         assertThat(list(user)).isEmpty();
         assertThat(citationIdOf("p2")).isNull();
@@ -142,10 +141,10 @@ class CitationFlowTest {
     void deleting_paper_removes_entry() {
         Session user = login("citation-delete-paper");
         registerPaper(user, "p3", "A Third Paper Title");
-        post(user, "/agent/citations/from-paper", Map.of("paper_id", "p3"));
+        post(user, "/api/v1/citations/from-paper", Map.of("paper_id", "p3"));
         assertThat(list(user)).hasSize(1);
 
-        delete(user, "/agent/papers/p3");
+        delete(user, "/api/v1/papers/p3");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bio_citation",
                 Integer.class)).isZero();
     }
@@ -156,7 +155,7 @@ class CitationFlowTest {
         Session owner = login("citation-owner");
         Session other = login("citation-other");
         registerPaper(owner, "p4", "Owner Only Paper Title");
-        post(owner, "/agent/citations/from-paper", Map.of("paper_id", "p4"));
+        post(owner, "/api/v1/citations/from-paper", Map.of("paper_id", "p4"));
 
         assertThat(list(owner)).hasSize(1);
         assertThat(list(other)).isEmpty();
@@ -172,8 +171,8 @@ class CitationFlowTest {
                 "authors", "Doe, John",
                 "year", "2024",
                 "journal", "Test Journal");
-        ResponseEntity<Map> response = rest.exchange("/agent/papers/" + paperId,
-                HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+        ResponseEntity<Map> response = rest.exchange("/api/v1/papers/" + paperId,
+                HttpMethod.PUT, new HttpEntity<>(body, headers), Map.class);
         assertThat(response.getStatusCode().value()).isEqualTo(200);
     }
 
@@ -184,9 +183,9 @@ class CitationFlowTest {
     }
 
     private Session login(String userName) {
-        rest.postForEntity("/auth/register",
+        rest.postForEntity("/api/v1/auth/register",
                 Map.of("userName", userName, "password", "secret123", "nickName", userName), Map.class);
-        ResponseEntity<Map> login = rest.postForEntity("/auth/login",
+        ResponseEntity<Map> login = rest.postForEntity("/api/v1/auth/login",
                 Map.of("userName", userName, "password", "secret123"), Map.class);
         Map<String, Object> data = (Map<String, Object>) login.getBody().get("data");
         return new Session((String) data.get("token"),
@@ -201,7 +200,7 @@ class CitationFlowTest {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> list(Session user) {
-        return (List<Map<String, Object>>) get(user, "/agent/citations").get("entries");
+        return (List<Map<String, Object>>) get(user, "/api/v1/citations").get("entries");
     }
 
     private Map<String, Object> get(Session user, String path) {

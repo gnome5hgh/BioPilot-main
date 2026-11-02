@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.biopilot</groupId>
+    <artifactId>bio-modules</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>bio-kb</artifactId>
+  <!-- 检索语料状态：知识库勾选与索引状态机。索引/检索本体在 Python 引擎，本模块只管状态与清单。 -->
+  <dependencies>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-core</artifactId>
+    </dependency>
+    <!-- AgentInternalClient：唤醒索引器 / 读引擎运行时信息 -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-web</artifactId>
+    </dependency>
+    <!-- JdbcTemplate 与事务：索引状态机直接操作 bio_paper 的 kb 列 -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-mybatis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-satoken</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+  </dependencies>
+</project>

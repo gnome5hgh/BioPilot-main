@@ -13,7 +13,9 @@
   <modules>
     <module>bio-system</module>
     <module>bio-project</module>
-    <module>bio-catalog</module>
+    <module>bio-file</module>
+    <module>bio-kb</module>
+    <module>bio-gateway</module>
     <module>bio-schedule</module>
     <module>bio-literature</module>
     <module>bio-citation</module>

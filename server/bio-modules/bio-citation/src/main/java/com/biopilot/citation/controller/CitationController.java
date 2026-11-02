@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 引用库端点：列表/搜索、格式化、新增/编辑/删除、导出 .bib、从论文加入。 */
 @RestController
-@RequestMapping("/agent/citations")
+@RequestMapping("/api/v1/citations")
 public class CitationController {
 
     private final CitationService service;
@@ -50,9 +50,9 @@ public class CitationController {
         return Map.of("status", "ok", "result", view);
     }
 
-    @PostMapping("/remove-by-paper")
-    public Map<String, Object> removeByPaper(@RequestBody Map<String, Object> body) {
-        String paperId = String.valueOf(body.getOrDefault("paper_id", "")).trim();
+    /** 按论文移出引用库（论文是引用的来源实体，作为路径参数）。 */
+    @DeleteMapping("/by-paper/{paperId}")
+    public Map<String, Object> removeByPaper(@PathVariable String paperId) {
         return Map.of("status", "ok", "removed", service.removeByPaper(uid(), paperId));
     }
 

@@ -20,7 +20,15 @@
     </dependency>
     <dependency>
       <groupId>com.biopilot</groupId>
-      <artifactId>bio-catalog</artifactId>
+      <artifactId>bio-file</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-kb</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-gateway</artifactId>
     </dependency>
     <dependency>
       <groupId>com.biopilot</groupId>
@@ -64,11 +72,6 @@
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>
       <scope>runtime</scope>
-    </dependency>
-    <!-- 终端 WebSocket 中继：浏览器 ↔ SpringBoot ↔ 适配层 PTY -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-websocket</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

@@ -25,7 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 密钥字段不回显，编辑时留空表示保持原值。</p>
  */
 @RestController
-@RequestMapping("/agent/admin/mcp-servers")
+@RequestMapping("/api/v1/admin/literature/sources")
 @SaCheckRole("ADMIN")
 public class LiteratureMcpAdminController {
 

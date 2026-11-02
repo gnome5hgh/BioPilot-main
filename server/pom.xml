@@ -101,7 +101,17 @@
       </dependency>
       <dependency>
         <groupId>com.biopilot</groupId>
-        <artifactId>bio-catalog</artifactId>
+        <artifactId>bio-file</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-kb</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-gateway</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

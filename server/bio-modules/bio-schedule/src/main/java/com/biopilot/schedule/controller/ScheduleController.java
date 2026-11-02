@@ -12,10 +12,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PatchMapping;
 
 /** 定时任务定义 CRUD（执行由 Python 引擎的调度循环消费）。 */
 @RestController
-@RequestMapping("/agent/schedules")
+@RequestMapping("/api/v1/schedules")
 public class ScheduleController {
 
     private final ScheduleService service;
@@ -35,14 +36,13 @@ public class ScheduleController {
         return service.create(StpUtil.getLoginIdAsString(), body);
     }
 
-    @PostMapping("/{taskId}/pause")
-    public Map<String, Object> pause(@PathVariable String taskId) {
-        return service.setPaused(taskId, 1);
-    }
-
-    @PostMapping("/{taskId}/resume")
-    public Map<String, Object> resume(@PathVariable String taskId) {
-        return service.setPaused(taskId, 0);
+    /** 暂停/恢复：请求体 {@code {paused: true|false}}。 */
+    @PatchMapping("/{taskId}")
+    public Map<String, Object> setPaused(@PathVariable String taskId,
+                                         @RequestBody Map<String, Object> body) {
+        boolean paused = body != null
+                && String.valueOf(body.get("paused")).matches("(?i)true|1");
+        return service.setPaused(taskId, paused ? 1 : 0);
     }
 
     @PostMapping("/{taskId}/run")

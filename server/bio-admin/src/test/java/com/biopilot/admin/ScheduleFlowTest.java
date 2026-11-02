@@ -81,9 +81,9 @@ class ScheduleFlowTest {
     }
 
     private String tokenFor(String userName) {
-        rest.postForEntity("/auth/register",
+        rest.postForEntity("/api/v1/auth/register",
                 Map.of("userName", userName, "password", "secret123", "nickName", userName), Map.class);
-        ResponseEntity<Map> login = rest.postForEntity("/auth/login",
+        ResponseEntity<Map> login = rest.postForEntity("/api/v1/auth/login",
                 Map.of("userName", userName, "password", "secret123"), Map.class);
         return (String) ((Map) login.getBody().get("data")).get("token");
     }
@@ -97,7 +97,7 @@ class ScheduleFlowTest {
 
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> list(String token) {
-        ResponseEntity<Map> response = rest.exchange("/agent/schedules", HttpMethod.GET,
+        ResponseEntity<Map> response = rest.exchange("/api/v1/schedules", HttpMethod.GET,
                 authed(token, null), Map.class);
         return (List<Map<String, Object>>) response.getBody().get("schedules");
     }
@@ -106,7 +106,7 @@ class ScheduleFlowTest {
     @Order(1)
     void create_list_pause_resume_run_delete() {
         String token = tokenFor("sched-user");
-        ResponseEntity<Map> created = rest.exchange("/agent/schedules", HttpMethod.POST,
+        ResponseEntity<Map> created = rest.exchange("/api/v1/schedules", HttpMethod.POST,
                 authed(token, Map.of(
                         "name", "每周文献巡检",
                         "task", "检索本周新文献",
@@ -121,19 +121,19 @@ class ScheduleFlowTest {
         assertThat(rows.get(0).get("paused")).isEqualTo(0);
         String taskId = (String) rows.get(0).get("id");
 
-        rest.exchange("/agent/schedules/" + taskId + "/pause", HttpMethod.POST,
-                authed(token, null), Map.class);
+        rest.exchange("/api/v1/schedules/" + taskId, HttpMethod.PATCH,
+                authed(token, Map.of("paused", true)), Map.class);
         assertThat(list(token).get(0).get("paused")).isEqualTo(1);
 
-        rest.exchange("/agent/schedules/" + taskId + "/resume", HttpMethod.POST,
-                authed(token, null), Map.class);
+        rest.exchange("/api/v1/schedules/" + taskId, HttpMethod.PATCH,
+                authed(token, Map.of("paused", false)), Map.class);
         assertThat(list(token).get(0).get("paused")).isEqualTo(0);
 
-        ResponseEntity<Map> run = rest.exchange("/agent/schedules/" + taskId + "/run",
+        ResponseEntity<Map> run = rest.exchange("/api/v1/schedules/" + taskId + "/run",
                 HttpMethod.POST, authed(token, null), Map.class);
         assertThat((String) run.getBody().get("status")).isEqualTo("queued");
 
-        rest.exchange("/agent/schedules/" + taskId, HttpMethod.DELETE,
+        rest.exchange("/api/v1/schedules/" + taskId, HttpMethod.DELETE,
                 authed(token, null), Map.class);
         assertThat(list(token)).isEmpty();
     }
@@ -142,7 +142,7 @@ class ScheduleFlowTest {
     @Order(2)
     void invalid_interval_is_rejected() {
         String token = tokenFor("sched-bad");
-        ResponseEntity<Map> created = rest.exchange("/agent/schedules", HttpMethod.POST,
+        ResponseEntity<Map> created = rest.exchange("/api/v1/schedules", HttpMethod.POST,
                 authed(token, Map.of(
                         "name", "x", "task", "y",
                         "conversation_id", "conv-1", "interval_minutes", 1)), Map.class);
@@ -201,19 +201,19 @@ class ScheduleFlowTest {
     void schedules_are_isolated_per_user() {
         String owner = tokenFor("sched-owner");
         String other = tokenFor("sched-other");
-        rest.exchange("/agent/schedules", HttpMethod.POST,
+        rest.exchange("/api/v1/schedules", HttpMethod.POST,
                 authed(owner, Map.of(
                         "name", "owner-task", "task", "t",
                         "conversation_id", "conv-owner", "interval_minutes", 60)), Map.class);
         String taskId = (String) list(owner).get(0).get("id");
 
         assertThat(list(other)).isEmpty();
-        ResponseEntity<Map> foreignRun = rest.exchange("/agent/schedules/" + taskId + "/run",
+        ResponseEntity<Map> foreignRun = rest.exchange("/api/v1/schedules/" + taskId + "/run",
                 HttpMethod.POST, authed(other, null), Map.class);
         assertThat(foreignRun.getStatusCode().value()).isEqualTo(404);
 
         // 别人的删除请求不能动到这一行
-        rest.exchange("/agent/schedules/" + taskId, HttpMethod.DELETE,
+        rest.exchange("/api/v1/schedules/" + taskId, HttpMethod.DELETE,
                 authed(other, null), Map.class);
         assertThat(list(owner)).hasSize(1);
     }
