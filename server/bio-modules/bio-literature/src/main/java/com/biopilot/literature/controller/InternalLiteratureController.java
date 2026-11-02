@@ -1,7 +1,7 @@
 package com.biopilot.literature.controller;
 
 import com.biopilot.common.core.exception.ServiceException;
-import com.biopilot.common.web.http.SafePdfFetcher;
+import com.biopilot.common.net.SafePdfFetcher;
 import com.biopilot.literature.domain.LiteratureSearchResult;
 import com.biopilot.literature.domain.SearchQuery;
 import com.biopilot.literature.service.LiteratureSearchService;
@@ -64,7 +64,7 @@ public class InternalLiteratureController {
     }
 
     /**
-     * 下载 PDF 字节（复用平台的 SSRF 逐跳校验与 `%PDF` 校验）。
+     * 下载 PDF 字节（复用 bio-common-net 的 SSRF 逐跳校验与 `%PDF` 校验）。
      *
      * <p>只返回字节，**不登记论文库、不写 OSS**——agent 下载的论文按既有约定
      * 只落引擎工作区，是否进论文库由用户在网页决定。</p>

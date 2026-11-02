@@ -25,7 +25,8 @@ server/
 │                 #   bio-citation（引用库：勾选/维护/导出 .bib）
 ├─ bio-common/    # 共享基础设施（按 cde-common 分模块）
 │  ├─ bio-common-core/     # R / PageResult / ServiceException / 常量 / 通用工具（含标题归一化）
-│  ├─ bio-common-web/      # 全局异常兜底 / 内部 HTTP 客户端 / multipart / SSE / SSRF PDF 下载
+│  ├─ bio-common-web/      # 全局异常兜底 / 内部 HTTP 客户端 / multipart / SSE
+│  ├─ bio-common-net/      # 安全出网：外部 URL 校验 + 重定向逐跳校验下载（纯 JDK，PDF 下载/文献导入共用）
 │  ├─ bio-common-mybatis/  # MyBatis-Plus / 租户插件 / 分页 / 基础实体
 │  ├─ bio-common-satoken/  # Sa-Token 配置与 401/403 异常映射
 │  ├─ bio-common-oss/      # MinIO/OSS 客户端

@@ -51,6 +51,11 @@
       </dependency>
       <dependency>
         <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-net</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
         <artifactId>bio-common-mybatis</artifactId>
         <version>${project.version}</version>
       </dependency>

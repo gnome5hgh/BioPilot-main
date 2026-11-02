@@ -3,7 +3,7 @@ package com.biopilot.literature.service;
 import com.biopilot.catalog.dto.PaperView;
 import com.biopilot.catalog.service.PaperService;
 import com.biopilot.common.core.exception.ServiceException;
-import com.biopilot.common.web.http.SafePdfFetcher;
+import com.biopilot.common.net.SafePdfFetcher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;

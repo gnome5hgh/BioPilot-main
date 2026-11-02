@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.biopilot</groupId>
+    <artifactId>bio-common</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>bio-common-net</artifactId>
+  <!-- 安全出网：外部 URL 校验与逐跳校验的下载。主代码纯 JDK，不依赖 Spring，
+       任何模块（含不依赖 bio-common-web 的 bio-common-mcp）都能窄依赖进来。 -->
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

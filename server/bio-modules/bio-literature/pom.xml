@@ -18,6 +18,11 @@
       <groupId>com.biopilot</groupId>
       <artifactId>bio-common-web</artifactId>
     </dependency>
+    <!-- 安全出网：外部 URL 校验与 PDF 逐跳下载（纯 JDK，独立于 web 通用件） -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-net</artifactId>
+    </dependency>
     <dependency>
       <groupId>com.biopilot</groupId>
       <artifactId>bio-common-satoken</artifactId>
