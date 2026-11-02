@@ -12,10 +12,9 @@
 
 ## Directory Structure
 
-- `file/` — 读 / 写 / 编辑 / glob / grep / 读 PDF / 取标题（只做工具声明与降级文案）
-- `search/` — 下载 PDF（下载核心在 `core/security/services/pdf_fetch.py`）
-- `review/` — 审查裁决、模板体检、期刊会议等级查询（helper 已并入工具文件）
-- `citations/` — 引用工具（只装配给 `citation-agent`）
+- `file/` — 读 / 写 / 编辑 / glob / grep / 读 PDF（只做工具声明与降级文案；标题由 Java 提取，本层不推导）
+- `search/` — 文献检索薄转发（`search_literature`，调 Java `/internal/literature/search`）与 PDF 下载（`fetch_pdf`：平台模式调 Java `/internal/literature/fetch-pdf`，单机 REPL 走本地下载核心）
+- `review/` — 审查裁决、模板体检（helper 已并入工具文件）
 - `rag/` — 检索、看图、入库、全量收敛、索引体检（只装配给 `rag-agent`）
 - `vision/` — 图表提取与看图分析
 - `memory/` — 记忆读写/管理工具集（9 件，只装配给 `memory-agent`；编辑语义在 `core/memory/services/`）
@@ -26,6 +25,7 @@
 工具装配不在本包：`make_tools` 在 `cli/services/tool_assembly.py`；工具运行时上下文在
 `core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在 `biopilot/common/` 与 `core/security/`。
 平台数据端口（论文目录/文件/文档）已迁 Java `bio-catalog`，本包不再保留数据访问 adapter。
+分析产物（`run_python`）经 Java `/internal/files/artifacts` 登记；平台文件字节经 `/internal/attachments/*` 取回，工具不直连 OSS。
 
 ## Responsibilities
 
@@ -63,7 +63,7 @@
 
 - 依赖 `core/tool/`（抽象与安全元数据校验）、`core/constants/`（风险与副作用词汇）、`core/security/`（中间件在调用前后接管）。
 - 被 `cli/` 在装配期取用，被 `core/agent` 在 ReAct 循环里执行。
-- 各领域工具的真实实现对在对应 core 子包里（记忆在 `core/memory/`，检索在 `core/rag/`，引用在 `citations/`）。
+- 各领域工具的真实实现对在对应 core 子包里（记忆在 `core/memory/`，检索在 `core/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
 
 ## Investigation Rule
 

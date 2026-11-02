@@ -2,7 +2,7 @@
 
 子 agent 派发与结构化结果摘要的实现。装配给 supervisor（硬编码放行所有子 agent）
 与需要内部审稿/补料的 paper-agent/note-agent/research-agent（按各自 allowed_spawns 白名单）；
-叶子 agent（review-agent/citation-agent/memory-agent）不装配、不递归调度。需父 agent 注入
+叶子 agent（review-agent/memory-agent）不装配、不递归调度。需父 agent 注入
 (needs_parent),见 Tool 约定。
 
 派发前 _admit 的五道闸（未知类型 / spawn 白名单 /
@@ -121,34 +121,6 @@ class ResearchAgentDigest(BaseModel):
     plan_path: str = ""
 
 
-class CitationAgentDigest(BaseModel):
-    """citation-agent 的结果摘要:同步/删除的计数 + 被拒条目与原因,supervisor 据此汇报。
-
-    status 默认空串:sync_citations 的 tool summary 只有 total/added/skipped/
-    rejected、没有 status,LLM 抽 digest 时容易漏该字段——给默认值避免校验失败
-    整个 digest 回落为 {},计数一并丢失。rejected_items/blocked_reason 是给上级的
-    可行动线索:知道是哪几篇、为什么被拒,才能决定补什么料、派谁去补。
-
-    Attributes:
-        status: str，操作状态（默认空串——sync 的 summary 无该字段，给默认避免整份 digest 回落为 {}）
-        added: int，新增条目数
-        skipped: int，已在库跳过数
-        rejected: int，拒绝入库数
-        total: int，扫描总数
-        rejected_items: list[str]，被拒条目的可辨识名
-        blocked_reason: str，被拒的原因类别
-    """
-    status: str = ""
-    added: int = 0
-    skipped: int = 0
-    rejected: int = 0
-    total: int = 0
-    #: 被拒条目的可辨识名(标题或路径),让上级知道该补哪几篇
-    rejected_items: list[str] = []
-    #: 被拒的原因类别(缺元数据 / 解析失败 / 不在语料 …),让上级知道该派谁补
-    blocked_reason: str = ""
-
-
 class RagAgentDigest(BaseModel):
     """rag-agent 的结果摘要：入库/跳过/清理篇数与失败清单。
 
@@ -196,7 +168,6 @@ def digest_schema_for(agent_type: str) -> type[BaseModel]:
         "review-agent": ReviewAgentDigest,
         "note-agent": NoteAgentDigest,
         "research-agent": ResearchAgentDigest,
-        "citation-agent": CitationAgentDigest,
         "rag-agent": RagAgentDigest,
     }.get(agent_type, GenericDigest)
 

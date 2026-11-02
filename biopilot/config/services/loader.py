@@ -17,15 +17,14 @@ from biopilot.config.schemas.sections import (
     CorpusConfig,
     IntentConfig,
     LLMConfig,
-    McpServerConfig,
     MemoryConfig,
+    PlatformConfig,
     RagConfig,
     RuntimeConfig,
     ClassifierConfig,
     SecurityConfig,
     SessionConfig,
     VisionLLMConfig,
-    parse_mcp_servers,
 )
 
 
@@ -110,6 +109,7 @@ class BioPilotConfig:
         llm: LLMConfig，LLM 连接
         vision: VisionLLMConfig，视觉模型连接
         runtime: RuntimeConfig，运行时基础设施
+        platform: PlatformConfig，Java 平台后端连接（agent 调平台内部能力）
         corpus: CorpusConfig，语料库与产物路径
         intent: IntentConfig，意图识别
         security: SecurityConfig，安全模块（预批准名单）
@@ -118,7 +118,6 @@ class BioPilotConfig:
         session: SessionConfig，会话恢复
         agents: AgentsConfig，子 agent 配置
         compaction: CompactionSettings，上下文压缩
-        mcp_servers: dict[str, McpServerConfig]，MCP server 接入表（仅 YAML）
     """
 
     #: LLM 连接配置
@@ -129,6 +128,9 @@ class BioPilotConfig:
 
     #: 运行时基础设施（workspace / agents_dir / confirm_above）
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+
+    #: Java 平台后端连接（内部检索、文档保存等外部能力）
+    platform: PlatformConfig = field(default_factory=PlatformConfig)
 
     #: 语料库与产物路径
     corpus: CorpusConfig = field(default_factory=CorpusConfig)
@@ -153,9 +155,6 @@ class BioPilotConfig:
 
     #: 上下文压缩配置（触发/保留/摘要参数；YAML 与 env 均可覆写）
     compaction: CompactionSettings = field(default_factory=CompactionSettings)
-
-    #: MCP server 接入配置（config.yaml 顶层 mcp_servers；仅 YAML，无环境变量形态）
-    mcp_servers: dict[str, "McpServerConfig"] = field(default_factory=dict)
 
     @classmethod
     def from_env(cls, config_path: str | None = None) -> "BioPilotConfig":
@@ -193,6 +192,11 @@ class BioPilotConfig:
         # [目录] 提示也变绝对。只在此生产入口处理——测试直接构造的值不受影响。
         config.runtime.workspace = str(
             Path(config.runtime.workspace).expanduser().resolve())
+        # 出站内部调用与入站校验共用一个 secret：部署只配 BIOPILOT_INTERNAL_TOKEN，
+        # agent 调 Java 平台端点时自动带上，避免两处配不同值导致 403。
+        config.platform.internal_token = (
+            config.platform.internal_token
+            or os.environ.get("BIOPILOT_INTERNAL_TOKEN", ""))
         return config
 
     def _load_yaml(self, config_path: str | None) -> None:
@@ -200,7 +204,7 @@ class BioPilotConfig:
 
         顶层键与 dataclass 字段同名（``llm`` / ``runtime`` / ``rag`` …），
         经通用递归合并 ``_merge`` 下行，任意深度；不存在的文件静默跳过，
-        未知键忽略。``mcp_servers`` 需校验+转换，单独分支。
+        未知键忽略。
 
         Args:
             config_path: str | None，config.yaml 路径；文件不存在时静默跳过
@@ -214,11 +218,6 @@ class BioPilotConfig:
         if not isinstance(data, dict):
             return
 
-        # MCP servers：嵌套结构需校验+转换，单独处理（不参与通用合并）
-        if "mcp_servers" in data:
-            self.mcp_servers = parse_mcp_servers(data["mcp_servers"])
-            data = {k: v for k, v in data.items() if k != "mcp_servers"}
-
         _merge(self, data)
 
     def _load_env(self) -> None:
@@ -228,7 +227,7 @@ class BioPilotConfig:
         env 名 = ``BIOPILOT_`` + 配置路径（``.`` 换 ``_``）大写，如
         ``BIOPILOT_LLM_API_KEY`` / ``BIOPILOT_RAG_STORAGE_URI`` /
         ``BIOPILOT_RAG_QUERY_REWRITE_MODEL``。自由 dict/list 字段
-        （``agents.timeouts``、``mcp_servers``）不派生 env。
+        （如 ``agents.timeouts``）不派生 env。
         """
         _apply_env(self, ())
 

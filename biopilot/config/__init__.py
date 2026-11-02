@@ -10,12 +10,13 @@
 配置结构与 config.yaml 同构：
 ``runtime`` / ``corpus`` / ``intent`` / ``rag{embedding, rerank,
 retriever, query_rewrite, chunker, storage, tools}`` / ``memory`` /
-``session`` / ``agents{timeouts}``，外加保留的顶层 ``llm`` / ``vision`` / ``mcp_servers``。
+``session`` / ``agents{timeouts}``，外加保留的顶层 ``llm`` / ``vision``；平台后端
+连接在 ``platform`` 段。
 
 env 名约定：字段路径以 ``_`` 连接并大写，前缀 ``BIOPILOT_``。例如
 ``rag.storage.uri`` → ``BIOPILOT_RAG_STORAGE_URI``，
 ``rag.query_rewrite.model`` → ``BIOPILOT_RAG_QUERY_REWRITE_MODEL``。无例外表；
-``agents.timeouts`` 与 ``mcp_servers`` 是自由 dict，仅 YAML 可配（不派生 env）。
+``agents.timeouts`` 是自由 dict，仅 YAML 可配（不派生 env）。
 
 使用方式::
 
@@ -37,8 +38,8 @@ from biopilot.config.schemas.sections import (
     ClassifierConfig,
     SecurityConfig,
     LLMConfig,
-    McpServerConfig,
     MemoryConfig,
+    PlatformConfig,
     QueryRewriteConfig,
     RagConfig,
     RagToolsConfig,
@@ -49,7 +50,6 @@ from biopilot.config.schemas.sections import (
     MinioConfig,
     StorageConfig,
     VisionLLMConfig,
-    parse_mcp_servers,
 )
 
 __all__ = [
@@ -57,6 +57,7 @@ __all__ = [
     "LLMConfig",
     "VisionLLMConfig",
     "RuntimeConfig",
+    "PlatformConfig",
     "CorpusConfig",
     "IntentConfig",
     "IntentJevConfig",
@@ -74,6 +75,4 @@ __all__ = [
     "MemoryConfig",
     "SessionConfig",
     "AgentsConfig",
-    "McpServerConfig",
-    "parse_mcp_servers",
 ]

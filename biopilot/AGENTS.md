@@ -15,9 +15,8 @@
 
 - `cli/` — 装配根：启动预检 + 对象图组装 + 工具装配（有 manifest）
 - `config/` — 全局可调参数：默认值的声明点 + 三级加载（有 manifest）
-- `common/` — 跨层共享基础设施：常量/通用工具/存储原语（不是 agent 核心，也不是业务层）
+- `common/` — 跨层共享基础设施：常量/通用工具/原子写/出站平台客户端（不是 agent 核心，也不是业务层）
 - `core/` — agent 系统技术核心，内含 `rag/` 与 `vision/`（有 manifest，其下各子包各有）
-- `citations/` — 引用管理（`references.bib`，有 manifest）
 - `tools/` — 面向 LLM 的工具声明，按域分包（有 manifest）
 - `terminal/` — 终端交互隔离层（有 manifest）
 - `__init__.py` / `__main__.py` — 包标记与 `python -m` 的结构性入口
@@ -26,18 +25,18 @@
 
 - 提供进程入口与装配根（`cli/`）。
 - 定义全局可调参数及其加载优先级（`config/`）。
-- 承载全部运行层能力（`core/`）与它们的对外工具、终端交互、引用管理。
+- 承载全部运行层能力（`core/`）与它们的对外工具、终端交互；引用库、论文标题提取、文献检索（含 MCP 客户端）归 Java，不在本包实现。
 - `common/` 只放跨层纯能力；平台数据访问归 Java `bio-catalog`，不再设 Python 数据适配层。
 - 通过包门面暴露重量组件，不让外部深入组件内部结构。
-- **保留 agent 运行时 API**：对话 SSE/确认/上下文用量、知识库状态与试检索、引用库、终端、`/internal/*` 索引触发。论文/文件/文档/定时任务/文献搜索的平台 CRUD 不在本包新增。
-- **数据所有权**：`bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event` 由本包写；`bio_paper` 只写 `indexed/index_status/index_error/indexed_at/chunk_count`；`bio_document` 的 agent 侧写者只有 `save_document` 工具。
+- **保留 agent 运行时 API**：对话 SSE/确认/上下文用量、知识库状态与试检索、终端、`/internal/kb/sync`、`/internal/schedule/run` 与用户数据清理。论文/文件/文档/定时任务/文献搜索的平台 CRUD 不在本包新增。
+- **数据所有权**：`bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event` 由本包写；**`bio_paper` 全部列由 Java 写**，本包只读（状态经 `/internal/kb/{normalize,indexing,result}` 上报，文件字节经 `/internal/attachments/*` 取回）；`bio_document`、`bio_file_upload`、`bio_schedule_task` 由 Java 写，本包只经内部端点转发/触发。
 
 ## Core Logic
 
 - **包根只留 `__init__.py`**（`biopilot/` 另有 `__main__.py`，`python -m` 的结构性入口）；每个关注点落进子包，子包 `__init__` 只做再导出。
-- **对外经包门面**：引用库经 `get_citation_manager()`、RAG 经 `get_rag_service()`。
+- **对外经包门面**：RAG 经 `get_rag_service()`。
 - **懒加载单例**：重量组件用双重检查加锁的模块级单例，包导入期不拉重型依赖。新增重量组件照这个形状做。
-- **依赖方向**：`core` 不 import 上层模块（`tools` / `terminal` / `citations`）——这是「某组件该不该搬进 core」那类判断的硬依据；`rag` 与 `vision` 已在 `core/` 内，core 内部互相依赖是允许的。
+- **依赖方向**：`core` 不 import 上层模块（`tools` / `terminal`）——这是「某组件该不该搬进 core」那类判断的硬依据；`rag` 与 `vision` 已在 `core/` 内，core 内部互相依赖是允许的。
 
 ## Key Entry Points
 
@@ -55,9 +54,8 @@
 
 ## Dependencies And Collaboration
 
-- `cli/` 是装配层，依赖 `config/`、`core/`、`citations/`、`tools/`、`terminal/`；被依赖方不反向 import `cli/`。
+- `cli/` 是装配层，依赖 `config/`、`core/`、`tools/`、`terminal/`；被依赖方不反向 import `cli/`。
 - `core/` 依赖 `tools/` 的抽象（`Tool` / `ToolResult`）但不反向；`tools/` 与 `terminal/` 是被消费方。
-- `citations/` 只经门面对外。
 
 ## Investigation Rule
 
@@ -83,8 +81,8 @@ conda run -n biopilot python -m pytest tests/cli tests/core -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 直接子包：[`cli/`](cli/AGENTS.md) / [`config/`](config/AGENTS.md) / [`core/`](core/AGENTS.md) / [`citations/`](citations/AGENTS.md) / [`tools/`](tools/AGENTS.md) / [`terminal/`](terminal/AGENTS.md)
-- `core/` 之下：[`agent/`](core/agent/AGENTS.md) / [`llm/`](core/llm/AGENTS.md) / [`memory/`](core/memory/AGENTS.md) / [`intent/`](core/intent/AGENTS.md) / [`rag/`](core/rag/AGENTS.md) / [`vision/`](core/vision/AGENTS.md) / [`security/`](core/security/AGENTS.md) / [`skills/`](core/skills/AGENTS.md) / [`mcp/`](core/mcp/AGENTS.md) / [`tool/`](core/tool/AGENTS.md) / [`constants/`](core/constants/AGENTS.md)
+- 直接子包：[`cli/`](cli/AGENTS.md) / [`config/`](config/AGENTS.md) / [`core/`](core/AGENTS.md) / [`tools/`](tools/AGENTS.md) / [`terminal/`](terminal/AGENTS.md)
+- `core/` 之下：[`agent/`](core/agent/AGENTS.md) / [`llm/`](core/llm/AGENTS.md) / [`memory/`](core/memory/AGENTS.md) / [`intent/`](core/intent/AGENTS.md) / [`rag/`](core/rag/AGENTS.md) / [`vision/`](core/vision/AGENTS.md) / [`security/`](core/security/AGENTS.md) / [`skills/`](core/skills/AGENTS.md) / [`tool/`](core/tool/AGENTS.md) / [`constants/`](core/constants/AGENTS.md)
 - 跨层共享基础设施：[`common/`](common/AGENTS.md)
 
 ## References

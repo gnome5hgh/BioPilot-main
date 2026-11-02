@@ -29,8 +29,7 @@ def apply_pre_approval(tools: list[Tool], approved: set[str],
 
     Args:
         tools: list[Tool]，待处理的工具
-        approved: set[str]，预批准的工具名（来自 security.pre_approved_tools 与
-            mcp_servers.*.write_tools 的并集）
+        approved: set[str]，预批准的工具名（来自 security.pre_approved_tools）
         level: str，降到哪一档
     """
     for tool in tools:
@@ -44,7 +43,7 @@ def merge_tools(*groups: tuple[str, list[Tool]]) -> list[Tool]:
     """按组顺序合并工具列表，工具名全局唯一，冲突即抛 ValueError（fail-fast）。
 
     来源组为 ``"skill"`` 的工具在合并时被抬到至少 ``EXTERNAL_RISK_FLOOR``——它们是
-    第三方代码，自报档位不可信（与 MCP 侧「注解不可信、缺注解按可能写」同构）。
+    第三方代码，自报档位不可信（与外部工具「缺注解按可能写」同构）。
 
     Args:
         groups: (来源标签, 工具列表) 序列，如 ("agent", ...), ("skill", ...), ("framework", ...)

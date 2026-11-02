@@ -43,7 +43,6 @@ async def _repl(supervisor: Agent, *,
                 config: BioPilotConfig | None = None,
                 resume_hint: str | None = None, confirm_center=None,
                 resume_replay: ResumeReplay | None = None,
-                mcp_manager=None,
                 registry: CommandRegistry | None = None) -> None:
     """
     REPL 主循环。
@@ -74,7 +73,7 @@ async def _repl(supervisor: Agent, *,
         resume_replay: --resume 的历史回放载荷（可选）。由 cli 层从同一 in-context
             窗口构建，此处只在横幅之后、首次读输入之前渲染进滚动区——顺序错了
             历史会跑到横幅上方。回放是只读的（见 terminal/resume.py）。
-        registry: 斜杠命令注册表（可选，None 时用 io/renderer/mcp_manager 自建默认表）。
+        registry: 斜杠命令注册表（可选，None 时用 io/renderer 自建默认表）。
     """
     # 开场输出一律先于读输入：横幅、Tip、以及在 Tip 之下择一出现的 hint / 回放。
     # 三者必须按此序打——回放若在横幅之前渲染，历史会印到横幅上方，用户上翻看到的
@@ -107,7 +106,7 @@ async def _repl(supervisor: Agent, *,
     center = confirm_center or ConfirmCenter(io, renderer)
     center.start()
     registry = registry or build_default_registry(
-        CommandContext(io=io, renderer=renderer, mcp_manager=mcp_manager))
+        CommandContext(io=io, renderer=renderer))
 
     def _cancel_run():
         """SIGINT handler：只取消当前 run 任务，REPL 本身继续存活（回到输入框）。"""

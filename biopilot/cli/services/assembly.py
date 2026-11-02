@@ -19,7 +19,6 @@ from biopilot.core.agent import Agent
 from biopilot.core.agent import AgentRegistry
 from biopilot.core.skills import apply_pre_approval, merge_tools
 from biopilot.core.skills import SkillRegistry, load_lock
-from biopilot.core.mcp.services.bridge import collect_mcp_agent_tools
 from biopilot.tools.skills.load_skill import LoadSkillTool
 from biopilot.core.tool.services.roots import declared_roots
 from biopilot.core.llm import LLMClient
@@ -50,10 +49,7 @@ from biopilot.terminal.repl import build_resume_replay
 
 
 def _approved_tools(config: BioPilotConfig) -> set[str]:
-    """预批准的工具名集合：security.pre_approved_tools 与各 MCP server 的 write_tools 并集。
-
-    两种写法等价——按 server 书写的 write_tools 只是同一个概念的语法糖；装配时并成
-    一个集合再统一降档，避免两套名单各管一段、行为不一致。
+    """预批准的工具名集合，来自 ``security.pre_approved_tools``。
 
     Args:
         config: BioPilotConfig，配置来源
@@ -61,10 +57,7 @@ def _approved_tools(config: BioPilotConfig) -> set[str]:
     Returns:
         set[str]，允许降档（medium）的工具名集合。
     """
-    approved = set(config.security.pre_approved_tools or [])
-    for server in (config.mcp_servers or {}).values():
-        approved |= set(getattr(server, "write_tools", None) or [])
-    return approved
+    return set(config.security.pre_approved_tools or [])
 
 
 def _select_resume_session(agent_manager: AgentManager, io, user_id: str) -> str | None:
@@ -192,17 +185,12 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     skill_registry = SkillRegistry(
         str(_skills_dir) if _skills_dir.is_dir() else None, disabled=_disabled)
     _load_skill_tool = LoadSkillTool(skill_registry)
-    from biopilot.core.mcp.services.client import McpClientManager
-    mcp_manager = McpClientManager(config.mcp_servers)
-    if config.mcp_servers:
-        mcp_manager.start()
     for _agent_type in registry.list_agents():
         _cfg = registry.get_config(_agent_type)
         _cfg.tools = merge_tools(
             ("agent", _cfg.tools),
             ("skill", skill_registry.get_tools_for(_agent_type)),
             ("framework", [_load_skill_tool]),
-            ("mcp", collect_mcp_agent_tools(_agent_type, config.mcp_servers, mcp_manager)),
         )
         apply_pre_approval(_cfg.tools, _approved_tools(config))
 
@@ -353,13 +341,6 @@ def main(argv: list[str] | None = None) -> int | None:
         return 0
 
     config = BioPilotConfig.from_env()
-    # MCP 客户端平台：config.mcp_servers 非空才启动（后台循环 + 非阻塞预取）。
-    # 工具注入发生在下方装配循环（与 skill merge 同缝）；管理器引用同时传给
-    # _repl 供 /mcp 命令，退出时 shutdown。
-    from biopilot.core.mcp.services.client import McpClientManager
-    mcp_manager = McpClientManager(config.mcp_servers)
-    if config.mcp_servers:
-        mcp_manager.start()
     is_tty = sys.stdin.isatty()
     io = make_input_io(config)
     console = Console() if is_tty else None
@@ -416,10 +397,7 @@ def main(argv: list[str] | None = None) -> int | None:
             # supervisor 的 skill 捆绑工具并入被 get_tools_for 代码级拒绝（权限最小化红线）
             ("skill", skill_registry.get_tools_for(_agent_type)),
             ("framework", [_load_skill_tool]),
-            ("mcp", collect_mcp_agent_tools(_agent_type, config.mcp_servers, mcp_manager)),
         )
-        # 预批准名单统一：security.pre_approved_tools 与各 server 的 write_tools 并成
-        # 一个集合后再降档，两种写法等价
         apply_pre_approval(_cfg.tools, _approved_tools(config))
 
     # 终端装配：TTY → prompt_toolkit 输入 + rich Live 渲染；非 TTY（管道/CI/测试）→
@@ -594,12 +572,8 @@ def main(argv: list[str] | None = None) -> int | None:
         debounce_seconds=config.memory.debounce_seconds,
         max_delay_seconds=config.memory.max_delay_seconds)
 
-    try:
-        asyncio.run(_repl(supervisor,
-                          io=io, renderer=renderer, consolidator=consolidator,
-                          consolidation_queue=consolidation_queue,
-                          config=config, resume_hint=resume_hint,
-                          confirm_center=center, resume_replay=resume_replay,
-                          mcp_manager=mcp_manager))
-    finally:
-        mcp_manager.shutdown()
+    asyncio.run(_repl(supervisor,
+                      io=io, renderer=renderer, consolidator=consolidator,
+                      consolidation_queue=consolidation_queue,
+                      config=config, resume_hint=resume_hint,
+                      confirm_center=center, resume_replay=resume_replay))

@@ -115,10 +115,11 @@ class RunPythonTool(Tool):
         )
 
     def _persist_artifacts(self, files: list[dict]) -> None:
-        """把本次执行的产物推到用户 OSS（users/<uid>/files/analysis/<run-id>/<文件名>）。
+        """把本次执行的产物登记进平台文件管理（OSS + `bio_file_upload`）。
 
-        scratch 挂载在宿主、容器即弃——不推走的话产物随临时目录清理丢失。
-        存储不可用或无用户域时静默跳过（产物本地路径仍在 summary 里）。
+        scratch 挂载在宿主、容器即弃——不登记的话产物随临时目录清理丢失，网页也
+        看不到。对象键与元数据行都由 Java 写；单文件失败只记日志，不影响其余
+        产物与工具返回（本地路径仍在 summary 里）。
 
         Args:
             files: summary["files"] 列表（就地补 oss_key）。
@@ -129,21 +130,27 @@ class RunPythonTool(Tool):
         if not user_id or not files:
             return
         try:
+            from biopilot.common.platform import make_platform_client
             from biopilot.config import BioPilotConfig
-            from biopilot.common.storage.minio import make_object_store
-            store = make_object_store(BioPilotConfig.from_env())
-            if store is None:
-                return
+            platform = make_platform_client(BioPilotConfig.from_env())
+        except Exception as e:
+            logger.warning("分析产物持久化失败（不阻断工具返回）：%r", e)
+            return
+        try:
             run_id = Path(files[0]["path"]).parent.name
             for f in files:
                 src = Path(f["path"])
                 if not src.exists() or not src.is_file():
                     continue
-                key = f"users/{user_id}/files/analysis/{run_id}/{f['name']}"
-                store.put(key, src.read_bytes(), "application/octet-stream")
-                f["oss_key"] = key
-        except Exception as e:
-            logger.warning("分析产物持久化失败（不阻断工具返回）：%r", e)
+                try:
+                    created = platform.upload_artifact(
+                        str(user_id), run_id, str(f.get("name") or src.name),
+                        src.read_bytes(), "application/octet-stream")
+                    f["oss_key"] = created.get("oss_key", "")
+                except Exception as exc:
+                    logger.warning("分析产物上传失败（%s）：%r", f.get("name"), exc)
+        finally:
+            platform.close()
 
     @staticmethod
     def _policy_summary(policy: sb.SandboxPolicy) -> dict:

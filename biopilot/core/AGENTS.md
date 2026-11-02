@@ -8,7 +8,7 @@
 ## Module Positioning
 
 - 角色：`aggregator-manifest-dir`
-- 职责：集中放运行时能力——ReAct 引擎、LLM 接入、记忆、意图、安全、RAG、视觉、Skill、MCP 与它们共享的契约；本层只负责聚合与分层约束，具体行为由各子包自己定义。
+- 职责：集中放运行时能力——ReAct 引擎、LLM 接入、记忆、意图、安全、RAG、视觉、Skill 与它们共享的契约；本层只负责聚合与分层约束，具体行为由各子包自己定义。MCP 客户端与文献检索归 Java，不在本层。
 
 ## Directory Structure
 
@@ -18,7 +18,6 @@
 - `intent/` — 意图识别（可选预处理层）
 - `security/` — 安全中间件与防护能力
 - `skills/` — Skill 插件体系
-- `mcp/` — MCP 客户端平台
 - `rag/` — RAG 检索栈
 - `vision/` — 视觉分析
 - `tool/` — Tool 契约：`domain/`（entity 契约 + dto 结果载体）+ `services/`（加载期校验、工具运行时上下文）+ `constants/`
@@ -62,7 +61,7 @@
 ## Investigation Rule
 
 1. 先读本文件确认目标子包与它是否有自己的 manifest。
-2. 引擎与工具执行看 `agent/`；模型接入看 `llm/`；记忆看 `memory/`；意图看 `intent/`；安全看 `security/`；检索看 `rag/`；图表看 `vision/`；插件与外部工具看 `skills/` 与 `mcp/`。
+2. 引擎与工具执行看 `agent/`；模型接入看 `llm/`；记忆看 `memory/`；意图看 `intent/`；安全看 `security/`；检索看 `rag/`；图表看 `vision/`；插件与外部工具看 `skills/`。
 3. 共享叶子能力在 `biopilot/common/`，跨模块词汇在 `constants/`，工具契约在 `tool/`——排查「同一逻辑有两份实现」时先看这三处。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -81,7 +80,7 @@ conda run -n biopilot python -m pytest tests/core tests/agent -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 子包 manifest：[`agent/`](agent/AGENTS.md) / [`llm/`](llm/AGENTS.md) / [`memory/`](memory/AGENTS.md) / [`intent/`](intent/AGENTS.md) / [`rag/`](rag/AGENTS.md) / [`vision/`](vision/AGENTS.md) / [`security/`](security/AGENTS.md) / [`skills/`](skills/AGENTS.md) / [`mcp/`](mcp/AGENTS.md) / [`tool/`](tool/AGENTS.md) / [`constants/`](constants/AGENTS.md)
+- 子包 manifest：[`agent/`](agent/AGENTS.md) / [`llm/`](llm/AGENTS.md) / [`memory/`](memory/AGENTS.md) / [`intent/`](intent/AGENTS.md) / [`rag/`](rag/AGENTS.md) / [`vision/`](vision/AGENTS.md) / [`security/`](security/AGENTS.md) / [`skills/`](skills/AGENTS.md) / [`tool/`](tool/AGENTS.md) / [`constants/`](constants/AGENTS.md)
 - 跨层共享基础设施：[`../../common/AGENTS.md`](../../common/AGENTS.md)
 - 工具实现（面向 agent 的那一层）：[`../tools/AGENTS.md`](../tools/AGENTS.md)
 

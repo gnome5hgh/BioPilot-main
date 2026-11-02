@@ -1,8 +1,8 @@
 """共享 SSRF 安全 HTTP 客户端（私有模块，下划线前缀——不进 __init__ 再导出）。
 
-本模块是「SSRF 校验 + httpx 同步客户端」的通用基础设施，不只搜索用——arxiv/openalex
-搜索与 lookup_venue_rank 等级查询共用同一 SSRF mixin。PDF 下载的抓取与 SSRF 校验见
-FetchPdfTool（biopilot/tools/search/fetch_pdf.py）。
+本模块是「SSRF 校验 + httpx 同步客户端」的通用基础设施：需要抓取外部网页的工具
+共用同一 SSRF mixin。PDF 下载的抓取与 SSRF 校验见 FetchPdfTool
+（biopilot/tools/search/fetch_pdf.py）。
 """
 from biopilot.core.security.services.network import check_egress, resolve_url_target
 
@@ -10,8 +10,7 @@ from biopilot.core.security.services.network import check_egress, resolve_url_ta
 class _HttpClientMixin:
     """共享：SSRF 校验 + httpx 同步客户端（工具已在线程池跑）。
 
-    arxiv/openalex 的搜索 client 与 venue-rank 的抓取 client 都混入此 mixin——
-    "Http" 而非 "Search" 指其通用性（rank 查询不是搜索）。
+    "Http" 而非 "Search" 指其通用性：任何需要 SSRF 防护的外部抓取都可混入。
 
     Attributes:
         client: httpx.Client，实际发起请求的客户端（由混入方装配）

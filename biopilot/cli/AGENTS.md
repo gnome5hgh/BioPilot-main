@@ -26,7 +26,7 @@
 
 - **装配顺序即依赖方向**：顺序写在装配根函数（`services/assembly.py` 的 `main()`）的 docstring 里，改顺序等于改语义。
 - **预检是软依赖**：任何失败只产警告、不阻塞启动；`BIOPILOT_SKIP_BOOTSTRAP=1` 或非 TTY 直接跳过。**别把「预检失败」写成启动失败**。
-- **包 `__init__` 里有一处必须在任何 grpc 导入之前执行的环境守卫**（`GRPC_VERBOSITY`）：gRPC C 核心在初始化时读它，晚一步就会在 MCP 子进程 fork 时刷出成片的 poll-list 噪音。用 `setdefault`，不覆盖用户显式配置。
+- **包 `__init__` 里有一处必须在任何 grpc 导入之前执行的环境守卫**（`GRPC_VERBOSITY`）：gRPC C 核心在初始化时读它，晚一步就会在子进程 fork 时刷出成片的 poll-list 噪音。用 `setdefault`，不覆盖用户显式配置。
 
 ## Key Entry Points
 

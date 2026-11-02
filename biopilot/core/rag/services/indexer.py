@@ -261,19 +261,21 @@ class RagIndexer:
             json.dumps({"version": self._recipe, "docs": state}))
 
     # ---------- 文档解析 → 分块 ----------
-    def _parse_file(self, path: Path) -> _FileContent:
+    def _parse_file(self, path: Path, title: str | None = None) -> _FileContent:
         """解析一篇 PDF，产出 chunker 切块所需的全部原料。
 
         文本与章节由本地版面解析还原成 markdown，再按同一套「按 ``#`` 行分节」逻辑
-        切章节。文档标题取自版面/元数据，绝不用文件名充当标题。
+        切章节。标题由调用方提供（平台论文来自 `bio_paper.title`）；语料文件不传，
+        标题为空——本模块不再推导标题，绝不用文件名充当标题。
 
         Args:
             path: PDF 路径。
+            title: 论文标题；None/空表示无标题。
 
         Returns:
             _FileContent: 解析产物（title/sections）。
         """
-        extracted = extract_pdf(str(path))
+        extracted = extract_pdf(str(path), title or "")
         # 每个渲染块的位置随它拆出的每一行重复出现，分节后即成为该章节的
         # 位置集合（一个块内的行同属一段，位置相同是准确的）。
         lines: list[tuple[str, tuple[int, int, int, int, int]]] = []
@@ -530,7 +532,7 @@ class RagIndexer:
         return state
 
     # ---------- 公开 API ----------
-    def index_document(self, path: str) -> IndexOutcome:
+    def index_document(self, path: str, title: str | None = None) -> IndexOutcome:
         """单篇文档的增量重索引入口，文档写入/编辑/下载完成后调用。
 
         为什么必须"先删后建"？
@@ -551,6 +553,7 @@ class RagIndexer:
 
         Args:
             path: 文档的绝对路径（或相对路径，会被解析）。
+            title: 论文标题（平台论文从 `bio_paper.title` 传入；语料文件为空）。
 
         Returns:
             IndexOutcome，本次入库的状态（IndexOutcomeStatus）、写入块数与原因。
@@ -569,7 +572,7 @@ class RagIndexer:
             return IndexOutcome(IndexOutcomeStatus.SKIPPED, reason="不在语料根目录下（只索引 PDF）")
 
         # 1. 解析文档，获得切块原料（章节 + 标题）
-        parsed = self._parse_file(p)
+        parsed = self._parse_file(p, title)
         store = self.service._ensure_vector_store()
         bm25 = self.service._ensure_bm25()
 

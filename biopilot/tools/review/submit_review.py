@@ -79,7 +79,7 @@ class SubmitReviewTool(Tool):
         Returns:
             ToolResult；非法输入返回可行动报错文本，通过时回裁决全文并置 summary 的终止标记。
         """
-        # ① verdict 枚举校验（enum_check 共享，同 submit_download_review）
+        # ① verdict 枚举校验
         bad = enum_check(verdict, VERDICTS, "verdict")
         if bad:
             return ToolResult(text=bad)

@@ -21,18 +21,6 @@ def _exit_handler(args: list[str], ctx: CommandContext) -> None:
     pass  # 退出由 SlashCommand.exits 标志表达，handler 无事可做
 
 
-def _mcp_handler(args: list[str], ctx: CommandContext) -> None:
-    """/mcp：打印各 server 状态报告。
-
-    Args:
-        args: list[str]，命令参数（未使用）
-        ctx: CommandContext，依赖袋
-    """
-    ctx.renderer.print(ctx.mcp_manager.status_report()
-                       if ctx.mcp_manager
-                       else "未接入 MCP（config.yaml 顶层 mcp_servers 为空）。")
-
-
 def _version_handler(args: list[str], ctx: CommandContext) -> None:
     """/version：打印已安装的 biopilot 版本。
 
@@ -160,8 +148,6 @@ def build_default_registry(context: CommandContext) -> CommandRegistry:
     registry = CommandRegistry(context)
     registry.register(SlashCommand("exit", "/exit", "退出 REPL",
                                    _exit_handler, exits=True))
-    registry.register(SlashCommand("mcp", "/mcp", "MCP server 状态一览",
-                                   _mcp_handler))
     registry.register(SlashCommand("version", "/version", "显示版本号",
                                    _version_handler))
     registry.register(SlashCommand(

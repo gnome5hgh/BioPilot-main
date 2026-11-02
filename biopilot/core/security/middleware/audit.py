@@ -65,7 +65,7 @@ _span_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar("audit_s
 def _sanitize(value):
     """递归脱敏：凭证类**键名**命中的值替换为占位，其余（含正文）原样保留。
 
-    递归是必须的：工具入参与结构化 summary 都可能嵌套（如 MCP 工具的
+    递归是必须的：工具入参与结构化 summary 都可能嵌套（如检索工具的
     ``{"config": {"api_key": ...}}``、RAG 检索记录的 ``documents[].metadata``），
     只扫顶层会把嵌套凭证漏进日志。list 逐项走同一规则；字符串/标量原样返回。
 

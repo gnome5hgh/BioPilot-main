@@ -32,7 +32,8 @@ __all__ = ["MemoryDB"]
 # 数据库 Schema 定义（幂等建表）
 # ============================================================================
 # 表名规范：系统域 sys_<entity>，BioPilot 业务域 bio_<domain>_<entity>。
-# 这里只列引擎侧的表；Java 侧的 sys_* / bio_project 由 server/script/sql 维护。
+# 这里只列引擎侧的表；平台表（sys_*、bio_project、bio_paper、bio_document、
+# bio_file_upload、bio_schedule_task、bio_citation 等）由 server/script/sql 维护。
 _SCHEMA = """
 -- bio_memory_block 表：核心记忆块存储（业务主表）
 CREATE TABLE IF NOT EXISTS bio_memory_block (
@@ -102,70 +103,6 @@ CREATE TABLE IF NOT EXISTS bio_security_audit_event (
     KEY idx_audit_session (session_id, created_at),
     KEY idx_audit_user (user_id, created_at)
 );
--- bio_file_upload 表：对话附件（数据文件先入 OSS，任务执行时挂进沙箱）
-CREATE TABLE IF NOT EXISTS bio_file_upload (
-    id VARCHAR(64) NOT NULL,
-    user_id VARCHAR(191) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    oss_key VARCHAR(500) NOT NULL,
-    size_bytes BIGINT NOT NULL DEFAULT 0,
-    content_type VARCHAR(120) NULL,
-    created_at VARCHAR(40) NOT NULL,
-    PRIMARY KEY (id),
-    KEY idx_upload_user (user_id)
-);
--- bio_schedule_task 表：定时任务（webapi 进程内调度器消费；REPL 不跑调度）
-CREATE TABLE IF NOT EXISTS bio_schedule_task (
-    id VARCHAR(64) NOT NULL,
-    user_id VARCHAR(191) NOT NULL,
-    conversation_id VARCHAR(64) NOT NULL,
-    name VARCHAR(200) NOT NULL,
-    task TEXT NOT NULL,
-    interval_minutes INTEGER NOT NULL,
-    paused INTEGER NOT NULL DEFAULT 0,
-    last_run_at VARCHAR(40) NULL,
-    next_run_at VARCHAR(40) NOT NULL,
-    created_at VARCHAR(40) NOT NULL,
-    PRIMARY KEY (id),
-    KEY idx_sched_user (user_id),
-    KEY idx_sched_next (next_run_at)
-);
-
--- bio_paper 表：用户论文目录元数据（原文在 MinIO users/<uid>/papers/，行级 user_id 隔离）
-CREATE TABLE IF NOT EXISTS bio_paper (
-    id VARCHAR(64) NOT NULL,             -- 论文唯一标识
-    user_id VARCHAR(191) NOT NULL,       -- 归属用户
-    title VARCHAR(500) NOT NULL,         -- 标题（解析器出口；宁空勿错）
-    file_name VARCHAR(255) NULL,         -- 原始文件名（展示与同名查重用；不参与标题）
-    oss_key VARCHAR(500) NOT NULL,       -- MinIO 对象键
-    size_bytes BIGINT NOT NULL DEFAULT 0,
-    indexed INTEGER NOT NULL DEFAULT 0,  -- 兼容旧字段：1=已进知识库且索引成功
-    kb_enabled TINYINT NOT NULL DEFAULT 0,  -- 用户是否把它加入知识库（0=只躺在文件管理）
-    index_status VARCHAR(20) NOT NULL DEFAULT 'not_added',  -- not_added/queued/indexing/indexed/failed
-    index_error VARCHAR(500) NULL,       -- 最近一次索引失败原因
-    indexed_at VARCHAR(40) NULL,         -- 最近一次索引成功时间
-    chunk_count INT NOT NULL DEFAULT 0,  -- 最近一次索引产出的分块数
-    created_at VARCHAR(40) NOT NULL,
-    seq BIGINT NOT NULL AUTO_INCREMENT,
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_papers_seq (seq),
-    KEY idx_papers_user (user_id)
-);
-
--- bio_document 表：文档编辑器产物（markdown 存 OSS，内容在行内 TEXT）
-CREATE TABLE IF NOT EXISTS bio_document (
-    id VARCHAR(64) NOT NULL,
-    user_id VARCHAR(191) NOT NULL,
-    name VARCHAR(200) NOT NULL,
-    content MEDIUMTEXT NULL,
-    oss_key VARCHAR(500) NULL,
-    updated_at VARCHAR(40) NOT NULL,
-    seq BIGINT NOT NULL AUTO_INCREMENT,
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_documents_seq (seq),
-    KEY idx_documents_user (user_id)
-);
-
 -- bio_message 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS bio_message (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识
@@ -203,13 +140,8 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
     ("bio_agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
     ("bio_agent_state", "project_id", "project_id VARCHAR(64) NULL"),
-    # 论文从「上传即索引」改为「用户显式加入知识库」：旧库靠这些列承接状态机。
-    ("bio_paper", "file_name", "file_name VARCHAR(255) NULL"),
-    ("bio_paper", "kb_enabled", "kb_enabled TINYINT NOT NULL DEFAULT 0"),
-    ("bio_paper", "index_status", "index_status VARCHAR(20) NOT NULL DEFAULT 'not_added'"),
-    ("bio_paper", "index_error", "index_error VARCHAR(500) NULL"),
-    ("bio_paper", "indexed_at", "indexed_at VARCHAR(40) NULL"),
-    ("bio_paper", "chunk_count", "chunk_count INT NOT NULL DEFAULT 0"),
+    # 平台表（bio_paper/bio_document/bio_file_upload/bio_schedule_task）的建表与
+    # 加列归 Java（server/script/sql）；此处只维护引擎自己的表。
 )
 
 #: 旧表名 → 规范表名。init_schema 在建表前自动改名，保证存量库升级不丢数据。
@@ -219,12 +151,10 @@ _RENAMED_TABLES: tuple[tuple[str, str], ...] = (
     ("block_history", "bio_memory_block_history"),
     ("consolidation_cursor", "bio_memory_consolidation_cursor"),
     ("audit_event", "bio_security_audit_event"),
-    ("uploaded_file", "bio_file_upload"),
-    ("scheduled_task", "bio_schedule_task"),
-    ("papers", "bio_paper"),
-    ("documents", "bio_document"),
     ("messages", "bio_message"),
     ("agent_state", "bio_agent_state"),
+    # 平台表旧名（papers/documents/uploaded_file/scheduled_task）由 Java
+    # server/script/sql/migrations/2026-11-02-rename-tables.sql 迁移。
 )
 
 #: 连接池上限：覆盖「多线程子 agent 并发写记忆 + 事务钉住」的常规并发量。
@@ -362,7 +292,6 @@ class MemoryDB:
                     if stmt.strip():
                         cur.execute(stmt)
                 self.migrate_additive_columns(cur)
-                self._backfill_papers(cur)
             conn.commit()
         finally:
             self._release(conn)
@@ -390,24 +319,6 @@ class MemoryDB:
                     f"旧表 {old} 与新表 {new} 同时存在，请先人工合并数据后再启动")
             if old in existing:
                 cur.execute(f"RENAME TABLE `{old}` TO `{new}`")
-
-    def _backfill_papers(self, cur) -> None:
-        """把旧库的 papers 行迁到新的知识库状态字段（幂等）。
-
-        旧版本只有 indexed 布尔值：补 file_name 供展示/查重；indexed=1 的行视为
-        用户已加入知识库。用户主动移出后会把 indexed 置 0，因此这个条件不会
-        把已移出的论文重新启用。
-
-        Args:
-            cur: 当前游标（init_schema 已开启连接）。
-        """
-        cur.execute(
-            "UPDATE bio_paper SET file_name=SUBSTRING_INDEX(oss_key, '/', -1)"
-            " WHERE file_name IS NULL OR file_name=''")
-        cur.execute(
-            "UPDATE bio_paper SET kb_enabled=1, index_status='indexed',"
-            " indexed_at=COALESCE(indexed_at, created_at)"
-            " WHERE indexed=1 AND kb_enabled=0 AND index_status='not_added'")
 
     def migrate_additive_columns(self, cur=None) -> None:
         """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等）。

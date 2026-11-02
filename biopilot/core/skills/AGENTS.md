@@ -76,7 +76,7 @@ conda run -n biopilot python -m pytest tests/core -k "skill" -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
-- 设计依据：ADR 0011（Skill 系统）
+- 设计依据：ADR 0010（Skill 系统）
 - Skill 根目录与入库规则：[`../../../.biopilot/AGENTS.md`](../../../.biopilot/AGENTS.md)
 - 工具封装：[`../../tools/AGENTS.md`](../../tools/AGENTS.md)
 

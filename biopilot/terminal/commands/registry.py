@@ -27,12 +27,10 @@ class CommandContext:
     Attributes:
         io: InputIO，输入适配（需要交互的子命令用）
         renderer: StreamRenderer，输出通道
-        mcp_manager: MCP 管理器 | None（None 表示未接入）
     """
 
     io: InputIO
     renderer: StreamRenderer
-    mcp_manager: object | None = None
 
 
 @dataclass(frozen=True)

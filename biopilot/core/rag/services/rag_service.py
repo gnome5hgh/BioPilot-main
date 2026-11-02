@@ -301,84 +301,21 @@ class RAGService:
                 max_query_chars=self.config.rag.query_rewrite.max_query_chars)
         return self._rewriter
 
-    def index_user_papers(self, user_id: str, db, store) -> dict:
-        """把该用户在 bio_paper 表登记的论文（原文在 OSS）索引进本人 collection。
-
-        平台的论文原文在对象存储、元数据行在 bio_paper 表；本方法把它们同步到
-        本域的镜像语料根（<paper_id>.pdf，稳定路径保证块 id 跨次重建稳定），
-        然后走与本地语料同一条 index_all 管线（增量、删除清理、BM25 重建）。
-        索引成功的行置 bio_paper.indexed=1；解析/取回失败的行保持 0，下次重建重试。
-        bio_paper 行被删除的论文，其镜像文件同步删除，index_all 据此清掉旧块。
-
-        Args:
-            user_id: 归属用户（即本服务实例的用户域）。
-            db: MemoryDB，bio_paper 元数据读写。
-            store: 对象存取器（put/get 语义，论文原文来源）。
-
-        Returns:
-            dict: synced（本次下载篇数）/ indexed（置 1 篇数）/ failed（失败清单）。
-        """
-        rows = db.execute(
-            "SELECT id, oss_key, size_bytes, indexed FROM bio_paper WHERE user_id=?",
-            (user_id,)).fetchall()
-        mirror = Path(self.config.corpus.pdf_dir)
-        mirror.mkdir(parents=True, exist_ok=True)
-
-        wanted: dict[str, dict] = {}
-        synced = 0
-        for r in rows:
-            paper_id = r["id"]
-            target = mirror / f"{paper_id}.pdf"
-            wanted[str(target)] = True
-            exists = target.exists() and target.stat().st_size > 0
-            if exists:
-                continue
-            data = store.get(r["oss_key"])
-            if not data:
-                continue
-            target.write_bytes(data)
-            synced += 1
-
-        # 镜像里已不在 bio_paper 表的文件清掉（论文被删 → 块随 index_all 清理）
-        for old in mirror.glob("*.pdf"):
-            if str(old) not in wanted:
-                old.unlink()
-
-        with self.lock:
-            outcome = self.get_indexer().index_all()
-
-        # 状态里有镜像路径 = 该篇解析与入库成功（empty/skipped 不会写状态）
-        raw = self.get_indexer().read_state()
-        state = (raw or (0, {}))[1]
-        indexed = 0
-        failed: list[dict] = []
-        for r in rows:
-            target = str(mirror / f"{r['id']}.pdf")
-            if state.get(target):
-                if not r["indexed"]:
-                    db.execute("UPDATE bio_paper SET indexed=1 WHERE id=? AND user_id=?",
-                               (r["id"], user_id))
-                indexed += 1
-            else:
-                failed.append({"paper_id": r["id"],
-                               "reason": "未进入索引（对象取回或解析失败）"})
-        return {"synced": synced, "indexed": indexed,
-                "failed": failed, "changed": getattr(outcome, "changed", [])}
-
     # ---------- 对外便捷入口（索引/检索持同一把锁） ----------
-    def index_document(self, path: str) -> IndexOutcome:
+    def index_document(self, path: str, title: str | None = None) -> IndexOutcome:
         """单篇文档的增量重索引（持锁）。
 
         调用索引器的 index_document 方法，在锁保护下执行，保证索引状态一致。
 
         Args:
             path: 文档的绝对路径。
+            title: 论文标题（平台论文从 `bio_paper.title` 传入；语料文件为空）。
 
         Returns:
             IndexOutcome，本次入库的状态、块数与原因。
         """
         with self.lock:
-            return self.get_indexer().index_document(path)
+            return self.get_indexer().index_document(path, title=title)
 
     def index_all(self) -> IndexRunOutcome:
         """全量增量扫描：重索引新增/变更文档、清理已删除文档（持锁）。

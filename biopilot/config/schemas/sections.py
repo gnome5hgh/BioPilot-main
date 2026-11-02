@@ -2,14 +2,13 @@
 
 本文件是**所有可调参数默认值的唯一声明点**——改默认值只改这里；``config.yaml``
 是纯覆盖文件（不重复声明默认值），环境变量优先级最高。分区与 YAML 顶层键同名：
-``runtime`` / ``corpus`` / ``intent`` / ``rag{...}`` / ``memory`` / ``session`` /
-``agents``，外加保留顶层的 ``llm`` / ``vision`` / ``mcp_servers``。
+``runtime`` / ``platform`` / ``corpus`` / ``intent`` / ``rag{...}`` / ``memory`` /
+``session`` / ``agents``，外加保留顶层的 ``llm`` / ``vision``。
 
 加载与派生逻辑在 ``loader.py``（递归合并、env 派生、YAML 读取），对外只经
 ``biopilot.config`` 取。
 """
-import re
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from pydantic import Field
 from typing import Literal
 
@@ -176,6 +175,31 @@ class RuntimeConfig:
 
 
 @dataclass
+class PlatformConfig:
+    """Java 平台后端连接：agent 经内部端点调用平台能力（如文献检索）。
+
+    引擎不自建平台业务实现；需要外部能力时调 Java 的 ``/internal/*``。
+    这与 Java 调引擎内部端点是同一套共享 token 语义，只是方向相反。
+
+    Attributes:
+        base_url: str，SpringBoot 地址（本机 8080，compose 内为 http://server:8080）
+        internal_token: str，内部调用共享 token；留空时回退环境变量
+            ``BIOPILOT_INTERNAL_TOKEN``（与引擎入站校验同一个 secret）
+        search_timeout: float，单次内部检索请求的超时秒数
+        transfer_timeout: float，文件上传/下载等大流量内部请求的超时秒数
+    """
+
+    #: SpringBoot 地址；容器部署由 compose 注入 http://server:8080
+    base_url: str = "http://127.0.0.1:8080"
+    #: 内部调用 token；留空回退 BIOPILOT_INTERNAL_TOKEN
+    internal_token: str = ""
+    #: 文献检索等内部请求的超时（秒）；要大于 Java 侧单源超时，给聚合留出余量
+    search_timeout: float = 90.0
+    #: 文件传输类内部请求的超时（秒）
+    transfer_timeout: float = 120.0
+
+
+@dataclass
 class CorpusConfig:
     """语料库与产物路径。个人绝对路径，经 config.yaml / env 提供，留空走各自回退。
 
@@ -183,7 +207,6 @@ class CorpusConfig:
         note_dir: str，笔记目录（产出落点，不是索引源）
         pdf_dir: str，PDF 目录（RAG 索引源）
         research_dir: str，研究产物目录（空则回退 workspace/research）
-        citations_bib_path: str，references.bib 路径（引用库真相源；空则回退默认）
     """
 
     #: 语料库笔记目录（笔记产物的默认落点；不进检索知识库,note/）——留空则文件类工具无可用根。
@@ -196,9 +219,6 @@ class CorpusConfig:
 
     #: 研究产物目录（产物区,research/）——空则由 factory 回退 workspace/research。
     research_dir: str = ""
-
-    #: references.bib 路径（引用库真相源）。空则回退 workspace/citations/references.bib
-    citations_bib_path: str = ""
 
 
 # ── intent ──────────────────────────────────────────────────────────────────
@@ -262,8 +282,7 @@ class SecurityConfig:
     """安全模块配置：外部来源工具的预批准名单。
 
     预批准是**降档表达信任**（降到会话免问档内），不是旁路——会话把免问上限调严
-    （如 confirm_above=low）时，名单内的工具照样会被问。MCP server 配置里的
-    write_tools 按 server 书写，装配时并入同一集合，两种写法等价。
+    （如 confirm_above=low）时，名单内的工具照样会被问。
 
     Attributes:
         pre_approved_tools: list[str]，允许静默执行的工具名（外部来源工具默认要问）
@@ -721,9 +740,8 @@ class AgentsConfig:
     timeouts 是自由 dict（agent 类型 → 秒数），仅 YAML 可配（dict 无自然 env 形态）。
     各值按该 agent 完整任务的典型时长留余量设定：note-agent 覆盖含内审重试的纯笔记
     端到端，paper-agent 覆盖大批量新颖性检索，review-agent 覆盖全文审阅，research-agent
-    覆盖完整研究链路；paper-agent 还要覆盖读整篇与图表问题，citation-agent 要覆盖
-    逐篇读首页取元数据加查引/入库/渲染一整套，memory-agent 要覆盖记忆与清单的读写，
-    bio-agent 要覆盖读数据、多步分析执行与失败重试的整轮。表里没有的类型落回
+    覆盖完整研究链路；paper-agent 还要覆盖读整篇与图表问题，memory-agent 要覆盖
+    记忆与清单的读写，bio-agent 要覆盖读数据、多步分析执行与失败重试的整轮。表里没有的类型落回
     SpawnSubAgentTool.timeout 的类默认（120s）——新增角色时一并补进本表，别让它在表外
     静默用类默认。某 agent 反复撞帽说明任务时长需要重新评估，而不是继续调大。
 
@@ -743,93 +761,9 @@ class AgentsConfig:
         default_factory=lambda: {
             "note-agent": 900, "paper-agent": 420, "review-agent": 300,
             "research-agent": 1800, "rag-agent": 900,
-            "citation-agent": 300, "memory-agent": 180, "bio-agent": 1800,
+            "memory-agent": 180, "bio-agent": 1800,
         })
 
     #: 只有单次派发内需要串联多阶段的角色才提额度；表外角色一律用 Agent 的默认 20 轮。
     max_turns: dict[str, int] = field(
         default_factory=lambda: {"research-agent": 45, "bio-agent": 40})
-
-
-_SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
-
-
-@dataclass
-class McpServerConfig:
-    """单个 MCP server 的接入配置（config.yaml 顶层 mcp_servers 段；仅 YAML，无环境变量形态）。
-
-    过滤顺序 allowed → disabled →
-    风险分级；写类工具默认禁用，write_tools 显式开启；uvx 冷启动可能下载包，
-    connect_timeout 默认高于业界 5s。
-
-    Attributes:
-        transport: str，传输方式：stdio | http
-        command: str，stdio 必填：可执行文件
-        args: list[str]，stdio 启动参数
-        env: dict[str, str]，stdio 子进程环境变量
-        url: str，http 必填
-        headers: dict[str, str]，http 请求头
-        enabled: bool，是否启用该 server
-        agents: list[str]，可注入的 agent 类型名单
-        connect_timeout: float，连接超时（秒）
-        call_timeout: float，单次调用超时（秒）
-        disabled_tools: list[str]，显式屏蔽的工具名
-        allowed_tools: list[str] | None，白名单（None = 不限制）
-        write_tools: list[str]，预批准写入的工具（免逐次确认）
-    """
-
-    transport: str = "stdio"            # "stdio" | "http"
-    command: str = ""                   # stdio 必填：可执行文件（如 uvx）
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
-    url: str = ""                       # http 必填
-    headers: dict[str, str] = field(default_factory=dict)
-    enabled: bool = True
-    agents: list[str] = field(default_factory=lambda: ["paper-agent"])
-    connect_timeout: float = 30.0
-    call_timeout: float = 120.0
-    disabled_tools: list[str] = field(default_factory=list)
-    allowed_tools: list[str] | None = None
-    write_tools: list[str] = field(default_factory=list)
-
-    def validate(self, name: str) -> None:
-        """校验单个 server 配置：名字格式、transport 取值、以及各 transport 的必填项。
-
-        Args:
-            name: str，server 名（用于错误信息与格式校验）
-        """
-        if not _SERVER_NAME_RE.fullmatch(name):
-            raise ValueError(f"MCP server 名非法: '{name}'（须匹配 [a-zA-Z0-9_-]+）")
-        if self.transport not in ("stdio", "http"):
-            raise ValueError(f"MCP server '{name}': 非法 transport '{self.transport}'（stdio|http）")
-        if self.transport == "stdio" and not self.command:
-            raise ValueError(f"MCP server '{name}': transport=stdio 必须提供 command")
-        if self.transport == "http" and not self.url.startswith(("http://", "https://")):
-            raise ValueError(f"MCP server '{name}': transport=http 必须提供 http(s) url")
-
-
-def parse_mcp_servers(raw: dict | None) -> dict[str, McpServerConfig]:
-    """yaml 原始 dict → 校验后的 McpServerConfig 表；未知键忽略（同仓库 hasattr 守卫精神）。
-
-    Args:
-        raw: dict | None，YAML 里 mcp_servers 段的原始值
-
-    Returns:
-        server 名 → 校验通过的 McpServerConfig；raw 为 None 返回空表。
-    """
-    # 顶层类型守卫：用户写成 mcp_servers: [a, b]（列表）或字符串时，直接
-    # .items() 会抛裸 AttributeError——改为干净的 ValueError。
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"mcp_servers: 顶层配置必须是映射（server 名 → 配置段），得到 {type(raw).__name__}")
-    known = {f.name for f in fields(McpServerConfig)}
-    servers: dict[str, McpServerConfig] = {}
-    for name, item in raw.items():
-        if not isinstance(item, dict):
-            raise ValueError(f"MCP server '{name}': 配置段必须是映射")
-        cfg = McpServerConfig(**{k: v for k, v in item.items() if k in known})
-        cfg.validate(name)
-        servers[name] = cfg
-    return servers

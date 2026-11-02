@@ -22,7 +22,6 @@ class IntentType(StrEnum):
     PAPER = "paper"                # 论文事务：检索/下载/读指定论文/分析图表/删 PDF
     NOTE = "note"                  # 笔记事务：撰写/删除笔记
     RESEARCH = "research"          # 选题事务：选题发现/研究计划/删选题产物
-    CITATION = "citation"          # 引用库事务：references.bib 同步/增删/查询导出
     INDEX = "index"                # 语料索引事务：入库/重建/索引体检
     MEMORY = "memory"              # 记忆事务：记忆与清单查询、记账；**用户陈述自身信息**也归此类
     QUESTION = "question"          # 即问即答：先自答，需依据时取材料

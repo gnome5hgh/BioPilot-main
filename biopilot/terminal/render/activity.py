@@ -91,8 +91,7 @@ def format_call_line(tool_name: str, args: dict | None) -> str:
 
 
 #: 工具名 → (emoji+动词, 计数词)。未知工具走 _DEFAULT。
-#: 完整性由测试守护：遍历 biopilot.tools 包全部 Tool 子类，注册名必须都在表内或有豁免
-#: （mcp__* 前缀动态解析）。
+#: 完整性由测试守护：遍历 biopilot.tools 包全部 Tool 子类，注册名必须都在表内。
 ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     # ── 文件与检索 ──
     "read_file": ("🔍 查阅", "文件"),
@@ -104,6 +103,7 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "index_paths": ("🗂️ 入库", "次"),
     "reindex_all": ("🔄 收敛", "次"),
     "index_status": ("🩺 体检", "次"),
+    "search_literature": ("📚 检索", "次"),
     "fetch_pdf": ("📥 下载", "次"),
     "format_check": ("✅ 校验", "次"),
     # ── 写入与删除 ──
@@ -117,7 +117,6 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "format_citations": ("📎 排版", "次"),
     "remove_citation": ("📎 删引", "次"),
     "sync_citations": ("📎 同步", "次"),
-    "lookup_venue_rank": ("🏛 查刊", "次"),
     # ── 视觉 ──
     "analyze_figures": ("🖼️ 解析", "次"),   # 视觉解析 PDF 插图（note-agent 高频、耗时数秒）
     # ── 记忆与笔记 ──
@@ -130,7 +129,6 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "memory_read": ("📖 读块", "次"),
     "save_document": ("📄 成稿入库", "次"),
     "run_python": ("🐍 沙箱执行", "次"),
-    "extract_title": ("🏷️ 摘题", "次"),
     "unread_list_add": ("📋 未读", "次"),
     "unread_list_remove": ("📋 未读", "次"),
     "read_tool_result": ("📄 取回", "次"),
@@ -138,25 +136,19 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "spawn_sub_agent": ("🤖 子任务", "次"),
     "load_skill": ("🧩 技能", "次"),
     "submit_review": ("📮 提审", "次"),
-    "submit_download_review": ("📮 提审", "次"),
 }
 _DEFAULT = ("🔧 执行", "次")
 
 
 def activity_label(tool_name: str) -> tuple[str, str]:
-    """工具名 → (emoji+动词, 计数词)；MCP 工具解析 mcp__<srv>__<tool> 前缀。
+    """工具名 → (emoji+动词, 计数词)；未知工具走默认标签。
 
     Args:
-        tool_name: str，工具名（含 mcp__ 动态前缀）
+        tool_name: str，工具名
 
     Returns:
-        (emoji+动词, 计数词)；未知工具与 MCP 工具各有兜底。
+        (emoji+动词, 计数词)；未知工具用默认标签。
     """
-    if tool_name and tool_name.startswith("mcp__"):
-        parts = tool_name.split("__")
-        server = parts[1] if len(parts) > 1 and parts[1] else "?"
-        tool = parts[2] if len(parts) > 2 and parts[2] else "?"
-        return (f"🔌 {server} · {tool}", "次")
     return ACTIVITY_LABELS.get(tool_name or "", _DEFAULT)
 
 

@@ -54,7 +54,7 @@
 
 ## Dependencies And Collaboration
 
-- 被 `tools/`（所有具体工具）、`core/agent`（执行管道）、`core/security`（读元数据做判定）、`core/skills` 与 `core/mcp`（第三方工具桥接后同样遵守本契约）消费。
+- 被 `tools/`（所有具体工具）、`core/agent`（执行管道）、`core/security`（读元数据做判定）与 `core/skills`（第三方工具同样遵守本契约）消费。
 - 依赖 `core/constants/` 的取值枚举；本包不依赖任何上层模块。
 
 ## Investigation Rule

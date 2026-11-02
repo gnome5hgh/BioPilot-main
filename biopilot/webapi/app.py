@@ -73,6 +73,37 @@ def _shared_db():
     return _db_instance
 
 
+_platform_instance = None
+
+
+def _platform_client():
+    """Java 平台内部端点客户端（懒建单例）。"""
+    global _platform_instance
+    if _platform_instance is None:
+        from biopilot.common.platform import make_platform_client
+        from biopilot.config import BioPilotConfig
+        _platform_instance = make_platform_client(BioPilotConfig.from_env())
+    return _platform_instance
+
+
+def _safe_component(value: str) -> str:
+    """把用户/会话/文件名归一化成可安全拼进本地路径的片段。
+
+    只处理路径分隔符与 ``..``，保留中文等正常文件名字符；空值回退 ``unknown``。
+
+    Args:
+        value: 原始片段。
+
+    Returns:
+        不含路径分隔符与上跳片段的字符串。
+    """
+    text = str(value or "").replace("\\", "_").replace("/", "_")
+    text = text.replace("\x00", "").strip()
+    while ".." in text:
+        text = text.replace("..", "_")
+    return text or "unknown"
+
+
 #: 确认框里不展示取值的参数名（凭证类一律脱敏，避免用户在看确认框时泄露密钥）
 _SECRET_PARAM_KEYS = {"api_key", "apikey", "token", "password", "secret", "access_key", "secret_key"}
 
@@ -298,56 +329,53 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                              conversation_id: str) -> list[dict]:
         """把消息引用的附件落成本地文件并返回清单（发给模型的元数据行）。
 
-        附件正文存 OSS；这里取回到 ``users/<uid>/uploads/<会话>/``（持久本地
-        副本）——沙箱按会话挂载该目录，模型经清单里的路径读数据。归属双条件，
-        拿别人的 file_id 解析不到。
+        身份与字节都由 Java 解析：这里只传 ``(kind, id)``，拿回字节与服务器侧
+        元数据。body 里的 oss_key/name/size 一律忽略——它们来自浏览器，不能作为
+        归属依据（否则可以把别人的 oss_key 塞进来读走别人的文件）。
+
+        本地副本落到 ``users/<uid>/uploads/<会话>/``，沙箱按会话挂载该目录；
+        路径片段先归一化，防客户端传入 ``..`` 写出上传目录。
 
         Args:
             x_user_id: 归属用户。
-            attachments: 消息体里的 {file_id|paper_id, name, size, oss_key} 列表。
+            attachments: 消息体里的 {file_id|paper_id, ...} 列表。
             conversation_id: 会话 id（本地副本目录的一部分）。
 
         Returns:
             list[dict]: [{name, size, path, file_id, paper_id, oss_key}]，本地绝对路径清单。
         """
-        db = _shared_db()
-        out = []
-        for att in attachments or []:
+        out: list[dict] = []
+        if not attachments:
+            return out
+        base = (pathlib.Path(cfg_runtime_workspace()) / "users"
+                / _safe_component(x_user_id) / "uploads"
+                / _safe_component(conversation_id))
+        for att in attachments:
             att = att or {}
-            file_id = att.get("file_id", "")
-            paper_id = att.get("paper_id", "")
-            oss_key = att.get("oss_key", "")
-            name = att.get("name", "")
-            size = att.get("size", 0)
-            if not oss_key and file_id:
-                row = db.execute(
-                    "SELECT name, oss_key, size_bytes FROM bio_file_upload"
-                    " WHERE id=? AND user_id=?", (file_id, x_user_id)).fetchone()
-                if row is None:
-                    continue
-                name, oss_key, size = row["name"], row["oss_key"], row["size_bytes"]
-            elif not oss_key and paper_id:
-                prow = db.execute(
-                    "SELECT oss_key FROM bio_paper WHERE id=? AND user_id=?",
-                    (paper_id, x_user_id)).fetchone()
-                if prow is None:
-                    continue
-                oss_key = prow["oss_key"]
-                name = name or pathlib.PurePosixPath(oss_key).name
-            if not oss_key:
+            file_id = str(att.get("file_id") or "")
+            paper_id = str(att.get("paper_id") or "")
+            if paper_id:
+                kind, obj_id = "paper", paper_id
+            elif file_id:
+                kind, obj_id = "file", file_id
+            else:
                 continue
-            data = _object_store().get(oss_key) if _object_store() is not None else None
-            if data is None:
+            try:
+                data, meta = _platform_client().attachment(x_user_id, kind, obj_id)
+            except Exception as exc:
+                logger.warning("附件取回失败（%s=%s）：%s", kind, obj_id, exc)
                 continue
-            target = (pathlib.Path(cfg_runtime_workspace()) / "users" / x_user_id
-                      / "uploads" / conversation_id
-                      / f"{file_id or paper_id}_{name}")
+            if not data:
+                continue
+            name = _safe_component(meta.get("name") or obj_id)
+            target = base / f"{_safe_component(obj_id)}_{name}"
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists() or target.stat().st_size != len(data):
                 target.write_bytes(data)
-            out.append({"name": name, "size": size or len(data),
+            out.append({"name": name, "size": meta.get("size") or len(data),
                         "path": str(target), "file_id": file_id or None,
-                        "paper_id": paper_id or None, "oss_key": oss_key})
+                        "paper_id": paper_id or None,
+                        "oss_key": meta.get("oss_key") or ""})
         return out
 
     def _attachment_meta(attachments: list[dict]) -> list[dict]:
@@ -419,23 +447,22 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         marker = content.find("\n\n")
         return content[marker + 2:] if marker >= 0 else content
 
-    # ---------- 定时任务（定义维护归 Java；这里只跑到期扫描与执行） ----------
-
-    async def _scheduler_loop():
-        """调度循环：每 60 秒扫一次到期任务（扫描与执行逻辑在模块级 run_due_schedules）。"""
-        while True:
-            try:
-                await run_due_schedules(_shared_db(), agent_factory,
-                                        _sched_running, gate=llm_gate)
-            except Exception:
-                logger.warning("调度轮询异常", exc_info=True)
-            await asyncio.sleep(60)
+    # ---------- 后台循环（定时任务调度已归 Java，这里只保留终端的回收与 KB 对账） ----------
 
     @app.on_event("startup")
-    async def _start_scheduler():
-        """应用启动时拉起调度循环与终端回收；随应用关停由事件循环统一回收。"""
-        app.state.scheduler = asyncio.create_task(_scheduler_loop())
+    async def _start_background():
+        """应用启动时拉起对账循环与终端回收；随应用关停由事件循环统一回收。
+
+        启动时先补跑一次知识库对账：上一进程崩溃留下的 indexing/queued 行、
+        跨栈写入留下的半截状态，都会在这里被拉回一致。
+        """
         app.state.shell_reaper = asyncio.create_task(shell_manager.reaper())
+        app.state.kb_reconciler = asyncio.create_task(_kb_reconcile_loop())
+        try:
+            for user_id in await asyncio.to_thread(_users_needing_reconcile):
+                _schedule_user_index(user_id)
+        except Exception:
+            logger.warning("启动时知识库状态恢复失败", exc_info=True)
 
     @app.get("/chat/history")
     async def chat_history(
@@ -803,29 +830,39 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 yaml_mod.safe_dump(existing, fh, allow_unicode=True)
         return {"status": "ok", "applied": applied}
 
-    # 删户两阶段：标记 → 等活动清零 → 物理删除（幂等）
-    @app.post("/admin/users/{target_id}/mark-deleting")
-    async def mark_deleting(target_id: str, x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+    # 删户两阶段：标记 → 等活动清零 → 物理删除（幂等）。只清引擎数据；
+    # 平台表行与 OSS 对象由 Java 在同一个删户流程里清理。
+    @app.post("/internal/users/{target_id}/mark-deleting")
+    async def mark_deleting(
+        target_id: str,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        _internal_user(x_user_id, x_internal_token)
         db = _shared_db()
         db.execute("UPDATE bio_agent_state SET user_id=CONCAT('deleting:', user_id)"
                    " WHERE user_id=? AND user_id NOT LIKE 'deleting:%'", (target_id,))
         return {"status": "marked"}
 
-    @app.post("/admin/users/{target_id}/purge")
-    async def purge_user(target_id: str, x_user_id: str | None = Header(default=None)) -> dict:
+    @app.post("/internal/users/{target_id}/purge")
+    async def purge_user(
+        target_id: str,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
         """物理清除该用户的全部引擎数据（幂等，可重复执行）。
 
         agent_state 在 mark-deleting 阶段被改名为 `deleting:<uid>`，这里两种
-        形态都清；其余表从未改名，按原 uid 删。无论是否先走过 mark 都收敛。
+        形态都清；其余引擎表从未改名，按原 uid 删。平台表（论文/文档/引用/项目/
+        定时任务）与 OSS 对象归 Java，不在这里删。
         """
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        _internal_user(x_user_id, x_internal_token)
         db = _shared_db()
-        for table in ("bio_message", "bio_memory_block", "bio_memory_block_history",
-                      "bio_paper", "bio_document"):
-            db.execute(f"DELETE FROM {table} WHERE user_id=?", (target_id,))
+        for table in ("bio_message", "bio_memory_block", "bio_memory_block_history"):
+            try:
+                db.execute(f"DELETE FROM {table} WHERE user_id=?", (target_id,))
+            except Exception:
+                logger.warning("删户清理跳过 %s（表不存在或不可达）", table)
         db.execute("DELETE FROM bio_agent_state WHERE user_id=?"
                    " OR user_id LIKE CONCAT('deleting:', ?)", (target_id, target_id))
         return {"status": "purged", "user_id": target_id}
@@ -903,7 +940,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             shell_manager.detach(session, ws)
 
 
-    # ---------- 内部接口（只给 Java 平台调；索引状态仍由引擎独占写） ----------
+    # ---------- 内部接口（只给 Java 平台调） ----------
 
     def _internal_user(x_user_id: str | None, x_internal_token: str | None) -> str:
         """校验内部调用头：token（配置了才校验）+ 归属用户。"""
@@ -913,45 +950,6 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         return x_user_id
-
-    def _paper_ids(body) -> list[str]:
-        return [str(item) for item in ((body or {}).get("paper_ids") or []) if item]
-
-    @app.post("/internal/kb/enqueue")
-    async def internal_kb_enqueue(
-        body: dict,
-        x_user_id: str | None = Header(default=None),
-        x_internal_token: str | None = Header(default=None),
-    ) -> dict:
-        uid = _internal_user(x_user_id, x_internal_token)
-        from biopilot.core.rag.services.paper_state import queue_papers
-        queue_papers(_shared_db(), uid, _paper_ids(body))
-        _schedule_user_index(uid)
-        return {"status": "ok"}
-
-    @app.post("/internal/kb/detach")
-    async def internal_kb_detach(
-        body: dict,
-        x_user_id: str | None = Header(default=None),
-        x_internal_token: str | None = Header(default=None),
-    ) -> dict:
-        uid = _internal_user(x_user_id, x_internal_token)
-        from biopilot.core.rag.services.paper_state import detach_papers
-        detach_papers(_shared_db(), uid, _paper_ids(body))
-        _schedule_user_index(uid)
-        return {"status": "ok"}
-
-    @app.post("/internal/kb/retry")
-    async def internal_kb_retry(
-        body: dict,
-        x_user_id: str | None = Header(default=None),
-        x_internal_token: str | None = Header(default=None),
-    ) -> dict:
-        uid = _internal_user(x_user_id, x_internal_token)
-        from biopilot.core.rag.services.paper_state import queue_papers
-        queue_papers(_shared_db(), uid, _paper_ids(body))
-        _schedule_user_index(uid)
-        return {"status": "ok"}
 
     @app.post("/internal/kb/sync")
     async def internal_kb_sync(
@@ -963,8 +961,42 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         _schedule_user_index(uid)
         return {"status": "ok"}
 
+    @app.post("/internal/schedule/run")
+    async def internal_schedule_run(
+        body: dict,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        """Java 调度器投递到期任务：立即返回，后台跑一轮 agent。
+
+        时间推进由 Java 在认领时完成（投递失败也推进，防每轮重试刷爆），这里只
+        负责执行与进程内去重；与网页对话共用同一个全局并发闸。
+
+        Args:
+            body: ``{task_id, conversation_id, task, name}``。
+            x_user_id: 归属用户。
+            x_internal_token: 内部调用共享 token。
+
+        Returns:
+            ``{status: accepted|skipped}``。
+        """
+        uid = _internal_user(x_user_id, x_internal_token)
+        payload = body or {}
+        conversation_id = str(payload.get("conversation_id") or "")
+        task = str(payload.get("task") or "")
+        task_id = str(payload.get("task_id") or "")
+        if not conversation_id or not task:
+            raise HTTPException(status_code=422,
+                                detail="conversation_id 与 task 必填")
+        key = task_id or f"{uid}:{conversation_id}:{task[:32]}"
+        if key in _sched_running:
+            return {"status": "skipped"}
+        _sched_running.add(key)
+        asyncio.get_running_loop().create_task(_execute_scheduled(
+            uid, conversation_id, "【定时任务】" + task, key, agent_factory, llm_gate))
+        return {"status": "accepted"}
+
     _kb_endpoints(app)
-    _citation_endpoints(app)
     return app
 
 
@@ -993,60 +1025,33 @@ _queues: list = []
 user_models: dict[str, str | None] = {}
 
 
-# ---------- 定时任务调度（模块级：依赖显式传入，测试直调） ----------
-
+#: 正在执行的定时任务 id（进程内去重；跨实例由 Java 的 CAS 认领负责）
 _sched_running: set = set()
 
 
-async def run_due_schedules(db, agent_factory, running: set, gate=None) -> int:
-    """扫描并执行到期的定时任务，返回本轮执行数。
+async def _execute_scheduled(user_id: str, conversation_id: str, task: str,
+                             key: str, agent_factory, gate) -> None:
+    """执行一次定时任务：与网页对话同一装配路径、同一全局并发闸。
 
-    执行即把任务文本投进归属会话跑一遍（回答落会话，用户在聊天流里看）；
-    跑完推进 last_run/next_run——失败也推进，防失败任务每轮重试刷爆。
-    running 集合防上一轮未完成的任务本轮重复入队。
+    参数显式传入（工厂与闸由适配层注入），测试可直接 await 它而不依赖后台任务。
 
     Args:
-        db: MemoryDB，任务行读写。
+        user_id: 归属用户。
+        conversation_id: 归属会话。
+        task: 任务文本（调用方已加「【定时任务】」前缀）。
+        key: 进程内去重键（task_id）。
         agent_factory: 会话工厂（与对话同一路径）。
-        running: 运行中任务 id 集合（防重复入队；跨调用量由调用方持有）。
-        gate: asyncio.Semaphore | None，全局并发闸（定时执行与网页对话共用）。
+        gate: asyncio.Semaphore，全局并发闸。
     """
-    from datetime import datetime, timedelta, timezone
-    now = datetime.now(timezone.utc).isoformat()
-    due = db.execute(
-        "SELECT * FROM bio_schedule_task WHERE paused=0 AND next_run_at<=?",
-        (now,)).fetchall()
-    ran = 0
-    for row in due:
-        if row["id"] in running:
-            continue
-        running.add(row["id"])
-
-        async def _run_one(row=row):
-            try:
-                # 定时执行与网页对话同过全局并发闸（此前直调 agent.run 绕过了资源治理）
-                if gate is not None:
-                    async with gate:
-                        built = agent_factory(row["user_id"], row["conversation_id"])
-                        agent = await built if asyncio.iscoroutine(built) else built
-                        await agent.run("【定时任务】" + row["task"])
-                else:
-                    built = agent_factory(row["user_id"], row["conversation_id"])
-                    agent = await built if asyncio.iscoroutine(built) else built
-                    await agent.run("【定时任务】" + row["task"])
-            except Exception:
-                logger.warning("定时任务执行失败（%s）", row["name"], exc_info=True)
-            finally:
-                done_at = datetime.now(timezone.utc)
-                nxt = (done_at + timedelta(minutes=row["interval_minutes"])).isoformat()
-                db.execute(
-                    "UPDATE bio_schedule_task SET last_run_at=?, next_run_at=? WHERE id=?",
-                    (done_at.isoformat(), nxt, row["id"]))
-                running.discard(row["id"])
-
-        asyncio.create_task(_run_one())
-        ran += 1
-    return ran
+    try:
+        async with gate:
+            built = agent_factory(user_id, conversation_id)
+            agent = await built if asyncio.iscoroutine(built) else built
+            await agent.run(task)
+    except Exception:
+        logger.warning("定时任务执行失败（%s）", key, exc_info=True)
+    finally:
+        _sched_running.discard(key)
 
 
 def run_server(config: WebConfig | None = None) -> None:
@@ -1072,40 +1077,190 @@ reindex_pending: set[str] = set()
 kb_last_run: dict[str, dict] = {}
 
 
+#: 单次索引最多重扫几遍：索引期间新加入的论文会在下一遍接着处理
+_KB_INDEX_PASSES = 3
+#: 索引锁被另一个进程占用时的补跑次数（每次间隔 2 秒）；超时交给周期对账
+_KB_LOCK_RETRIES = 15
+#: 周期对账间隔（秒）：兜住跨进程丢唤醒、崩溃遗留与半截状态
+_KB_SWEEP_SECONDS = 300
+
+
+def _drop_paper_index(svc, target: pathlib.Path) -> None:
+    """撤销一篇论文的索引与镜像（并发移出后的补偿；失败只留日志）。
+
+    Args:
+        svc: RAGService，当前用户域实例。
+        target: 镜像 PDF 路径。
+    """
+    try:
+        svc.remove_document(str(target))
+    except Exception:
+        logger.warning("撤回已移出论文的索引失败（%s）", target, exc_info=True)
+    try:
+        target.unlink(missing_ok=True)
+    except Exception:
+        logger.warning("撤回已移出论文的镜像失败（%s）", target, exc_info=True)
+
+
 def _index_user_kb_sync(user_id: str) -> dict:
     """把该用户「已加入知识库」的论文逐篇索引，并清理已移出的论文。
 
     逐篇索引用 ``index_document``：它内部先删后建，能给出单篇的分块数与失败原因。
     已移出的论文走 ``remove_document`` 只删索引，不动 papers 行和 OSS 原文。
 
+    并发防护（跨栈写入的收敛点）：
+      - 同一用户同一时刻只允许一个索引者，用 MySQL 命名锁 ``kb-index:<uid>``
+        跨进程互斥；锁随连接自动释放，进程崩溃不会留下死锁；
+      - 拿到锁后先让 Java `/internal/kb/normalize` 收敛半截与僵尸状态；
+      - 结果上报由 Java 按 `kb_enabled` 与 `indexing` 前置条件落盘，索引期间被
+        移出的论文会返回 applied=false，引擎据此撤回刚建好的索引；
+      - 索引期间新加入的论文在下一遍重扫里接着处理。
+
     Args:
         user_id: 归属用户（即 RAG 用户域）。
+
+    Returns:
+        dict: indexed/failed/removed 计数与 finished_at；skipped=True 表示锁被
+        另一个进程持有，本轮没有做任何事。
+    """
+    from datetime import datetime, timezone
+    from biopilot.config import BioPilotConfig
+    from biopilot.core.memory.storage.named_lock import NamedLock
+
+    cfg = BioPilotConfig.from_env()
+    lock = NamedLock(cfg.runtime.memory_dsn)
+    lock_name = f"kb-index:{user_id}"
+    acquired = False
+    lock_usable = True
+    try:
+        acquired = lock.acquire(lock_name, timeout=15)
+    except Exception:
+        # 锁服务异常不阻断索引（bio_paper 同库，真不可达时索引本身也会失败）；
+        # 降级为无锁执行，状态更新仍有条件守卫，不会写出互斥以外的错值。
+        lock_usable = False
+        logger.warning("知识库索引锁不可用，本轮无锁执行（%s）", user_id, exc_info=True)
+    if lock_usable and not acquired:
+        return {"indexed": 0, "failed": 0, "removed": 0, "skipped": True,
+                "finished_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        return _index_user_kb_locked(user_id, cfg)
+    finally:
+        if acquired:
+            lock.release(lock_name)
+
+
+def _index_user_kb_locked(user_id: str, cfg) -> dict:
+    """持有该用户索引锁后执行一轮完整索引（收敛 → 逐篇索引 → 清理）。
+
+    状态写者只有 Java：本函数通过 ``/internal/kb/normalize``、``/indexing``、
+    ``/result`` 驱动状态迁移；Java 返回的 ``applied`` 决定是否撤回刚建好的
+    向量与镜像。
+
+    Args:
+        user_id: 归属用户。
+        cfg: BioPilotConfig，配置快照。
 
     Returns:
         dict: indexed/failed/removed 计数与 finished_at。
     """
     from datetime import datetime, timezone
-    from biopilot.config import BioPilotConfig
     from biopilot.core.rag.constants import IndexOutcomeStatus
     from biopilot.core.rag.services.rag_service import get_rag_service
-    from biopilot.core.rag.storage.image_store import MinioImageStore
-    from biopilot.core.rag.services.paper_state import (
-        mark_index_result, mark_indexing)
 
-    cfg = BioPilotConfig.from_env()
     svc = get_rag_service(cfg, user_domain=user_id)
     db = _shared_db()
-    store = MinioImageStore(cfg.rag.storage.minio)
+    platform = _platform_client()
     mirror = pathlib.Path(svc.config.corpus.pdf_dir)
     mirror.mkdir(parents=True, exist_ok=True)
 
-    rows = db.execute(
-        "SELECT id, oss_key, kb_enabled, index_status FROM bio_paper WHERE user_id=?",
-        (user_id,)).fetchall()
-    enabled = {row["id"]: row for row in rows if row["kb_enabled"]}
+    indexed = failed = removed = 0
+    seen: set[str] = set()
+    for _pass in range(_KB_INDEX_PASSES):
+        # 每遍先让 Java 收敛：半截状态与崩溃遗留的 indexing 都拉回可执行状态。
+        # 持锁时才敢把 indexing 判为僵尸；平台不可达则本轮直接退出，下一轮重试。
+        try:
+            platform.kb_normalize(user_id, requeue_indexing=True)
+        except Exception:
+            logger.warning("知识库状态收敛失败（%s），本轮跳过", user_id, exc_info=True)
+            break
+        rows = db.execute(
+            "SELECT id, oss_key, kb_enabled, index_status, title FROM bio_paper"
+            " WHERE user_id=?",
+            (user_id,)).fetchall()
+        enabled = {row["id"]: row for row in rows if row["kb_enabled"]}
+        todo = []
+        for paper_id, row in enabled.items():
+            if paper_id in seen:
+                continue
+            target = mirror / f"{paper_id}.pdf"
+            if row["index_status"] == "indexed" and target.exists():
+                continue
+            todo.append((paper_id, row, target))
+        if not todo:
+            break
+        try:
+            accepted = set(platform.kb_indexing(
+                user_id, [paper_id for paper_id, _row, _target in todo]))
+        except Exception:
+            logger.warning("索引状态置位失败（%s），本轮跳过", user_id, exc_info=True)
+            break
+        if not accepted:
+            break
+        seen.update(accepted)
+
+        results: list[dict] = []
+        for paper_id, row, target in todo:
+            if paper_id not in accepted:
+                continue
+            try:
+                if not target.exists():
+                    data, _meta = platform.attachment(user_id, "paper", paper_id)
+                    if not data:
+                        raise RuntimeError("论文原文取回失败")
+                    target.write_bytes(data)
+                # 标题只从数据库取（Java 提取并落库），索引不再自己解析标题
+                outcome = svc.index_document(str(target), title=row.get("title") or None)
+                status = getattr(outcome, "status", None)
+                if status == IndexOutcomeStatus.INDEXED:
+                    results.append({"paper_id": paper_id, "ok": True,
+                                    "chunks": int(getattr(outcome, "chunks", 0) or 0),
+                                    "error": ""})
+                else:
+                    reason = getattr(outcome, "reason", "") or f"未入库（{status}）"
+                    results.append({"paper_id": paper_id, "ok": False,
+                                    "chunks": 0, "error": reason})
+            except Exception as exc:
+                logger.warning("论文索引失败（%s）", paper_id, exc_info=True)
+                results.append({"paper_id": paper_id, "ok": False,
+                                "chunks": 0, "error": str(exc)})
+
+        reported = False
+        applied: dict = {}
+        if results:
+            try:
+                applied = platform.kb_result(user_id, results)
+                reported = True
+            except Exception:
+                # 状态未知：保留已建好的索引，下一轮按 indexing 重排后幂等重建
+                logger.warning("索引结果上报失败（%s）", user_id, exc_info=True)
+
+        for item in results:
+            paper_id = str(item["paper_id"])
+            if not item["ok"]:
+                failed += 1
+                continue
+            if not reported:
+                continue
+            if applied.get(paper_id):
+                indexed += 1
+            else:
+                # 索引期间被移出：撤回刚建好的向量与镜像，两边都不留残留
+                _drop_paper_index(svc, mirror / f"{paper_id}.pdf")
 
     # 已移出知识库（或已删除）的论文：删镜像与索引块；文件本身在 OSS 里不动
-    removed = 0
+    rows = db.execute(
+        "SELECT id, kb_enabled FROM bio_paper WHERE user_id=?", (user_id,)).fetchall()
+    enabled = {row["id"] for row in rows if row["kb_enabled"]}
     for path in mirror.glob("*.pdf"):
         if path.stem in enabled:
             continue
@@ -1116,37 +1271,11 @@ def _index_user_kb_sync(user_id: str) -> dict:
         except Exception:
             logger.warning("清理已移出论文的索引失败（%s）", path, exc_info=True)
 
-    todo = []
-    for paper_id, row in enabled.items():
-        target = mirror / f"{paper_id}.pdf"
-        if row["index_status"] == "indexed" and target.exists():
-            continue
-        todo.append((paper_id, row, target))
-
-    indexed = failed = 0
-    if todo:
-        mark_indexing(db, user_id, [paper_id for paper_id, _row, _target in todo])
-    for paper_id, row, target in todo:
-        try:
-            if not target.exists():
-                data = store.get(row["oss_key"])
-                if not data:
-                    raise RuntimeError("对象存储取回失败")
-                target.write_bytes(data)
-            outcome = svc.index_document(str(target))
-            status = getattr(outcome, "status", None)
-            if status == IndexOutcomeStatus.INDEXED:
-                mark_index_result(db, user_id, paper_id, True,
-                                  chunks=int(getattr(outcome, "chunks", 0) or 0))
-                indexed += 1
-            else:
-                reason = getattr(outcome, "reason", "") or f"未入库（{status}）"
-                mark_index_result(db, user_id, paper_id, False, error=reason)
-                failed += 1
-        except Exception as exc:
-            logger.warning("论文索引失败（%s）", paper_id, exc_info=True)
-            mark_index_result(db, user_id, paper_id, False, error=str(exc))
-            failed += 1
+    # 收尾再收敛一次（不重排本轮刚置 indexing 的行）：不留「已就绪但不在知识库」
+    try:
+        platform.kb_normalize(user_id, requeue_indexing=False)
+    except Exception:
+        logger.warning("知识库收尾收敛失败（%s）", user_id, exc_info=True)
 
     summary = {
         "indexed": indexed,
@@ -1158,11 +1287,103 @@ def _index_user_kb_sync(user_id: str) -> dict:
     return summary
 
 
+def _users_needing_reconcile() -> list[str]:
+    """列出知识库派生状态不自洽的用户（启动恢复与周期对账共用）。
+
+    判据两类：
+
+    - 行内不自洽：勾选了但还没进入可检索状态，或者没勾选却留着索引痕迹。
+      失败（failed）不算——它等用户点重试，周期对账不自动重跑，避免反复
+      消耗解析与嵌入资源。
+    - 行外不自洽：镜像目录里还有 PDF，但对应行已经删除、或已不在知识库。
+      论文删除后的索引清理是异步通知，通知丢失时向量会留在检索面里；按
+      镜像目录反查能把这些孤儿收回来。
+
+    Returns:
+        list[str]: 需要跑一轮索引/清理的用户 id。
+    """
+    db = _shared_db()
+    rows = db.execute(
+        "SELECT user_id, id, kb_enabled, indexed, index_status, index_error,"
+        " indexed_at, chunk_count FROM bio_paper"
+    ).fetchall()
+    stale = {
+        row["user_id"] for row in rows
+        if row.get("user_id") and (
+            (int(row.get("kb_enabled") or 0) == 1
+             and str(row.get("index_status") or "") in ("not_added", "queued", "indexing"))
+            or (int(row.get("kb_enabled") or 0) == 0 and (
+                int(row.get("indexed") or 0) != 0
+                or str(row.get("index_status") or "not_added") != "not_added"
+                or int(row.get("chunk_count") or 0) != 0
+                or row.get("index_error") is not None
+                or row.get("indexed_at") is not None))
+        )
+    }
+    return sorted(stale | _users_with_orphan_mirrors(rows))
+
+
+def _users_with_orphan_mirrors(rows: list[dict],
+                               workspace: str | None = None) -> set[str]:
+    """按镜像目录反查「有 PDF 但对应行已删除/未加入」的用户。
+
+    Args:
+        rows: 全量 bio_paper 行（含 user_id/id/kb_enabled，避免二次查询）。
+        workspace: 工作区根（测试注入口）；缺省取当前配置。
+
+    Returns:
+        set[str]: 存在孤儿镜像的用户 id。
+    """
+    import re as _re
+
+    from biopilot.config import BioPilotConfig
+
+    root = (pathlib.Path(workspace) if workspace
+            else pathlib.Path(BioPilotConfig.from_env().runtime.workspace))
+    enabled: dict[str, set[str]] = {}
+    safe_to_user: dict[str, str] = {}
+    for row in rows:
+        user_id = str(row.get("user_id") or "")
+        if not user_id:
+            continue
+        safe_to_user[_re.sub(r"[^A-Za-z0-9_-]", "_", user_id)] = user_id
+        if int(row.get("kb_enabled") or 0):
+            enabled.setdefault(user_id, set()).add(str(row["id"]))
+    base = root / "rag" / "users"
+    if not base.is_dir():
+        return set()
+    stale: set[str] = set()
+    for directory in base.iterdir():
+        user_id = safe_to_user.get(directory.name)
+        if user_id is None or not directory.is_dir():
+            continue
+        papers = directory / "papers"
+        if not papers.is_dir():
+            continue
+        keep = enabled.get(user_id, set())
+        if any(path.stem not in keep for path in papers.glob("*.pdf")):
+            stale.add(user_id)
+    return stale
+
+
+async def _kb_reconcile_loop() -> None:
+    """周期对账循环：把跨进程丢失的唤醒、崩溃遗留、半截状态拉回一致。"""
+    while True:
+        await asyncio.sleep(_KB_SWEEP_SECONDS)
+        try:
+            for user_id in await asyncio.to_thread(_users_needing_reconcile):
+                _schedule_user_index(user_id)
+        except Exception:
+            logger.warning("知识库周期对账异常", exc_info=True)
+
+
 def _schedule_user_index(user_id: str) -> None:
     """在事件循环里后台触发一次该用户的知识库索引（singleflight + 补跑）。
 
     旧实现在重建期间直接丢弃新请求；用户连续勾选两批论文时第二批会永远停在
-    queued。这里用 pending 标记在当前轮结束后补跑。
+    queued。这里用 pending 标记在当前轮结束后补跑；跨进程的互斥由索引锁
+    承担，锁被另一进程持有时本轮稍后重试，避免「B 进程的请求被 A 进程吃掉
+    后再也没人触发」。
 
     Args:
         user_id: 归属用户（即 RAG 用户域）。
@@ -1174,9 +1395,19 @@ def _schedule_user_index(user_id: str) -> None:
 
     async def _runner():
         try:
+            misses = 0
             while True:
                 reindex_pending.discard(user_id)
-                await asyncio.to_thread(_index_user_kb_sync, user_id)
+                summary = await asyncio.to_thread(_index_user_kb_sync, user_id)
+                if summary.get("skipped"):
+                    misses += 1
+                    if misses > _KB_LOCK_RETRIES:
+                        logger.info("知识库索引锁持续被占用，交给周期对账（%s）", user_id)
+                        break
+                    await asyncio.sleep(2)
+                    reindex_pending.add(user_id)
+                else:
+                    misses = 0
                 if user_id not in reindex_pending:
                     break
         except Exception:
@@ -1185,19 +1416,6 @@ def _schedule_user_index(user_id: str) -> None:
             reindex_running.discard(user_id)
 
     asyncio.get_running_loop().create_task(_runner())
-
-
-def _object_store():
-    """通用对象存储（惰性单例；MinIO 不可达时回退本地同键）。"""
-    global _object_store_instance
-    if _object_store_instance is None:
-        from biopilot.config import BioPilotConfig
-        from biopilot.common.storage.minio import make_object_store
-        _object_store_instance = make_object_store(BioPilotConfig.from_env())
-    return _object_store_instance
-
-
-_object_store_instance = None
 
 
 def cfg_runtime_workspace() -> str:
@@ -1245,7 +1463,8 @@ def _kb_endpoints(app: FastAPI) -> None:
             "" if x_user_id == "local" else f"_{x_user_id}")
         last = _shared_db().execute(
             "SELECT MAX(indexed_at) AS t FROM bio_paper"
-            " WHERE user_id=? AND index_status='indexed'", (x_user_id,)).fetchone()
+            " WHERE user_id=? AND kb_enabled=1 AND index_status='indexed'",
+            (x_user_id,)).fetchone()
         return {
             "total_papers": counts["total"],
             "kb_enabled": counts["kb_enabled"],
@@ -1323,129 +1542,3 @@ def _kb_endpoints(app: FastAPI) -> None:
         chunks.sort(key=lambda chunk: chunk.chunk_index)
         return {"chunks": [_chunk_view(chunk) for chunk in chunks],
                 "paper": papers[paper_id]}
-
-
-def _citation_endpoints(app: FastAPI) -> None:
-    """引用库端点：列表/搜索、格式化、删除、导出、从论文入库。
-
-    引用库按用户隔离（users/<uid>/citations/references.bib）；写操作与 agent 侧
-    共用同一把 MySQL 命名锁，网页和终端不会同时改写同一份 bib。
-    """
-    from biopilot.citations import get_citation_manager
-    from biopilot.config import BioPilotConfig
-    from biopilot.core.memory.storage.named_lock import NamedLock
-
-    def _manager(user_id: str):
-        return get_citation_manager(BioPilotConfig.from_env(), user_domain=user_id)
-
-    def _entry_view(entry) -> dict:
-        return {
-            "key": entry.key,
-            "entry_type": entry.entry_type,
-            "title": entry.title,
-            "authors": entry.authors,
-            "year": entry.year,
-            "journal": (entry.fields or {}).get("journal", ""),
-        }
-
-    def _with_write_lock(user_id: str, action):
-        cfg = BioPilotConfig.from_env()
-        lock = NamedLock(cfg.runtime.memory_dsn)
-        name = f"citation:{user_id}"
-        acquired = False
-        try:
-            acquired = lock.acquire(name, timeout=5)
-            if not acquired:
-                raise HTTPException(status_code=409,
-                                    detail="引用库正在被另一个进程修改，请稍后重试")
-            return action()
-        finally:
-            if acquired:
-                lock.release(name)
-
-    @app.get("/citations")
-    async def citations_list(
-        q: str = "", x_user_id: str | None = Header(default=None),
-    ) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        entries = _manager(x_user_id).search(q or "")
-        return {"entries": [_entry_view(entry) for entry in entries]}
-
-    @app.post("/citations/format")
-    async def citations_format(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        keys = [str(key) for key in ((body or {}).get("keys") or []) if key]
-        style = (body or {}).get("style") or "author-year"
-        if not keys:
-            raise HTTPException(status_code=422, detail="keys 不能为空")
-        text = _manager(x_user_id).format(keys, style=style)
-        return {"text": text, "style": style}
-
-    @app.delete("/citations/{key}")
-    async def citations_delete(key: str, x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-
-        def _delete():
-            return _manager(x_user_id).remove(key)
-
-        result = _with_write_lock(x_user_id, _delete)
-        return {"status": "ok", "result": result}
-
-    @app.get("/citations/export")
-    async def citations_export(x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        manager = _manager(x_user_id)
-        try:
-            text = pathlib.Path(manager.bib_path).read_text(encoding="utf-8")
-        except FileNotFoundError:
-            text = ""
-        return {"text": text}
-
-    @app.post("/citations/from-paper")
-    async def citations_from_paper(
-        body: dict, x_user_id: str | None = Header(default=None),
-    ) -> dict:
-        """把文件管理里的论文登记进当前用户的引用库（从 PDF 抽取书目）。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        paper_id = (body or {}).get("paper_id", "")
-        if not paper_id:
-            raise HTTPException(status_code=422, detail="paper_id 不能为空")
-        row = _shared_db().execute(
-            "SELECT oss_key, file_name FROM bio_paper WHERE id=? AND user_id=?",
-            (paper_id, x_user_id)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="论文不存在")
-        cfg = BioPilotConfig.from_env()
-        import re as _re
-        safe = _re.sub(r"[^A-Za-z0-9_-]", "_", x_user_id)
-        mirror = (pathlib.Path(cfg.runtime.workspace) / "rag" / "users"
-                  / safe / "papers" / f"{paper_id}.pdf")
-        temp_path = None
-        source = mirror
-        if not mirror.exists():
-            store = _object_store()
-            data = store.get(row["oss_key"]) if store is not None else None
-            if not data:
-                raise HTTPException(status_code=502, detail="论文原文取回失败")
-            temp_dir = pathlib.Path(".biopilot/run/imports")
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            temp_path = temp_dir / f"{uuid.uuid4().hex}.pdf"
-            temp_path.write_bytes(data)
-            source = temp_path
-        try:
-            def _add():
-                return _manager(x_user_id).add_from_pdf(str(source))
-            result = _with_write_lock(x_user_id, _add)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"引用入库失败：{exc}")
-        finally:
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
-        return {"status": "ok", "result": result}
