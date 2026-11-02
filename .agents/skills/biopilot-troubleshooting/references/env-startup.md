@@ -79,7 +79,7 @@
 ### 适配层起不来：`memory_dsn 必须是 mysql://... 形式` / 启动即 fail-fast（`BIOPILOT_MEMORY_MYSQL_DSN`）
 - **根因**：`biopilot --web` 不读 `config.yaml` 的 DSN 段，DSN 只来自环境变量；标题更新、论文/文档端点的共享 `MemoryDB()` 无参构造时没有回退默认值。REPL 模式才有 config 默认值兜底。
 - **修法**：启动命令带上 `BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3306/biopilot"`；库不存在时先 `docker compose up -d`（MySQL 容器首启由 `docker/mysql-init/` 建库建表；数据卷已存在的旧容器**不会**重跑 init，表缺失要手动执行 `server/script/sql/` 与建表脚本）。
-- **验证**：`docker exec biopilot-mysql mysql -uroot biopilot -e "SHOW TABLES;"` 列出 blocks/messages/sys_user 等表；适配层 `/health` 返回 ok。
+- **验证**：`docker exec biopilot-mysql mysql -uroot biopilot -e "SHOW TABLES;"` 列出 bio_memory_block/bio_message/sys_user 等表；适配层 `/health` 返回 ok。旧数据卷升级时先执行 `server/script/sql/migrations/2026-11-02-rename-tables.sql`。
 
 ### 网页端带 body 的请求（对话/上传）到适配层全变空体，FastAPI 报 `Field required`（Java→Python 代理）
 - **根因**：SpringBoot 代理用的 java.net.http.HttpClient 默认带 h2c 升级头（`Upgrade: h2c` + `HTTP2-Settings`），uvicorn 把它当协议升级请求处理并**吞掉请求体**——GET 不带体所以列表类接口正常，极有迷惑性。
