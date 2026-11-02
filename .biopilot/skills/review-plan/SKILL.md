@@ -1,6 +1,6 @@
 ---
 name: review-plan
-description: 审研究选题产物——对 survey.md / gaps.md / ideas.md / plan.md 四份产物交叉核验、溯源核验与素材熔断诚实性检查，裁决对象是 plan.md。触发：任务要求审阅选题产物（通常给出四个绝对路径）时，开审前先加载本流程。边界：只审不改；必须读全四份，不能只看 plan。
+description: 审研究选题产物——对 survey.md / gaps.md / ideas.md / plan.md 四份产物交叉核验与素材熔断诚实性检查，裁决对象是 plan.md。触发：任务要求审阅选题产物（通常给出四个绝对路径）时，开审前先加载本流程。边界：只审不改；必须读全四份，不能只看 plan。
 metadata:
   version: "1.1.0"
   author: BioPilot
@@ -30,20 +30,9 @@ metadata:
    - plan 引用 / 对齐的 idea 卡 ↔ ideas.md（名称、一句话主张、新颖性判定一致）；
    - plan 动机 ↔ gaps.md（所依据的缺口真实存在且未被改写）；
    - survey 主题图 ↔ gaps 线索（抽查缺口确有语料线索支撑）。
-4. **核验溯源标注**（适用四产物全部标注）：
-
-   ```
-   spawn_sub_agent(agent_type="citation-agent",
-                   task="核验这些 key 是否存在于 references.bib 且标题匹配：<key> ↔ <标题>…")
-   ```
-
-   `[来源:key§节]` → 派 citation-agent 核 key（**四产物的 key 凑一批派一次**）——
-   这是唯一的溯源形态（引到别的笔记那种写法已淘汰，见到即列 blocking：被引的笔记
-   不是可被溯源的外部实体，且它自己也可能错）。
-   `[⚠无支撑]` / `[待确认]` 未消除 → 如实列 blocking，不默认放行。
-5. **核验素材熔断诚实性**：产物声称基于 N 篇论文时，确认这些素材真实存在且被引用；
+4. **核验素材熔断诚实性**：产物声称基于 N 篇论文时，确认这些素材真实存在且被引用；
    「未经外部验证」不得被写成已验证。
-6. **五维审查**（按选题产物语义重诠释）：
+5. **五维审查**（按选题产物语义重诠释）：
    - **requirements**：课题覆盖——研究问题围绕所选方向、覆盖用户确认的范围。
    - **faithfulness**：映射真实性——「论点 ← 论文 PDF」逐条核验；idea 卡 novelty 判定须有
      similar_works 检索证据支撑（novel / not_novel 须有检索差异点）。
@@ -51,7 +40,7 @@ metadata:
    - **completeness**：四份产物各自覆盖其模板要求的章节（标准见本 skill 的 `references/`
      与第 2 步读到的模板）+ 四产物齐备。
    - **structure**：逻辑（论点递进 / 依赖顺序合理）。
-7. **交裁决**：
+6. **交裁决**：
 
    ```
    submit_review(path=plan_path, verdict, issues)
@@ -61,5 +50,5 @@ metadata:
 
 ## 铁律
 
-1. ⚠️ 溯源核验不通过或「素材熔断」声称与事实不符 → **fail**，不默认放行。
+1. ⚠️ 「素材熔断」声称与事实不符 → **fail**，不默认放行。
 2. ⚠️ 裁决对象是 plan.md，但只看 plan 不读另外三份等于没交叉核验。

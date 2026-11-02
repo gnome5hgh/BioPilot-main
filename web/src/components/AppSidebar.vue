@@ -114,7 +114,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../api/auth'
 import { useChatStore } from '../stores/chat'
@@ -328,6 +328,12 @@ async function logout() {
   await auth.logout()
   router.push('/login')
 }
+
+// 从对话框下拉里选项目不经过侧栏：选中的项目要自动展开，否则新会话虽然归了组，
+// 却仍被折叠在项目下面看不见
+watch(() => store.currentProjectId, (projectId) => {
+  if (projectId) expanded.add(projectId)
+})
 
 onMounted(async () => {
   await store.init()

@@ -6,7 +6,7 @@
 # 改默认值只改那里，本模板不重复罗列，避免两处同步。
 # 加载顺序：config.py 默认值 ← config.yaml ← BIOPILOT_* 环境变量（后者最高）
 # env 名 = BIOPILOT_ + 配置路径大写（rag.storage.uri → BIOPILOT_RAG_STORAGE_URI）；
-# agents.timeouts 与 mcp_servers 是自由 dict，仅 YAML 可配。
+# agents.timeouts 是自由 dict，仅 YAML 可配。
 
 llm:
   api_key: ""                 # 必填：或 env BIOPILOT_LLM_API_KEY / .env
@@ -17,12 +17,21 @@ vision:
   # max_tokens: 8192        # 单次视觉输出上限（默认见 config.py）。视觉模型是推理模型，
   #                          # 思维链长度每次随机，偶尔把预算跑光导致描述为空/截在半句
 
-# 语料库与产物路径（个人绝对路径，文件类工具的数据源；research/bib 留空走默认派生）
+# 语料库与产物路径（个人绝对路径，文件类工具的数据源；research 留空走默认派生）
 corpus:
   note_dir: ""                # 论文笔记根目录
   pdf_dir: ""                 # PDF 根目录
   research_dir: ""
-  citations_bib_path: ""
+
+# Java 平台后端：agent 经内部端点调用平台能力（文献检索、文档保存等）。
+# 本机开发默认 8080；compose 内由环境变量覆盖为 http://server:8080。
+platform:
+  base_url: "http://127.0.0.1:8080"
+  # 内部调用共享 token；留空回退 BIOPILOT_INTERNAL_TOKEN（与引擎入站校验同一个 secret）
+  internal_token: ""
+  search_timeout: 90.0
+  # 文件上传/下载/PDF 抓取等大流量内部请求的超时（秒）
+  transfer_timeout: 120.0
 
 # 意图识别（可选预处理层）：默认关——关掉即整套意图层不挂载，系统走纯 ReAct
 # （不装载知识库、不注入 INTENT 块与规则块）。判定层是「规则层（.biopilot/intent/ 的
@@ -63,26 +72,8 @@ rag:
 #   max_turns:
 #     research-agent: 45
 
-# MCP server 接入（工具前缀 mcp__paper-search__*；详见 docs/learning/11-MCP客户端.md）
-mcp_servers:
-  paper-search:
-    transport: stdio
-    command: uvx
-    # 固定 git rev：uvx 对未固定 rev 每次启动都做远端 Git fetch（实测 7-12s，启动大头）；
-    # 固定后 uv 直接用缓存 checkout（实测 0.4s）。升级 server 时手动改这个 SHA
-    # （取新值：git ls-remote https://github.com/openags/paper-search-mcp HEAD）
-    args: ["--from", "git+https://github.com/openags/paper-search-mcp@cab1b5cc276a0cd004a0044003926a6440088049", "--with", "mcp<2", "paper-search-mcp"]
-    # git main（未发版）已给全部 73 工具显式注解（search/read=readOnlyHint:true，download=false+destructive）
-    # --with mcp<2：server 依赖尚未兼容 mcp 2.x（FastMCP 改名）；上游发版后可简化
-    agents: [paper-agent]           # 挂给哪些 agent
-    # connect_timeout: 30        # uvx 冷启动慢，默认 30s
-    # call_timeout: 120
-    # disabled_tools: [search_ieee]
-    # allowed_tools: null        # null=不限制；列表=白名单
-    # write_tools: []            # 写类工具（下载等）默认禁用；按需显式开启
-    write_tools: [download_with_fallback, download_semantic, read_arxiv_paper, read_pubmed_paper]
-    env:
-      PAPER_SEARCH_MCP_UNPAYWALL_EMAIL: ""   # 按需填入 Unpaywall 请求邮箱
+# 文献检索的 MCP server 由管理员在网页「设置 → 文献检索源」维护（落 MySQL），
+# 不在 config.yaml 声明；默认检索源 paper-search-mcp 由 Java 在空库时种入。
 
 # 上下文压缩（YAML / env 均可覆写；默认值以 config/schemas/sections.py 为准）
 compaction:

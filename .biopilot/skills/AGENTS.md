@@ -35,8 +35,7 @@
 
 - `write-note/SKILL.md` — 笔记流程（含笔记模板）
 - `write-research-plan/SKILL.md` — 选题与计划流程（含四份选题模板）
-- `review-note/`、`review-plan/`、`review-download/` — 三类审查流程（审查方持有的模板副本在各自的 `references/`）
-- `citation-format/` — 引用格式渲染口径
+- `review-note/`、`review-plan/` — 两类审查流程（审查方持有的模板副本在各自的 `references/`）
 
 ## Usage And Change Notes
 

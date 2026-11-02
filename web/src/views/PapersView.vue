@@ -120,9 +120,12 @@
               <button v-else class="btn btn-sm" @click="removeKb(row)">移出知识库</button>
               <button v-if="row.status === 'failed'" class="btn btn-sm" @click="retryKb(row)">重试</button>
               <button v-if="row.kb" class="btn btn-sm" @click="showChunks(row)">分块</button>
-              <button class="btn btn-sm" :disabled="citing === row.id" @click="addCitation(row)">
+              <button v-if="!row.citationId" class="btn btn-sm" :disabled="citing === row.id"
+                      @click="addCitation(row)">
                 {{ citing === row.id ? '入库中…' : '加入引用库' }}
               </button>
+              <button v-else class="btn btn-sm" @click="removeCitation(row)">移出引用库</button>
+              <button class="btn btn-sm" @click="editMeta(row)">编辑标题</button>
             </template>
             <button class="btn btn-sm btn-danger" @click="removeRow(row)">删除</button>
           </td>
@@ -140,6 +143,28 @@
 
     <!-- 预览弹层 -->
     <FilePreviewModal :target="previewTarget" @close="previewTarget = null" />
+
+    <!-- 标题/书目编辑弹层 -->
+    <div v-if="metaEditing" class="modal-mask" @click.self="metaEditing = null">
+      <div class="modal-card meta-card">
+        <div class="modal-head">
+          <span class="modal-title">编辑论文信息</span>
+          <button class="btn btn-sm" @click="metaEditing = null">关闭</button>
+        </div>
+        <div class="meta-form">
+          <label>标题<input v-model="metaEditing.title" class="input" /></label>
+          <label>作者<input v-model="metaEditing.authors" class="input" placeholder="Last, First and Last, First" /></label>
+          <label>年份<input v-model="metaEditing.year" class="input" /></label>
+          <label>期刊/会议<input v-model="metaEditing.journal" class="input" /></label>
+          <div class="meta-actions">
+            <button class="btn btn-primary" :disabled="savingMeta" @click="saveMeta">
+              {{ savingMeta ? '保存中…' : '保存' }}
+            </button>
+          </div>
+          <p class="faint">保存标题后，若论文已在知识库，会自动重新索引该篇。</p>
+        </div>
+      </div>
+    </div>
 
     <!-- 分块弹层 -->
     <div v-if="chunks.open" class="modal-mask" @click.self="chunks.open = false">
@@ -199,6 +224,8 @@ const editingOrigin = ref({ name: '', content: '' })
 const docPreview = ref(false)
 const saving = ref(false)
 const citing = ref('')
+const metaEditing = ref(null)
+const savingMeta = ref(false)
 
 const previewTarget = ref(null)
 const chunks = reactive({ open: false, loading: false, items: [], paper: null })
@@ -216,6 +243,7 @@ const rows = computed(() => {
       size: paper.size_bytes,
       time: paper.created_at,
       kb: Boolean(paper.kb_enabled),
+      citationId: paper.citation_id || '',
       status: paper.index_status || 'not_added',
       chunks: paper.chunk_count || 0,
       error: paper.index_error || '',
@@ -438,10 +466,58 @@ async function addCitation(row) {
   try {
     await http.post('/agent/citations/from-paper', { paper_id: row.id })
     toast('已加入引用库（可在引用库页面复制格式）', 'success')
+    await load()
   } catch (error) {
     toast(errText(error, '加入引用库失败'), 'error')
   } finally {
     citing.value = ''
+  }
+}
+
+async function removeCitation(row) {
+  const ok = await confirmDialog({
+    title: '移出引用库',
+    message: `把「${row.name}」移出引用库？`,
+    detail: '只删除引用条目，文件与知识库索引都不受影响。',
+    confirmText: '移出',
+  })
+  if (!ok) return
+  try {
+    await http.post('/agent/citations/remove-by-paper', { paper_id: row.id })
+    toast('已移出引用库', 'success')
+    await load()
+  } catch (error) {
+    toast(errText(error, '移出引用库失败'), 'error')
+  }
+}
+
+function editMeta(row) {
+  metaEditing.value = {
+    id: row.id,
+    title: row.title || '',
+    authors: row.raw.authors || '',
+    year: row.raw.year || '',
+    journal: row.raw.journal || '',
+  }
+}
+
+async function saveMeta() {
+  if (!metaEditing.value) return
+  savingMeta.value = true
+  try {
+    await http.patch(`/agent/papers/${metaEditing.value.id}`, {
+      title: metaEditing.value.title,
+      authors: metaEditing.value.authors,
+      year: metaEditing.value.year,
+      journal: metaEditing.value.journal,
+    })
+    toast('论文信息已保存', 'success')
+    metaEditing.value = null
+    await load()
+  } catch (error) {
+    toast(errText(error, '保存失败'), 'error')
+  } finally {
+    savingMeta.value = false
   }
 }
 
@@ -652,6 +728,11 @@ async function download(row) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.meta-card { width: min(520px, 100%); height: auto; max-height: 82vh; }
+.meta-form { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.meta-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #4a5160; }
+.meta-actions { display: flex; justify-content: flex-end; }
 
 .modal-mask {
   position: fixed;

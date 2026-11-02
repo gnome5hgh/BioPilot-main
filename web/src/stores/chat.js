@@ -100,6 +100,28 @@ export const useChatStore = defineStore('chat', {
     },
 
     /**
+     * 首条消息发出时先在本地登记会话行。
+     *
+     * 后端在 run 启动时才创建 bio_agent_state，而侧栏只在 run 结束时重拉列表；
+     * 不先登记的话，整段 run 期间新会话在左栏（包括它所属的项目）不可见。
+     * run 结束后 loadSessions 会用服务端行替换本行，标题以服务端自动标题为准。
+     *
+     * @param {string} task 用户本轮原话（标题取其前 20 字）
+     */
+    registerSession(task) {
+      if (!this.currentId || !this.isDraft) return
+      const name = (task || '').trim().replace(/\n/g, ' ').slice(0, 20)
+      this.draftTitle = name
+      this.sessions.unshift({
+        agent_id: this.currentId,
+        name,
+        created_at: new Date().toISOString(),
+        project_id: this.currentProjectId || null,
+        message_count: 1,
+      })
+    },
+
+    /**
      * 打开已有会话：拉历史消息与上下文用量。
      *
      * @param {object} session 会话行（agent_id/name/project_id/created_at）

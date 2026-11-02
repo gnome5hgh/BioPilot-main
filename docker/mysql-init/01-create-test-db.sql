@@ -49,3 +49,71 @@ CREATE TABLE IF NOT EXISTS bio_schedule_task (
     KEY idx_sched_user (user_id),
     KEY idx_sched_next (next_run_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务表';
+-- 平台文件表：测试库也建一份，避免 Java/Python 用例缺表
+CREATE TABLE IF NOT EXISTS bio_file_upload (
+    id           VARCHAR(64)  NOT NULL,
+    user_id      VARCHAR(191) NOT NULL,
+    name         VARCHAR(255) NOT NULL,
+    oss_key      VARCHAR(500) NOT NULL,
+    size_bytes   BIGINT       NOT NULL DEFAULT 0,
+    content_type VARCHAR(120) NULL,
+    created_at   VARCHAR(40)  NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_upload_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据文件表';
+CREATE TABLE IF NOT EXISTS bio_paper (
+    id             VARCHAR(64)  NOT NULL,
+    user_id        VARCHAR(191) NOT NULL,
+    title          VARCHAR(500) NOT NULL,
+    file_name      VARCHAR(255) NULL,
+    oss_key        VARCHAR(500) NOT NULL,
+    size_bytes     BIGINT       NOT NULL DEFAULT 0,
+    indexed        INTEGER      NOT NULL DEFAULT 0,
+    kb_enabled     TINYINT      NOT NULL DEFAULT 0,
+    citation_id    VARCHAR(64)  NULL,
+    authors        VARCHAR(1000) NOT NULL DEFAULT '',
+    year           VARCHAR(10)  NOT NULL DEFAULT '',
+    journal        VARCHAR(300) NOT NULL DEFAULT '',
+    index_status   VARCHAR(20)  NOT NULL DEFAULT 'not_added',
+    index_error    VARCHAR(500) NULL,
+    indexed_at     VARCHAR(40)  NULL,
+    chunk_count    INT          NOT NULL DEFAULT 0,
+    created_at     VARCHAR(40)  NOT NULL,
+    seq            BIGINT       NOT NULL AUTO_INCREMENT,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_papers_seq (seq),
+    KEY idx_papers_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='论文目录表';
+CREATE TABLE IF NOT EXISTS bio_document (
+    id         VARCHAR(64)  NOT NULL,
+    user_id    VARCHAR(191) NOT NULL,
+    name       VARCHAR(200) NOT NULL,
+    content    MEDIUMTEXT   NULL,
+    oss_key    VARCHAR(500) NULL,
+    updated_at VARCHAR(40)  NOT NULL,
+    seq        BIGINT       NOT NULL AUTO_INCREMENT,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_documents_seq (seq),
+    KEY idx_documents_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档表';
+-- 文献检索 MCP 配置表：测试库也建一份，避免服务启动时缺表
+CREATE TABLE IF NOT EXISTS bio_literature_mcp_server (
+    id                  VARCHAR(64)  NOT NULL,
+    name                VARCHAR(64)  NOT NULL,
+    transport           VARCHAR(16)  NOT NULL DEFAULT 'http',
+    url                 VARCHAR(500) NULL,
+    command             VARCHAR(200) NULL,
+    args_json           TEXT         NULL,
+    env_json            TEXT         NULL,
+    headers_json        TEXT         NULL,
+    adapter             VARCHAR(32)  NOT NULL DEFAULT 'paper_search',
+    allowed_tools_json  TEXT         NULL,
+    disabled_tools_json TEXT         NULL,
+    enabled             TINYINT      NOT NULL DEFAULT 1,
+    connect_timeout_ms  INT          NOT NULL DEFAULT 30000,
+    call_timeout_ms     INT          NOT NULL DEFAULT 60000,
+    created_at          VARCHAR(40)  NOT NULL,
+    updated_at          VARCHAR(40)  NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_literature_mcp_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文献检索 MCP server 配置';

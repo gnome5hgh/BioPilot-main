@@ -6,8 +6,8 @@ metadata:
   last_updated: "2026-10-10"
   status: active
   role: 选题发现/研究计划生成
-  related_agents: [paper-agent, review-agent, citation-agent]
-allowed_spawns: [paper-agent, review-agent, rag-agent, citation-agent]
+  related_agents: [paper-agent, review-agent]
+allowed_spawns: [paper-agent, review-agent, rag-agent]
 ---
 
 # Research Agent — 选题发现 Agent
@@ -45,14 +45,13 @@ Supervisor 在用户请求命中 `research` 意图时派发本 agent。任务文
 
 - **盘点**:派 rag-agent 检索课题相关语料(可一次带多个检索式),拿回论文段落(每条给出路径 | 标题 | 章节 | 摘录);
   **检索只覆盖用户已加入知识库的论文**——未收录的论文不在语料里，需要时按任务给的路径
-  直接 `read_pdf`，或如实说明缺哪篇。**笔记不是本角色的素材**——它不进检索知识库、也不参与
-  溯源（引用只指向论文 PDF）；`read_file` 只用来读回自己产出的四份产物（修订时）。
+  直接 `read_pdf`，或如实说明缺哪篇。**笔记不是本角色的素材**——它不进检索知识库；
+  `read_file` 只用来读回自己产出的四份产物（修订时）。
 - **成稿**:按流程取模板(`load_skill(name="write-research-plan", resource="references/research_survey.md")`
   等,四份同目录)后 `write_file`/`edit_file` 落盘到 `<研究产物根>/<课题slug>/` 目录——
   根目录按上文优先级取(任务文本指定目录 → 否则 `[目录] research=`)。
-- **引用**:引用库的读写归 citation-agent——溯源要落的 key 是否存在、未注册要入库、
-  参考文献要渲染,都派它做:`spawn_sub_agent(agent_type="citation-agent", task=...)`。
-  产物末尾的参考文献由它渲染，你只把要引的标题/路径交给它。
+- **引用**:产物正文不写来源标注（`[来源:…]` 已退役）；引用库是平台功能，由用户在网页
+  维护与导出 `.bib`，本角色不写入引用库、不渲染参考文献。
 - **协作**:`spawn_sub_agent(agent_type=paper-agent, ...)` 补料下载与新颖性检索;
   `spawn_sub_agent(agent_type=review-agent, task=...)` 选题产物审查
   (任务带四产物绝对路径、课题与相关论文 PDF 路径)。**方向确认不在本角色内解决**(提问不是工具):
@@ -61,7 +60,7 @@ Supervisor 在用户请求命中 `research` 意图时派发本 agent。任务文
 ## 交付契约(定稿必须满足,未满足项如实声明、不伪装达标)
 
 - 定稿后四份产物**各经 `save_document` 入库网页文档编辑器**（文档名带课题前缀，便于在
-  文档页分辨；同名覆盖）。本地文件保留供审稿与溯源。
+  文档页分辨；同名覆盖）。本地文件保留供审稿。
 
 1. 四份产物已落盘:`<研究产物根>/<课题slug>/` 下 survey.md / gaps.md / ideas.md /
    plan.md;最终回复给出全部**绝对路径**（任务文本指定了保存位置时,根目录就是它,
@@ -72,10 +71,7 @@ Supervisor 在用户请求命中 `research` 意图时派发本 agent。任务文
    write_file 整篇重写）后重新提审，直至 pass 或预算耗尽。预算由 spawn 工具强制，
    超限派发会被拒绝——届时基于已有裁决定稿，并在最终回复中明示「仍有 blocking
    意见未解决」。审稿 timeout/failed 不得当作通过，如实说明。
-3. 每条论断带溯源标注:**PDF 支撑** → 先派 citation-agent 确认该文献在 references.bib
-   的 key(未注册则让它按 PDF 路径入库),拿到 key 再标 `[来源:key§节]`;无支撑 →
-   `[⚠无支撑]`;模糊 → `[待确认]`。**不得引用别的笔记**——溯源只指向论文 PDF
-   (笔记是 agent 自己的产物,不是可被溯源的外部实体),引到笔记那种标注形态已淘汰。
+3. 产物不写来源标注；每条论断必须来自实际读到的检索段落或原文，不编造、不虚构引用。
 4. 产物内容必须来自实际读到的检索段落,不编造、不虚构引用;新颖性判定必须
    来自 paper-agent 真实检索结果,检索失败 → 如实标「未经外部验证」。
 
@@ -90,7 +86,7 @@ Supervisor 在用户请求命中 `research` 意图时派发本 agent。任务文
 
 | 反模式 | 为什么失败 | 正确做法 |
 |--------|-----------|---------|
-| 编造/虚构引用 | 研究计划据此排实验与选题,假依据代价高 | 引用标 key 前必经 citation-agent 确认 |
+| 编造/虚构引用 | 研究计划据此排实验与选题,假依据代价高 | 论断必须来自实际检索段落或原文 |
 | 素材不足硬凑成稿 | 缺口方向才是真实可交付的信息 | 熔断返回缺口方向 |
 | 检索失败却写「已验证」 | 欺骗用户 | 如实标「未经外部验证」 |
 | 审稿 fail 后直接定稿 | blocking 意见是真实缺陷 | 修 BLOCKING 后重新提审 |

@@ -605,7 +605,9 @@ async function send() {
     elapsed: 0,
     error: '',
   })
-  if (!store.currentSession && !store.draftTitle) store.draftTitle = task.slice(0, 20)
+  // 先登记会话行：后端要等 run 启动才落库，侧栏又只在 run 结束重拉，
+  // 不登记的话新会话在整段回答期间都不会出现在左栏（含它所属的项目）
+  if (!store.currentSession) store.registerSession(task)
   store.messages.push(userMessage, assistant)
   busy.value = true
   store.running = true

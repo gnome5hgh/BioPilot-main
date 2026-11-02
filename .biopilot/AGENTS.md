@@ -20,7 +20,6 @@
 ├─ security/       # 审计落盘（按天轮转的 JSONL）
 ├─ session/        # REPL 输入历史
 ├─ rag/            # 索引状态文件（带配方哈希）
-├─ citations/      # references.bib 的默认落点
 └─ infra/          # 依赖服务（Milvus / MinIO）的数据卷
 ```
 
@@ -52,7 +51,7 @@
 
 ## Dependencies And Collaboration
 
-- 被 `biopilot/core/skills/`（发现与安装）、`biopilot/core/intent/rules/`（装载知识库）、`biopilot/core/memory/`、`biopilot/core/security/middleware/audit.py`、`biopilot/core/rag/` 与 `biopilot/citations/` 消费。
+- 被 `biopilot/core/skills/`（发现与安装）、`biopilot/core/intent/rules/`（装载知识库）、`biopilot/core/memory/`、`biopilot/core/security/middleware/audit.py`、`biopilot/core/rag/` 消费。
 - 运行数据根的位置由运行时配置的 `workspace` 决定，本目录是它的默认值。
 
 ## Investigation Rule

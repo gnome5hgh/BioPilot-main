@@ -98,6 +98,21 @@ services:
       retries: 10
       start_period: 30s
 
+  # 文献检索 MCP server：默认即启动（dev 与 full 都可连）；只映射回环端口供本机
+  # SpringBoot 调试，生产部署走 compose 内网 http://paper-search-mcp:8000/mcp。
+  paper-search-mcp:
+    build: { context: ., dockerfile: docker/paper-search-mcp.Dockerfile }
+    container_name: biopilot-paper-search-mcp
+    environment:
+      PAPER_SEARCH_MCP_TRANSPORT: streamable-http
+      PAPER_SEARCH_MCP_HOST: 0.0.0.0
+      PAPER_SEARCH_MCP_PORT: 8000
+      PAPER_SEARCH_MCP_PATH: /mcp
+      PAPER_SEARCH_MCP_UNPAYWALL_EMAIL: ${PAPER_SEARCH_MCP_UNPAYWALL_EMAIL:-}
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
   # ---- 平台三件套（部署形态：--profile full 拉起；dev 只起基建） ----
   webapi:
     build: { context: ., dockerfile: docker/webapi.Dockerfile }
@@ -110,6 +125,9 @@ services:
       BIOPILOT_MEMORY_MYSQL_DSN: mysql://root@mysql:3306/biopilot
       BIOPILOT_RAG_STORAGE_URI: http://standalone:19530
       BIOPILOT_RAG_STORAGE_MINIO_ENDPOINT: minio:9000
+      # agent 调平台的内部端点（文献检索等）；与 Java 侧入站校验共用 token
+      BIOPILOT_PLATFORM_BASE_URL: http://server:8080
+      BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./.biopilot:/app/.biopilot
@@ -127,9 +145,14 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/biopilot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
       BIOPILOT_ADAPTERBASE: http://webapi:8300
+      # 容器内用服务名；空库首次启动时据此种入默认检索源
+      BIOPILOT_PAPER_SEARCH_URL: http://paper-search-mcp:8000/mcp
+      BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}
     depends_on:
       mysql:
         condition: service_healthy
+      paper-search-mcp:
+        condition: service_started
 
   web:
     build: { context: ., dockerfile: docker/web.Dockerfile }
