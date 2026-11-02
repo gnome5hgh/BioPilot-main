@@ -3,18 +3,15 @@
 下载职责独立成工具，让搜索工具保持纯只读：写盘副作用集中在本工具，审计日志里
 「写盘」动作归于 fetch_pdf，不藏在名为 search 的工具下。
 
-平台模式（有用户域）下下载经 Java `/internal/literature/fetch-pdf`，复用平台的
-SSRF 逐跳校验与 %PDF 校验；单机 REPL 没有平台后端，走本地
-`core/security/services/pdf_fetch.py`。两条路径都只返回 PDF 字节，非 PDF 响应
-一律拒绝写盘。
+下载一律经 Java `/internal/literature/fetch-pdf`：外部 URL 的 SSRF 逐跳校验与
+`%PDF` magic bytes 校验在 Java `bio-common-net` 执行，Python 不再直接抓外部地址
+（单机 REPL 需要一个可达的平台后端，与文献检索同一前提）。本工具只负责落盘、
+查重与负缓存。
 """
-import httpx
-from httpx import HTTPStatusError as _HttpxStatusError
 from pathlib import Path
 from urllib.parse import urlparse
 
-from biopilot.core.security.services.network import validate_url_target
-from biopilot.core.security.services.pdf_fetch import fetch_pdf_bytes
+from biopilot.common.platform.client import PlatformError
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.tool.constants import ScopeRoot
 from biopilot.common.storage.atomic import atomic_write_bytes
@@ -29,7 +26,7 @@ def _current_user_id() -> str:
 
 
 class FetchPdfTool(Tool):
-    """下载 PDF 工具：带 SSRF 校验的网络抓取 + 写盘。
+    """下载 PDF 工具：经平台下载（SSRF 校验在 Java）+ 写盘。
 
     Attributes:
         name: str，工具名 "fetch_pdf"
@@ -40,13 +37,12 @@ class FetchPdfTool(Tool):
         side_effects: list[str]，["network", "write_file"]
         provenance: str | None，None（返回本地路径与状态，无外部内容，不打横幅）
         wants_run_state: bool，True（注入失败 URL 负缓存与已下载短路池）
-        _client: tuple | None，惰性构造的 (httpx.Client, ssrf_check)
     """
 
     name = "fetch_pdf"
     # description 与行为对齐:纯下载,url 取 search_literature 结果里的 PDF 链接(LLM 据此传参)
-    description = ("下载 PDF 到本地资料库（SSRF 校验 + 写盘；入库需另行派发 rag-agent）。"
-                   "url 取 search_literature 结果中的 pdf_url。"
+    description = ("下载 PDF 到本地资料库（经平台下载，SSRF 与 %PDF 校验在 Java 侧；"
+                   "入库需另行派发 rag-agent）。url 取 search_literature 结果中的 pdf_url。"
                    "任务文本指定了保存位置时必须用它填 download_to——缺省落 pdf 根只是没指定时的兜底。")
     parameters = {
         "type": "object",
@@ -69,26 +65,6 @@ class FetchPdfTool(Tool):
     #: 注入 per-run 状态：失败 URL 负缓存（同 URL 本任务内不重复尝试）
     wants_run_state = True
 
-    def __init__(self):
-        """初始化工具；下载客户端留待实际下载时才懒建（缓存命中或短路时无需走网络）。"""
-        super().__init__()
-        # 懒建 (httpx.Client, ssrf_check)：缓存命中或短路时无需走网络，
-        # 测试经 _make_client 注入 MockTransport 与 SSRF 桩
-        self._client = None
-
-    @classmethod
-    def _make_client(cls, transport=None, ssrf_check=None):
-        """构造下载客户端；测试经 transport/ssrf_check 注入 MockTransport 与 SSRF 桩。
-
-        Args:
-            transport: HTTPTransport | None，测试注入的 MockTransport
-            ssrf_check: 回调 | None，URL 校验桩
-
-        Returns:
-            (httpx.Client, ssrf_check 回调) 二元组。
-        """
-        return httpx.Client(transport=transport, timeout=30.0), (ssrf_check or validate_url_target)
-
     @staticmethod
     def _default_download_name(url: str) -> str:
         """从 URL 尾段推导保存文件名：取 path 末段（去 query/fragment），
@@ -105,33 +81,27 @@ class FetchPdfTool(Tool):
             raise ValueError(f"无法从 URL 推导文件名: {url}——请显式传 download_to")
         return tail if tail.lower().endswith(".pdf") else f"{tail}.pdf"
 
-    def _fetch(self, client, ssrf_check, url: str, dest: Path) -> None:
-        """下载 PDF 并落盘；平台模式走 Java，单机模式走本地下载核心。
-
-        平台模式复用 Java 的 SSRF 逐跳校验与 %PDF 校验，避免两套安全策略在
-        Web 形态下漂移；单机 REPL 没有平台后端，退回本地
-        :func:`fetch_pdf_bytes`（同样是逐跳校验 + magic bytes）。
+    def _fetch(self, url: str, dest: Path) -> None:
+        """经平台下载 PDF 字节并落盘。
 
         Args:
-            client: httpx.Client，本地下载客户端
-            ssrf_check: 回调，本地 URL 目标校验
             url: str，下载地址
             dest: Path，落盘目标
 
-        Returns:
-            无返回值（就地写盘）。
+        Raises:
+            PlatformError: 平台不可用或下载失败（状态码见 ``status_code``）；
+                响应缺 ``%PDF`` magic bytes 按 422（确定性失败）抛出。
         """
-        user_id = _current_user_id()
-        if user_id not in ("", "local"):
-            from biopilot.common.platform import make_platform_client
-            from biopilot.config import BioPilotConfig
-            platform = make_platform_client(BioPilotConfig.from_env())
-            try:
-                data = platform.fetch_pdf(user_id, url)
-            finally:
-                platform.close()
-        else:
-            data = fetch_pdf_bytes(url, client=client, ssrf_check=ssrf_check)
+        from biopilot.common.platform import make_platform_client
+        from biopilot.config import BioPilotConfig
+        platform = make_platform_client(BioPilotConfig.from_env())
+        try:
+            data = platform.fetch_pdf(_current_user_id(), url)
+        finally:
+            platform.close()
+        if not data.startswith(b"%PDF"):
+            # 平台侧已做 %PDF 校验，这里是写盘前最后一道兜底；按确定性失败处理
+            raise PlatformError(f"响应不是 PDF（缺 %PDF magic bytes）: {url}", status_code=422)
         atomic_write_bytes(dest, data)
 
     def effective_target_path(self, args: dict) -> str | None:
@@ -196,7 +166,6 @@ class FetchPdfTool(Tool):
             if hit:
                 return ToolResult(
                     text=f"本任务内已下载过该论文: {hit}，无需重复下载。")
-        # ↓ 以下 dest 计算、fetch 逻辑原样保留 ↓
         if download_to:
             dest = Path(download_to)
         else:
@@ -209,26 +178,22 @@ class FetchPdfTool(Tool):
                 dest = Path(pdf_root) / self._default_download_name(url)
             except ValueError as e:
                 return ToolResult(text=f"下载失败: {e}", is_error=True)
-        # 惰性创建：平台模式不需要本地客户端，避免每次下载白建一个连接池
-        client, ssrf_check = self._client or (None, None)
         if dest.exists():
             return ToolResult(text=f"已存在，跳过下载: {dest}")
         try:
-            self._fetch(client, ssrf_check, url, dest)
-        except _HttpxStatusError as e:
-            status = e.response.status_code
-            if 400 <= status < 500:
-                # 4xx 属永久性失败（URL 不存在/无权限）：记入负缓存并明示「勿重试」
+            self._fetch(url, dest)
+        except PlatformError as e:
+            status = e.status_code
+            if status is not None and 400 <= status < 500:
+                # 4xx 属确定性失败（URL 不存在/无权限/地址或内容不合法）：记入负缓存并明示「勿重试」
                 reason = f"HTTP {status}（永久性失败，勿重试）"
                 if _run_state is not None:
                     _run_state.failed_urls[url] = reason
                 return ToolResult(text=f"下载失败: {reason}——{e}", is_error=True)
-            # 5xx/网关类是瞬时故障，交通用失败路径（允许重试）
+            # 5xx/网络不可达是瞬时故障，交通用失败路径（允许重试）
             return ToolResult(text=f"下载失败: {e}", is_error=True)
         except Exception as e:
-            # 含 SSRF 拦截、重定向未解析完整、响应非 PDF、网络异常等情况。
-            # 不记负缓存：这些可能是瞬时故障（网络抖动/服务暂不可用），允许重试；
-            # 只有 4xx 这类确定性失败才进负缓存。
+            # 写盘类异常（权限、路径问题等）：不记负缓存，允许重试
             return ToolResult(text=f"下载失败: {e}", is_error=True)
         if _run_state is not None:
             _run_state.downloaded[url] = str(dest)

@@ -30,7 +30,7 @@ from datetime import datetime
 
 import httpx
 
-from biopilot.core.security.services import endpoint_guard
+from biopilot.common.net.endpoint_binding import endpoint_guard
 from openai import OpenAI
 
 from biopilot.config import LLMConfig

@@ -15,7 +15,16 @@ __all__ = ["PlatformClient", "PlatformError", "make_platform_client"]
 
 
 class PlatformError(RuntimeError):
-    """平台内部调用失败（网络异常、非 2xx、响应不可解析）。"""
+    """平台内部调用失败（网络异常、非 2xx、响应不可解析）。
+
+    Attributes:
+        status_code: HTTP 状态码；网络层失败（连不上/超时）为 None。调用方
+            用它区分确定性失败（4xx，不重试）与瞬时故障（5xx/无响应，可重试）。
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class PlatformClient:
@@ -80,7 +89,8 @@ class PlatformClient:
             detail = (response.text or "").strip()[:200]
             raise PlatformError(
                 f"平台返回 HTTP {response.status_code}"
-                + (f"：{detail}" if detail else ""))
+                + (f"：{detail}" if detail else ""),
+                status_code=response.status_code)
         return response
 
     def attachment(self, user_id: str, kind: str, obj_id: str) -> tuple[bytes, dict]:

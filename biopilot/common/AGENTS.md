@@ -18,6 +18,7 @@ common/
 ├─ core/
 │  ├─ constants/      # 跨层共享取值与枚举（MessageRole、RETRY_BACKOFF_BASE）
 │  └─ utils/          # text / tokenization / frontmatter 等纯函数
+├─ net/               # HTTP 客户端的端点绑定（配置端点 host 校验，纯标准库）
 ├─ platform/          # 出站平台边界：调 Java `/internal/*` 的唯一客户端
 └─ storage/           # 通用存储原语（atomic 写）
 ```
@@ -30,6 +31,7 @@ common/
 - **常量两级布局**：枚举放 `core/constants/enums/<name>.py`（一个枚举一个文件），其余放同层 `constants.py`；`__init__.py` 只做再导出。
 - **存储原语仅限通用能力**：只剩本地原子写；对象存储的读写一律经 `platform` 调 Java，或由引擎组件自己的内部存储（图表原图、工具结果外置）持有。
 - **`platform/` 是唯一出站实现**：header、超时与错误映射只写一份；它可以依赖 `httpx`，这是本包「只依赖标准库」的唯一例外。
+- **`net/` 只放端点不变量**：配置端点绑定（请求只准打创建客户端时声明的 host）是 HTTP 客户端的构造约束，不是策略中间件——需要「要不要用户点头」的判定去 `core/security`。外部 URL 的 SSRF 校验归 Java `bio-common-net`，Python 侧不再实现。
 
 ## Dependencies And Collaboration
 

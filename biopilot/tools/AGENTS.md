@@ -13,7 +13,7 @@
 ## Directory Structure
 
 - `file/` — 读 / 写 / 编辑 / glob / grep / 读 PDF（只做工具声明与降级文案；标题由 Java 提取，本层不推导）
-- `search/` — 文献检索薄转发（`search_literature`，调 Java `/internal/literature/search`）与 PDF 下载（`fetch_pdf`：平台模式调 Java `/internal/literature/fetch-pdf`，单机 REPL 走本地下载核心）
+- `search/` — 文献检索薄转发（`search_literature`，调 Java `/internal/literature/search`）与 PDF 下载（`fetch_pdf`：调 Java `/internal/literature/fetch-pdf`，SSRF 与 `%PDF` 校验在 Java `bio-common-net`；本层只管落盘、查重与负缓存）
 - `review/` — 审查裁决、模板体检（helper 已并入工具文件）
 - `rag/` — 检索、看图、入库、全量收敛、索引体检（只装配给 `rag-agent`）
 - `vision/` — 图表提取与看图分析

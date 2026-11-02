@@ -18,7 +18,7 @@ security/
 ├─ middleware/    # base.py 协议与异常体系 + 审计落盘 + 路径权威
 │                 #   + 内容防护 + 命令防护 + 策略引擎（唯一确认决策点）
 └─ services/      # 被工具与客户端直接调用的防护能力：
-                  #   统一出网出口与端点守卫、命令解析、可选语义判定
+                  #   命令解析、可选语义判定
 ```
 
 ## Responsibilities
@@ -41,27 +41,26 @@ security/
 - `middleware/workspace.py` — 路径权威（读黑名单 + 写围栏 + 归一化）
 - `middleware/policy_engine.py` — 唯一的确认决策点
 - `middleware/audit.py` — 审计落盘
-- `services/network.py` — 统一出网出口与端点守卫
 
 ## Usage And Change Notes
 
 - **协议与实现同子包**：协议层与五个实现都在 `middleware/`——协议只服务它们，分开放只会让「谁定义契约」变含糊。
-- **异常跟着协议或服务走**：安全异常家族与协议同处 `middleware/base.py`，出网异常跟 `services/network.py`。`domain/` 只放数据载体，不放行为。
+- **异常跟着协议或服务走**：安全异常家族与协议同处 `middleware/base.py`，命令/分类器异常跟各自服务。`domain/` 只放数据载体，不放行为。
 - **本包不另立风险词汇**：风险等级与副作用取值在 `core/constants/`（枚举即单一真相源），从这里取，不要复制一份。
-- **不要建 `constants/`**：扫描规则、不可见字符表、伪装系统消息模板、安全命令表、根目标表、私网段都只服务各自那一个中间件或服务，**就地声明**才对；真被两处消费了再搬。
+- **不要建 `constants/`**：扫描规则、不可见字符表、伪装系统消息模板、安全命令表、根目标表都只服务各自那一个中间件或服务，**就地声明**才对；真被两处消费了再搬。
 - **未配对代理字符清洗不在这里**：它被多个包横向消费，已归 `biopilot/common/core/utils/text.py`——需要时从那里取，别在本包再实现一份。
 - **中间件的装配顺序在 `biopilot/cli/services/assembly.py`**：顺序即执行顺序，改动顺序等于改动语义。
 
 ## Dependencies And Collaboration
 
-- 被 `core/agent`（工具执行管道按洋葱顺序调中间件）、`core/llm`（端点守卫）、`core/rag` 与 `tools/*`（出网与命令解析）依赖。
+- 被 `core/agent`（工具执行管道按洋葱顺序调中间件）与 `tools/*`（命令解析）依赖。
 - 依赖 `core/constants/`（风险与副作用词汇）与 `core/tool/`（工具的安全元数据声明）。
 - 与终端的关系是反向的：确认框由 `terminal/confirm/` 消费，本包只产出确认请求。
 
 ## Investigation Rule
 
 1. 先判断是「拦错了」还是「没拦住」：前者看对应中间件的判据，后者看策略引擎的升级因合并。
-2. 路径问题看 `middleware/workspace.py`；内容问题看内容防护；命令问题看 `command_guard` 与 `services/command.py`；出网问题看 `services/network.py`。
+2. 路径问题看 `middleware/workspace.py`；内容问题看内容防护；命令问题看 `command_guard` 与 `services/command.py`。
 3. 审计字段与格式看 `middleware/audit.py`；审计的实际落点是运行数据根下的 `security/audit/`（按天轮转的 JSONL）。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -88,4 +87,3 @@ conda run -n biopilot python -m pytest tests/security -q
 - [`middleware/base.py`](middleware/base.py)
 - [`middleware/workspace.py`](middleware/workspace.py)
 - [`middleware/policy_engine.py`](middleware/policy_engine.py)
-- [`services/network.py`](services/network.py)

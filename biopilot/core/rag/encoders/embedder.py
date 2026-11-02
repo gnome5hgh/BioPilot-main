@@ -10,7 +10,7 @@ from typing import Protocol
 
 import httpx
 
-from biopilot.core.security.services import endpoint_guard
+from biopilot.common.net.endpoint_binding import endpoint_guard
 import numpy as np
 
 from biopilot.common.core.constants import RETRY_BACKOFF_BASE

@@ -256,7 +256,7 @@ class ContentGuardMiddleware(SecurityMiddleware):
         """
         if ctx.result is None or ctx.tool.provenance is None:
             return
-        # 错误结果（熔断/SSRF/异常）不套横幅：横幅是成功语义，套在错误上会误导模型
+        # 错误结果（熔断/网络/异常）不套横幅：横幅是成功语义，套在错误上会误导模型
         if getattr(ctx.result, "is_error", False):
             return
 
