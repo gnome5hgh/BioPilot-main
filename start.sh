@@ -78,7 +78,7 @@ wait_url() {
   log "$name 60 秒内未就绪，看对应日志排查"; return 1
 }
 wait_url "适配层"  http://127.0.0.1:8300/health
-wait_url "服务端"  http://127.0.0.1:8080/auth/login
+wait_url "服务端"  http://127.0.0.1:8080/api/v1/auth/login
 wait_url "前端"    http://localhost:5173/
 
 cat <<'EOF'

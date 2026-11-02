@@ -23,7 +23,7 @@
 
 工具装配不在本包：`make_tools` 在 `cli/services/tool_assembly.py`；工具运行时上下文在
 `core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在 `biopilot/common/` 与 `core/security/`。
-平台数据端口（论文目录/文件/文档）已迁 Java `bio-catalog`，本包不再保留数据访问 adapter。
+平台数据端口（论文目录/文件/文档）已迁 Java `bio-file`，本包不再保留数据访问 adapter。
 分析产物（`run_python`）经 Java `/internal/files/artifacts` 登记；平台文件字节经 `/internal/attachments/*` 取回，工具不直连 OSS。
 
 ## Responsibilities

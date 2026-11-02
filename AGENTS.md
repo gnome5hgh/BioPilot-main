@@ -16,7 +16,7 @@
 - 名称：`BioPilot`
 - 路径：`.`
 - 角色：`repo-root-workspace-manifest`
-- 当前定位：**实验室私有部署的多用户生信科研 Agent 平台**。三层结构：`web/`（Vue3 前端）→ `server/`（SpringBoot：注册/登录/鉴权/角色/审计，内网代理）→ `biopilot/`（Python 引擎：原单机多 agent 研究助手，经 FastAPI 适配层暴露 HTTP/SSE）。学生登录使用；数据按 `user_id` 行级隔离（MySQL）与 `users/<uid>/` 前缀隔离（OSS/Milvus collection）。
+- 当前定位：**实验室私有部署的多用户生信科研 Agent 平台**。三层结构：`web/`（Vue3 前端）→ `server/`（SpringBoot：鉴权/角色/审计 + 平台业务 + 引擎接入）→ `biopilot/`（Python 引擎：原单机多 agent 研究助手，经 FastAPI 适配层暴露 HTTP/SSE）。学生登录使用；数据按 `user_id` 行级隔离（MySQL）与 `users/<uid>/` 前缀隔离（OSS/Milvus collection）。
 - 引擎本体不变的部分：单根 agent（supervisor）接收每一轮用户输入 → 可选的意图预处理 → ReAct 循环 → 拆解子任务派发子 agent → 聚合各子 agent 的结构化摘要后汇总回答。
 - 绑定环境：Python 3.11 / conda env `biopilot`；Java 21 + Maven（`server/`）；Node ≥ 20（`web/`）。
 
@@ -25,7 +25,7 @@
 ```text
 BioPilot-main/
 ├─ web/                # 前端（Vue3 + Vite + TS 风格 JS）：登录/对话/文件/文献/知识库/引用库/终端面板/管理
-├─ server/             # SpringBoot 3（Java 21）：bio-admin(启动装配+控制器) bio-modules(业务域) bio-common(通用件)
+├─ server/             # SpringBoot 3（Java 21）：bio-admin(启动装配) bio-modules(业务域+引擎接入) bio-common(通用件)
 ├─ biopilot/           # Python 引擎：cli/(装配) config/(参数) common/(跨层基础) core/(agent 运行层)
 │                      #   tools/ terminal/ webapi/(HTTP/SSE 适配层)
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
@@ -43,9 +43,10 @@ BioPilot-main/
 
 ### 当前目录分层含义
 
-- 三层调用链：`web/`（5173，Vite 代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 内网代理）→ `biopilot/webapi/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
-- `biopilot/` 是引擎主包；`cli/` 是装配根（`--web` 分流到适配层），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`core/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `core/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-catalog`。
-- `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（启动类 + 控制器）、`bio-modules`（业务域：bio-system / bio-project / bio-catalog / bio-schedule / bio-literature / bio-citation）、`bio-common`（core/web/net/mybatis/satoken/oss/pdf/mcp 八个共享模块）。
+- 三层调用链：`web/`（5173，Vite 原样代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 引擎接入）→ `biopilot/webapi/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
+- `biopilot/` 是引擎主包；`cli/` 是装配根（`--web` 分流到适配层），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`core/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `core/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
+- `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（8 个域：bio-system / bio-project / bio-file / bio-kb / bio-schedule / bio-literature / bio-citation，以及技术适配层 bio-gateway）、`bio-common`（core/web/net/mybatis/satoken/oss/pdf/mcp 八个共享模块）。
+- 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
 - `.biopilot/` 同时是运行时数据根与静态资产根：`skills/` 与 `intent/` 入库，`infra/` 是 docker 数据卷，其余都是运行期产物。
 - `.agents/skills/` 与 `.biopilot/skills/` 是**两条不相干的线**：前者给编码代理用，后者是 BioPilot 运行时的能力包。
@@ -135,7 +136,7 @@ BioPilot-main/
 - 仓库规则与阅读路径：`AGENTS.md`
 - 装配根（REPL 与 web 会话共用对象图）：`biopilot/cli/services/assembly.py`；启动预检：`biopilot/cli/services/bootstrap.py`
 - Web 适配层（agent 运行时 API：SSE/确认/知识库/终端/内部调用）：`biopilot/webapi/app.py`（规则见 [`biopilot/webapi/AGENTS.md`](biopilot/webapi/AGENTS.md)）
-- SpringBoot 启动类与代理控制器：`server/bio-admin/src/main/java/com/biopilot/admin/`
+- SpringBoot 启动类：`server/bio-admin/src/main/java/com/biopilot/admin/`；引擎接入（代理/SSE/终端 WS）：`server/bio-modules/bio-gateway/`
 - 前端入口与路由：`web/src/main.js`、`web/src/router/`
 - 参数声明点：`biopilot/config/schemas/sections.py`
 - 配置模板与字段示例：`config.example.yaml`

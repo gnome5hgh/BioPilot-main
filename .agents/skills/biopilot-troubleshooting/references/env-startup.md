@@ -89,7 +89,7 @@
 ### 网页端带 body 的请求（对话/上传）到适配层全变空体，FastAPI 报 `Field required`（Java→Python 代理）
 - **根因**：SpringBoot 代理用的 java.net.http.HttpClient 默认带 h2c 升级头（`Upgrade: h2c` + `HTTP2-Settings`），uvicorn 把它当协议升级请求处理并**吞掉请求体**——GET 不带体所以列表类接口正常，极有迷惑性。
 - **修法**：`AgentProxyController` 的 HttpClient 已锁 `HttpClient.Version.HTTP_1_1`；新增代理端点必须共用这个 client，别 new 默认的。
-- **验证**：`curl -F "file=@/tmp/x.pdf" -H "satoken: <token>" http://127.0.0.1:8080/agent/papers/upload` 返回 `{"status":"ok",...}` 而非 422。
+- **验证**：`curl -F "file=@/tmp/x.pdf" -H "satoken: <token>" http://127.0.0.1:8080/api/v1/papers` 返回 `{"status":"ok",...}` 而非 422。
 
 ### 管理端/profile 之类接口返回 500「系统繁忙」，日志里却没有异常堆栈
 - **根因**：全局异常兜底把未知异常转成通用文案且不打日志（设计如此，防泄内部细节）；「不存在的路径」也曾被它吞成 500（现 NoResourceFound 已如实 404）。
