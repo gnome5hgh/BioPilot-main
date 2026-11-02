@@ -32,6 +32,10 @@
     </dependency>
     <dependency>
       <groupId>com.biopilot</groupId>
+      <artifactId>bio-citation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
       <artifactId>bio-common-web</artifactId>
     </dependency>
     <dependency>

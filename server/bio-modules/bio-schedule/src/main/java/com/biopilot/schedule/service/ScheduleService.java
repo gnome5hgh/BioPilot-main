@@ -14,10 +14,10 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
-/** 定时任务定义维护：任务行由 Java 写，到期扫描与执行由 Python 引擎负责。
+/** 定时任务定义维护：任务行与调度进度全部由 Java 写。
 
-    执行侧只更新 last_run_at / next_run_at 两列作为调度进度；任务定义本身
-    （名称/内容/周期/暂停/删除）一律走本服务，避免两端各写一半。
+    到期扫描与认领在 {@code ScheduleDispatchService}，执行只调引擎内部端点跑一遍
+    agent；引擎不再直接读写 `bio_schedule_task`。
 */
 @Service
 public class ScheduleService {

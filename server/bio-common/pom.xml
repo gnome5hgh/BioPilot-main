@@ -16,5 +16,7 @@
     <module>bio-common-mybatis</module>
     <module>bio-common-satoken</module>
     <module>bio-common-oss</module>
+    <module>bio-common-pdf</module>
+    <module>bio-common-mcp</module>
   </modules>
 </project>

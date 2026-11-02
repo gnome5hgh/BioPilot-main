@@ -1,7 +1,14 @@
 package com.biopilot.admin;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 
+import com.biopilot.common.web.http.AgentInternalClient;
+import com.biopilot.schedule.service.ScheduleDispatchService;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -12,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -33,6 +41,15 @@ class ScheduleFlowTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    ScheduleDispatchService dispatch;
+
+    @MockBean
+    AgentInternalClient internal;
+
+    private static final DateTimeFormatter TS =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSxxx");
 
     @BeforeEach
     void ensureTable() {
@@ -131,6 +148,52 @@ class ScheduleFlowTest {
                         "conversation_id", "conv-1", "interval_minutes", 1)), Map.class);
         assertThat(created.getStatusCode().value()).isEqualTo(422);
         assertThat(list(token)).isEmpty();
+    }
+
+    private void insertTask(String id, long userId, int paused, OffsetDateTime next) {
+        jdbc.update("INSERT INTO bio_schedule_task (id, user_id, conversation_id, name,"
+                        + " task, interval_minutes, paused, last_run_at, next_run_at, created_at)"
+                        + " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                id, String.valueOf(userId), "conv-" + id, "巡检", "检索本周新文献",
+                60, paused, null, next.format(TS),
+                OffsetDateTime.now(ZoneOffset.UTC).format(TS));
+    }
+
+    @Test
+    @Order(4)
+    void due_task_is_claimed_and_dispatched() {
+        OffsetDateTime past = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1);
+        insertTask("due-1", 42L, 0, past);
+
+        int count = dispatch.dispatchOnce();
+
+        assertThat(count).isEqualTo(1);
+        verify(internal).runSchedule(eq(42L), eq("due-1"), eq("conv-due-1"),
+                eq("检索本周新文献"), eq("巡检"));
+        Map<String, Object> row = jdbc.queryForMap(
+                "SELECT last_run_at, next_run_at FROM bio_schedule_task WHERE id='due-1'");
+        assertThat(row.get("last_run_at")).isNotNull();
+        assertThat(String.valueOf(row.get("next_run_at"))
+                .compareTo(String.valueOf(row.get("last_run_at")))).isPositive();
+    }
+
+    @Test
+    @Order(5)
+    void second_scan_does_not_redispatch() {
+        insertTask("due-2", 43L, 0, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+        assertThat(dispatch.dispatchOnce()).isEqualTo(1);
+
+        // 认领时已把 next_run_at 推进到未来，第二轮不应重复投递
+        assertThat(dispatch.dispatchOnce()).isZero();
+    }
+
+    @Test
+    @Order(6)
+    void paused_and_future_tasks_are_skipped() {
+        insertTask("paused-1", 44L, 1, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+        insertTask("future-1", 45L, 0, OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(30));
+
+        assertThat(dispatch.dispatchOnce()).isZero();
     }
 
     @Test

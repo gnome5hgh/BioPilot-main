@@ -22,6 +22,15 @@
       <groupId>com.biopilot</groupId>
       <artifactId>bio-common-satoken</artifactId>
     </dependency>
+    <!-- 通用 MCP 客户端（客户端/传输/连接生命周期在 common，业务域只做 provider 与配置） -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-mcp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-mybatis</artifactId>
+    </dependency>
     <!-- 文献导入落论文库：只依赖 bio-catalog 的公开服务，不碰它的 mapper/entity -->
     <dependency>
       <groupId>com.biopilot</groupId>

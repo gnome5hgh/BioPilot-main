@@ -54,11 +54,17 @@ class CatalogFlowTest {
 
     @BeforeEach
     void ensureTables() {
+        // 测试库表结构随实体演进：先删后建，避免存量表缺列导致插入/查询 500
+        jdbc.execute("DROP TABLE IF EXISTS bio_paper");
+        jdbc.execute("DROP TABLE IF EXISTS bio_file_upload");
+        jdbc.execute("DROP TABLE IF EXISTS bio_document");
         jdbc.execute("CREATE TABLE IF NOT EXISTS bio_paper ("
                 + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
                 + "title VARCHAR(500) NOT NULL, file_name VARCHAR(255) NULL,"
                 + "oss_key VARCHAR(500) NOT NULL, size_bytes BIGINT NOT NULL DEFAULT 0,"
                 + "indexed INTEGER NOT NULL DEFAULT 0, kb_enabled TINYINT NOT NULL DEFAULT 0,"
+                + "citation_id VARCHAR(64) NULL, authors VARCHAR(1000) NOT NULL DEFAULT '',"
+                + "year VARCHAR(10) NOT NULL DEFAULT '', journal VARCHAR(300) NOT NULL DEFAULT '',"
                 + "index_status VARCHAR(20) NOT NULL DEFAULT 'not_added',"
                 + "index_error VARCHAR(500) NULL, indexed_at VARCHAR(40) NULL,"
                 + "chunk_count INT NOT NULL DEFAULT 0, created_at VARCHAR(40) NOT NULL,"
@@ -140,7 +146,7 @@ class CatalogFlowTest {
         assertThat(uploaded.getStatusCode().value()).isEqualTo(200);
         assertThat(uploaded.getBody().get("file_name")).isEqualTo("paper.pdf");
         String paperId = (String) uploaded.getBody().get("id");
-        verify(internal).kbEnqueue(anyLong(), org.mockito.ArgumentMatchers.anyList());
+        verify(internal, org.mockito.Mockito.atLeastOnce()).kbSync(anyLong());
 
         List<Map<String, Object>> papers = list(token, "/agent/papers", "papers");
         assertThat(papers).hasSize(1);
@@ -154,7 +160,7 @@ class CatalogFlowTest {
         ResponseEntity<Map> deleted = rest.exchange("/agent/papers/" + paperId,
                 HttpMethod.DELETE, new HttpEntity<>(authHeaders(token)), Map.class);
         assertThat((String) deleted.getBody().get("status")).isEqualTo("ok");
-        verify(internal).kbSync(anyLong());
+        verify(internal, org.mockito.Mockito.atLeastOnce()).kbSync(anyLong());
         assertThat(list(token, "/agent/papers", "papers")).isEmpty();
     }
 

@@ -25,7 +25,9 @@ public class MybatisPlusConfig {
     */
     private static final List<String> IGNORED_TABLES = List.of(
             "sys_user", "sys_role", "sys_user_role", "sys_login_log",
-            "bio_agent_state", "bio_security_audit_event");
+            "bio_agent_state", "bio_security_audit_event",
+            // 全局管理员配置，无 user_id 列（不是用户数据，不能按租户过滤）
+            "bio_literature_mcp_server");
 
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {

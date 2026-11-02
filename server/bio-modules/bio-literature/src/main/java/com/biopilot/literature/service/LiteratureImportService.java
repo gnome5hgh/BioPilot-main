@@ -75,7 +75,11 @@ public class LiteratureImportService {
                     "全文下载失败：" + (lastError.isBlank() ? "下载到的全文为空" : lastError));
         }
 
-        PaperView paper = papers.ingest(userId, title, name, data,
+        // Europe PMC 的搜索结果已带作者/期刊/年份，直接落库，避免再从 PDF 提取
+        String authors = String.valueOf(body.getOrDefault("authors", "")).trim();
+        String journal = String.valueOf(body.getOrDefault("journal", "")).trim();
+        String year = String.valueOf(body.getOrDefault("pubdate", "")).trim();
+        PaperView paper = papers.ingest(userId, title, authors, year, journal, name, data,
                 "application/pdf", false);
         return Map.of("status", "ok", "paper_id", paper.id(), "file_name", paper.fileName());
     }

@@ -94,6 +94,44 @@ public class DocumentService {
         return Map.of("status", "ok");
     }
 
+    /**
+     * agent 成稿入库：按 (user_id, name) upsert，内容先落 OSS、后写行。
+     *
+     * <p>引擎内部调用没有浏览器登录态，故走显式 user_id 的 mapper 方法；同名覆盖
+     * 语义与 Python 旧工具一致，不做跨类型同名检查（旧行为也不做）。</p>
+     *
+     * @param userId  归属用户（字符串，兼容 REPL 的 local 域）
+     * @param rawName 文档名（超 200 字符截断，非法路径字符替换为下划线）
+     * @param content markdown 全文
+     * @return {@code {status, id, name, created}}
+     */
+    public Map<String, Object> saveByName(String userId, String rawName, String content) {
+        String name = safeDocumentName(rawName);
+        String ossKey = "users/" + userId + "/files/documents/" + name;
+        minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
+        BioDocument existing = documentMapper.selectByUserAndNameForAgent(userId, name);
+        if (existing != null) {
+            documentMapper.updateForAgent(existing.getId(), userId, content, ossKey, now());
+            return Map.of("status", "ok", "id", existing.getId(),
+                    "name", name, "created", false);
+        }
+        String id = UUID.randomUUID().toString().replace("-", "");
+        documentMapper.insertForAgent(id, userId, name, content, ossKey, now());
+        return Map.of("status", "ok", "id", id, "name", name, "created", true);
+    }
+
+    private static String safeDocumentName(String rawName) {
+        String name = rawName == null ? "" : rawName.trim();
+        if (name.isEmpty()) {
+            throw new ServiceException(422, "文档名不能为空");
+        }
+        if (name.length() > 200) {
+            name = name.substring(0, 200);
+        }
+        String safe = name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").trim();
+        return safe.isEmpty() ? "未命名.md" : safe;
+    }
+
     public void delete(long userId, String docId) {
         BioDocument doc = find(docId);
         documentMapper.deleteById(docId);

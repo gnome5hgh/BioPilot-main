@@ -39,10 +39,17 @@ public class AgentProxyController {
             "${biopilot.adapter-base:http://127.0.0.1:8300}")
     private String adapterBase;
 
-    private final com.biopilot.system.service.SysUserService sysUserService;
+    /** 内部调用共享 token：删户等 /internal/* 端点额外携带。 */
+    @org.springframework.beans.factory.annotation.Value("${biopilot.internal-token:}")
+    private String internalToken;
 
-    public AgentProxyController(com.biopilot.system.service.SysUserService sysUserService) {
+    private final com.biopilot.system.service.SysUserService sysUserService;
+    private final com.biopilot.catalog.service.PlatformUserDataService platformUserData;
+
+    public AgentProxyController(com.biopilot.system.service.SysUserService sysUserService,
+                                com.biopilot.catalog.service.PlatformUserDataService platformUserData) {
         this.sysUserService = sysUserService;
+        this.platformUserData = platformUserData;
     }
 
     // 锁死 HTTP/1.1：默认的 h2c 升级头（Upgrade/HTTP2-Settings）会让 uvicorn 按协议
@@ -76,15 +83,26 @@ public class AgentProxyController {
     }
 
     private ResponseEntity<String> proxyPost(String path, String body) {
+        return sendPost(path, body, false);
+    }
+
+    /** /internal/* 转发：额外带共享 token（Python 侧内部端点要求）。 */
+    private ResponseEntity<String> proxyInternalPost(String path, String body) {
+        return sendPost(path, body, true);
+    }
+
+    private ResponseEntity<String> sendPost(String path, String body, boolean internal) {
         long userId = StpUtil.getLoginIdAsLong();
-        HttpRequest upstream = HttpRequest.newBuilder()
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(adapterBase + path))
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
-                .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body));
+        if (internal && internalToken != null && !internalToken.isBlank()) {
+            builder.header("X-Internal-Token", internalToken);
+        }
         try {
-            HttpResponse<String> resp = client.send(upstream,
+            HttpResponse<String> resp = client.send(builder.build(),
                     HttpResponse.BodyHandlers.ofString());
             return ResponseEntity.status(resp.statusCode())
                     .contentType(MediaType.APPLICATION_JSON)
@@ -175,51 +193,6 @@ public class AgentProxyController {
         return proxyPost("/kb/search", body);
     }
 
-    /** 引用库：列表、格式化、删除、导出、从论文入库（均按登录用户隔离）。 */
-    @GetMapping("/citations")
-    public ResponseEntity<String> citationsList(
-            @RequestParam(defaultValue = "") String q) {
-        return proxyGet("/citations?q="
-                + java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8));
-    }
-
-    @PostMapping("/citations/format")
-    public ResponseEntity<String> citationsFormat(@RequestBody String body) {
-        return proxyPost("/citations/format", body);
-    }
-
-    @DeleteMapping("/citations/{key}")
-    public ResponseEntity<String> citationsDelete(@PathVariable String key) {
-        long userId = StpUtil.getLoginIdAsLong();
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + "/citations/"
-                        + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8)))
-                .header("X-User-Id", String.valueOf(userId))
-                .DELETE()
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
-    }
-
-    @GetMapping("/citations/export")
-    public ResponseEntity<String> citationsExport() {
-        return proxyGet("/citations/export");
-    }
-
-    @PostMapping("/citations/from-paper")
-    public ResponseEntity<String> citationsFromPaper(@RequestBody String body) {
-        return proxyPost("/citations/from-paper", body);
-    }
-
     /** 终端面板：部署开关与重启（WS 本体由 TerminalRelayHandler 单独转发）。 */
     @GetMapping("/terminal/config")
     public ResponseEntity<String> terminalConfig() {
@@ -259,15 +232,18 @@ public class AgentProxyController {
             u.setStatus("1");
             sysUserService.updateById(u);
         }
-        return proxyPost("/admin/users/" + targetId + "/mark-deleting", "{}");
+        return proxyInternalPost("/internal/users/" + targetId + "/mark-deleting", "{}");
     }
 
     @SaCheckRole("ADMIN")
     @PostMapping("/admin/users/{targetId}/purge")
     public ResponseEntity<String> purgeUser(@PathVariable String targetId) {
-        ResponseEntity<String> upstream = proxyPost("/admin/users/" + targetId + "/purge", "{}");
-        // 引擎侧清理成功后删业务行（账号本身）——删除方向：先数据后账号
+        ResponseEntity<String> upstream =
+                proxyInternalPost("/internal/users/" + targetId + "/purge", "{}");
+        // 引擎侧清理成功后：先清平台表行与 OSS 对象，最后删账号（先数据后账号）。
+        // 平台清理失败时不删账号，管理员可重试，避免留下「账号没了、数据还在」。
         if (upstream.getStatusCode().is2xxSuccessful()) {
+            platformUserData.purge(targetId);
             var u = sysUserService.getById(Long.valueOf(targetId));
             if (u != null) {
                 sysUserService.deleteById(Long.valueOf(targetId));

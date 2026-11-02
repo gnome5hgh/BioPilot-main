@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -54,6 +55,13 @@ public class PaperController {
                                        @RequestParam(defaultValue = "false") boolean download) {
         DownloadData data = service.download(uid(), paperId);
         return DownloadResponses.of(data, download);
+    }
+
+    @PatchMapping("/{paperId}")
+    public Map<String, Object> updateMetadata(@PathVariable String paperId,
+                                              @RequestBody Map<String, Object> body) {
+        service.updateMetadata(uid(), paperId, body);
+        return Map.of("status", "ok");
     }
 
     @DeleteMapping("/{paperId}")

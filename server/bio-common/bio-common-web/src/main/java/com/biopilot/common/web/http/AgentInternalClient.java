@@ -6,7 +6,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,19 +68,26 @@ public class AgentInternalClient {
         }
     }
 
-    public void kbEnqueue(long userId, List<String> paperIds) {
-        post("/internal/kb/enqueue", userId, Map.of("paper_ids", paperIds));
-    }
-
-    public void kbDetach(long userId, List<String> paperIds) {
-        post("/internal/kb/detach", userId, Map.of("paper_ids", paperIds));
-    }
-
-    public void kbRetry(long userId, List<String> paperIds) {
-        post("/internal/kb/retry", userId, Map.of("paper_ids", paperIds));
-    }
-
+    /** 唤醒索引器：状态已由 Java 在数据库里写好，这里只触发一次扫描。 */
     public void kbSync(long userId) {
         post("/internal/kb/sync", userId, Map.of());
+    }
+
+    /**
+     * 触发一次到期的定时任务（Python 侧立即返回、后台执行）。
+     *
+     * @param userId         归属用户。
+     * @param taskId         任务 id（引擎按它去重）。
+     * @param conversationId 归属会话。
+     * @param task           任务文本。
+     * @param name           任务名（仅用于日志）。
+     */
+    public void runSchedule(long userId, String taskId, String conversationId,
+                            String task, String name) {
+        post("/internal/schedule/run", userId, Map.of(
+                "task_id", taskId == null ? "" : taskId,
+                "conversation_id", conversationId == null ? "" : conversationId,
+                "task", task == null ? "" : task,
+                "name", name == null ? "" : name));
     }
 }

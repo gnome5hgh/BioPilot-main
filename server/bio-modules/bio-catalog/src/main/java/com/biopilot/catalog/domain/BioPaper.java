@@ -17,6 +17,10 @@ public class BioPaper {
     private Long sizeBytes;
     private Integer indexed;
     private Integer kbEnabled;
+    private String citationId;
+    private String authors;
+    private String year;
+    private String journal;
     private String indexStatus;
     private String indexError;
     private String indexedAt;
@@ -85,6 +89,38 @@ public class BioPaper {
 
     public void setKbEnabled(Integer kbEnabled) {
         this.kbEnabled = kbEnabled;
+    }
+
+    public String getCitationId() {
+        return citationId;
+    }
+
+    public void setCitationId(String citationId) {
+        this.citationId = citationId;
+    }
+
+    public String getAuthors() {
+        return authors;
+    }
+
+    public void setAuthors(String authors) {
+        this.authors = authors;
+    }
+
+    public String getYear() {
+        return year;
+    }
+
+    public void setYear(String year) {
+        this.year = year;
+    }
+
+    public String getJournal() {
+        return journal;
+    }
+
+    public void setJournal(String journal) {
+        this.journal = journal;
     }
 
     public String getIndexStatus() {

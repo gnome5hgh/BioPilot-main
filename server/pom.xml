@@ -24,6 +24,8 @@
     <java.version>21</java.version>
     <mybatis-plus.version>3.5.14</mybatis-plus.version>
     <sa-token.version>1.44.0</sa-token.version>
+    <!-- 官方 MCP Java SDK；用 mcp-core + mcp-json-jackson2（Jackson 2），不要用聚合 mcp（拉 Jackson 3） -->
+    <mcp-sdk.version>1.1.5</mcp-sdk.version>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -64,6 +66,26 @@
       </dependency>
       <dependency>
         <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-pdf</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-mcp</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.modelcontextprotocol.sdk</groupId>
+        <artifactId>mcp-core</artifactId>
+        <version>${mcp-sdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.modelcontextprotocol.sdk</groupId>
+        <artifactId>mcp-json-jackson2</artifactId>
+        <version>${mcp-sdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
         <artifactId>bio-system</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -85,6 +107,11 @@
       <dependency>
         <groupId>com.biopilot</groupId>
         <artifactId>bio-literature</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-citation</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>
