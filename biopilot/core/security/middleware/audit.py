@@ -49,7 +49,7 @@ from biopilot.core.security.middleware.base import (
     SecurityMiddleware, SecurityBlocked, ConfirmRequired,
 )
 from biopilot.core.security.domain import AuditEntry, ToolContext
-from biopilot.core.common.services.text import sanitize_surrogates
+from biopilot.common.core.utils.text import sanitize_surrogates
 
 #: 凭证类键名 → 替换值。这是审计里唯一的脱敏——凭证落日志是真泄露且对取证
 #: 无价值；其余键值（含写入/读出的正文）全量原文保留。
@@ -233,7 +233,7 @@ class AuditMiddleware(SecurityMiddleware):
         """指定审计事件落库句柄。
 
         Args:
-            db: MemoryDB，MySQL 连接池（audit_event 表经 _SCHEMA 幂等建表）。
+            db: MemoryDB，MySQL 连接池（bio_security_audit_event 表经 _SCHEMA 幂等建表）。
         """
         self.db = db
 
@@ -255,7 +255,7 @@ class AuditMiddleware(SecurityMiddleware):
             # 严格 utf8mb4 写入会炸——清洗后再写，审计不丢行。
             payload = sanitize_surrogates(json.dumps(data, ensure_ascii=False))
             self.db.execute(
-                "INSERT INTO audit_event (user_id, event_type, span_id, trace_id,"
+                "INSERT INTO bio_security_audit_event (user_id, event_type, span_id, trace_id,"
                 " session_id, agent_type, tool_name, risk_level, turn, started_at,"
                 " ended_at, policy_decision, result_status, approval_outcome,"
                 " created_at, payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -280,7 +280,7 @@ class AuditMiddleware(SecurityMiddleware):
             事件 dict 列表（键为标准审计字段名），按插入顺序。
         """
         rows = self.db.execute(
-            "SELECT payload FROM audit_event ORDER BY id").fetchall()
+            "SELECT payload FROM bio_security_audit_event ORDER BY id").fetchall()
         return [json.loads(r["payload"]) for r in rows]
 
     async def before(self, ctx: ToolContext) -> None:

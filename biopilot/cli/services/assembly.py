@@ -21,7 +21,7 @@ from biopilot.core.skills import apply_pre_approval, merge_tools
 from biopilot.core.skills import SkillRegistry, load_lock
 from biopilot.core.mcp.services.bridge import collect_mcp_agent_tools
 from biopilot.tools.skills.load_skill import LoadSkillTool
-from biopilot.tools.common.factory import declared_roots
+from biopilot.core.tool.services.roots import declared_roots
 from biopilot.core.llm import LLMClient
 from biopilot.core.security.services.classifier import build_classifier
 from biopilot.core.security import (
@@ -34,7 +34,8 @@ from biopilot.core.tool.services.tool_result_store import make_tool_result_store
 from biopilot.core.memory.storage.database import MemoryDB
 from biopilot.core.memory.services.block_manager import BlockManager
 from biopilot.core.memory.services.message_manager import MessageManager
-from biopilot.tools.memory import set_memory_context, MemoryToolsContext
+from biopilot.core.tool.services.runtime_context import (
+    set_memory_context, MemoryToolsContext)
 from biopilot.core.memory.services.agent_manager import AgentManager
 from biopilot.core.memory.services.consolidation import MemoryConsolidator
 from biopilot.core.memory.services.consolidation_queue import ConsolidationQueue
@@ -70,7 +71,7 @@ def _select_resume_session(agent_manager: AgentManager, io, user_id: str) -> str
     """列出历史会话并让用户选择要恢复的会话（`--resume` 不带 id 时）。
 
     Args:
-        agent_manager: 记忆服务层句柄（读 agent_state / messages 表）。
+        agent_manager: 记忆服务层句柄（读 bio_agent_state / bio_message 表）。
         io: 输入适配器（读用户选择）。
         user_id: 归属域（本机单人恒 local；Web 终端注入登录用户 id）。
 

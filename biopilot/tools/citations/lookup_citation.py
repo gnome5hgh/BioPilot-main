@@ -1,6 +1,6 @@
 """lookup_citation：引用前必查——确认论文是否在语料库并拿到 key。"""
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import ScopeRoot
+from biopilot.core.tool.constants import ScopeRoot
 
 
 class LookupCitationTool(Tool):

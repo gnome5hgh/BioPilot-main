@@ -1,6 +1,6 @@
 """AgentManager：agent 生命周期 + refresh_memory（块变更后重编译 system prompt）。
 
-AgentState 持久化在 agent_state 表——它是一行以 agent_id 为主键的
+AgentState 持久化在 bio_agent_state 表——它是一行以 agent_id 为主键的
 JSON 快照，其中 message_ids 记录「当前 in-context 窗口的消息 id 列表」。
 单用户场景下 agent 表简化为按 agent_id 键控。
 """
@@ -22,22 +22,22 @@ class AgentManager:
     """agent 生命周期业务层：建/查/改 AgentState，并把块最新状态织入 memory。
 
     职责：
-    1. 管理 agent_state 表（CRUD）。
+    1. 管理 bio_agent_state 表（CRUD）。
     2. 从块表动态构建 AgentState.memory（每轮读取最新块）。
     3. 提供 refresh_memory 钩子供集成层在块变更后重编译 system prompt。
 
-    注意：AgentState.memory 不持久化到 agent_state 表，而是每次 get_agent 时
+    注意：AgentState.memory 不持久化到 bio_agent_state 表，而是每次 get_agent 时
     通过 block_manager.list_blocks() 动态生成——保证 memory 始终与块表一致。
 
     Attributes:
-        db: MemoryDB，agent_state 表的连接
+        db: MemoryDB，bio_agent_state 表的连接
         block_manager: BlockManager，get_agent 时动态读取最新块构建 memory
         message_manager: MessageManager，供后续扩展（当前未使用）
     """
 
     def __init__(self, db: MemoryDB, block_manager: BlockManager,
                  message_manager: MessageManager):
-        """初始化并创建 agent_state 表（若不存在）。
+        """初始化并创建 bio_agent_state 表（若不存在）。
 
         Args:
             db: 数据库连接。
@@ -49,7 +49,7 @@ class AgentManager:
         self.message_manager = message_manager
         # 幂等建表：agent_id 为主键，message_ids 存储 JSON
         # system 是 MySQL 8 保留字，列名一律反引号；agent_id 用 VARCHAR（TEXT 不能作主键）
-        db.execute("CREATE TABLE IF NOT EXISTS agent_state ("
+        db.execute("CREATE TABLE IF NOT EXISTS bio_agent_state ("
                    "agent_id VARCHAR(64) PRIMARY KEY, name TEXT, description TEXT,"
                    "`system` MEDIUMTEXT, model TEXT, context_window_limit INTEGER,"
                    "message_ids MEDIUMTEXT, created_at VARCHAR(40),"
@@ -107,14 +107,14 @@ class AgentManager:
             raise ValueError("create_agent 需要 user_id（多用户行级隔离的键，缺省即拒绝）")
         # 归属防护：id 已被他人占用时拒绝覆盖（REPLACE 会把他人会话整行抹掉——
         # 窗口 message_ids 清空、user_id 换人）。同用户重复创建=重置语义，照旧放行。
-        existing = self.db.execute("SELECT user_id FROM agent_state WHERE agent_id=?",
+        existing = self.db.execute("SELECT user_id FROM bio_agent_state WHERE agent_id=?",
                                    (agent_id,)).fetchone()
         if existing is not None and existing["user_id"] != user_id:
             raise ValueError(f"会话 {agent_id} 已归属其他用户")
         # project_id 经实例属性传递（REPLACE 需要它；None=未分组）
         self._create_project_id = project_id
         self.db.execute(
-            "REPLACE INTO agent_state (agent_id, user_id, name, message_ids, created_at,"
+            "REPLACE INTO bio_agent_state (agent_id, user_id, name, message_ids, created_at,"
             " project_id) VALUES (?,?,?,?,?,?)",
             (agent_id, user_id, name, json.dumps([]),
              datetime.now(timezone.utc).isoformat(), self._create_project_id))
@@ -136,9 +136,9 @@ class AgentManager:
             KeyError: 当 agent_id 不存在或归属不符时（不区分两种情况，避免探针）。
         """
         if user_id is None:
-            cur = self.db.execute("SELECT * FROM agent_state WHERE agent_id=?", (agent_id,))
+            cur = self.db.execute("SELECT * FROM bio_agent_state WHERE agent_id=?", (agent_id,))
         else:
-            cur = self.db.execute("SELECT * FROM agent_state WHERE agent_id=? AND user_id=?",
+            cur = self.db.execute("SELECT * FROM bio_agent_state WHERE agent_id=? AND user_id=?",
                                   (agent_id, user_id))
         row = cur.fetchone()
         if row is None:
@@ -170,7 +170,7 @@ class AgentManager:
             # 将 list/dict 序列化为 JSON 字符串以存入数据库
             if isinstance(val, (list, dict)):
                 val = json.dumps(val, ensure_ascii=False)
-            self.db.execute(f"UPDATE agent_state SET {key}=? WHERE agent_id=?",
+            self.db.execute(f"UPDATE bio_agent_state SET {key}=? WHERE agent_id=?",
                             (val, agent_id))
         return self.get_agent(agent_id)
 
@@ -213,18 +213,18 @@ class AgentManager:
 
         if project_id is not None:
             rows = [dict(r) for r in self.db.execute(
-                "SELECT agent_id, created_at FROM agent_state"
+                "SELECT agent_id, created_at FROM bio_agent_state"
                 " WHERE user_id=? AND project_id=?"
                 " ORDER BY created_at DESC, agent_id LIMIT ?", (user_id, project_id, limit)).fetchall()]
         else:
             rows = [dict(r) for r in self.db.execute(
-                "SELECT agent_id, created_at FROM agent_state WHERE user_id=?"
+                "SELECT agent_id, created_at FROM bio_agent_state WHERE user_id=?"
                 " ORDER BY created_at DESC, agent_id LIMIT ?", (user_id, limit)).fetchall()]
         sessions = []
         for r in rows:
             agent_id = r["agent_id"]
             first_user = self.db.execute(
-                "SELECT content FROM messages WHERE agent_id=? AND role='user'"
+                "SELECT content FROM bio_message WHERE agent_id=? AND role='user'"
                 " ORDER BY created_at, seq LIMIT 1", (agent_id,)).fetchone()
             preview = ""
             if first_user is not None and first_user["content"]:

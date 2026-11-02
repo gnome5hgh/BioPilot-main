@@ -79,7 +79,7 @@ class ViewImageTool(Tool):
         if store is None or llm is None:
             # 只在真的缺依赖时才去取全局服务（测试两样都注入时就不碰它）
             from biopilot.core.rag.services.rag_service import get_rag_service
-            from biopilot.tools.rag.runtime_context import get_rag_domain
+            from biopilot.core.tool.services.runtime_context import get_rag_domain
             svc = get_rag_service(user_domain=get_rag_domain())
             if store is None:
                 store = svc.image_store

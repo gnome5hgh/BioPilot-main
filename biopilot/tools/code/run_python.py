@@ -15,7 +15,7 @@ from pathlib import Path
 
 from biopilot.core.security.services import sandbox as sb
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.factory import semantic_roots
+from biopilot.core.tool.services.roots import semantic_roots
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class RunPythonTool(Tool):
         )
 
     def _persist_artifacts(self, files: list[dict]) -> None:
-        """把本次执行的产物推到用户 OSS（analysis/<run-id>/<文件名>）。
+        """把本次执行的产物推到用户 OSS（users/<uid>/files/analysis/<run-id>/<文件名>）。
 
         scratch 挂载在宿主、容器即弃——不推走的话产物随临时目录清理丢失。
         存储不可用或无用户域时静默跳过（产物本地路径仍在 summary 里）。
@@ -123,24 +123,24 @@ class RunPythonTool(Tool):
         Args:
             files: summary["files"] 列表（就地补 oss_key）。
         """
-        from biopilot.tools.memory.runtime_context import get_memory_context
+        from biopilot.core.tool.services.runtime_context import get_memory_context
         ctx = get_memory_context()
         user_id = getattr(ctx, "user_id", None) if ctx is not None else None
         if not user_id or not files:
             return
         try:
             from biopilot.config import BioPilotConfig
-            from biopilot.core.common.storage.user_files import make_user_file_store
-            cfg = BioPilotConfig.from_env()
-            store = make_user_file_store(
-                cfg, str(Path(cfg.runtime.workspace) / "user-files"))
+            from biopilot.common.storage.minio import make_object_store
+            store = make_object_store(BioPilotConfig.from_env())
+            if store is None:
+                return
             run_id = Path(files[0]["path"]).parent.name
             for f in files:
                 src = Path(f["path"])
                 if not src.exists() or not src.is_file():
                     continue
-                key = store.put(user_id, f"analysis/{run_id}/{f['name']}",
-                                src.read_bytes())
+                key = f"users/{user_id}/files/analysis/{run_id}/{f['name']}"
+                store.put(key, src.read_bytes(), "application/octet-stream")
                 f["oss_key"] = key
         except Exception as e:
             logger.warning("分析产物持久化失败（不阻断工具返回）：%r", e)
@@ -198,7 +198,7 @@ class RunPythonTool(Tool):
         if not cfg.security.sandbox.enabled:
             return ToolResult(text="沙箱代码执行已在配置中关闭（sandbox.enabled=false）")
 
-        from biopilot.tools.memory.runtime_context import get_memory_context
+        from biopilot.core.tool.services.runtime_context import get_memory_context
         ctx = get_memory_context()
         policy = self._build_policy(
             cfg,

@@ -22,7 +22,7 @@ import importlib.util
 import logging
 from pathlib import Path
 
-from biopilot.core.common.services.frontmatter import parse_frontmatter
+from biopilot.common.core.utils.frontmatter import parse_frontmatter
 from biopilot.core.skills.config import SkillConfig
 from biopilot.core.tool import Tool, validate_tool
 

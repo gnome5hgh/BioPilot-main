@@ -136,7 +136,7 @@ class MemoryConsolidator:
     """记忆整合器：把每轮对话沉淀进记忆块。
 
     触发是每轮一次（REPL 在本轮收尾调用）；进度由游标跟踪——游标落库
-    （consolidation_cursor 表），跨进程认领取 MySQL 命名锁：同一会话被 web 进程
+    （bio_memory_consolidation_cursor 表），跨进程认领取 MySQL 命名锁：同一会话被 web 进程
     与 REPL 进程同时触达时，只有持锁者消费（防双消费），对端本轮放弃。游标行
     不存在时按 messages 行数初次回填（进程重启/首启自愈）。
 
@@ -148,7 +148,7 @@ class MemoryConsolidator:
         enable: bool，总开关
         _running: bool，本次整合是否在执行中（防并发重叠）
         _failures: int，连续失败计数（达阈值强制推进游标，防死循环）
-        _cursor: int，已处理到的消息数游标（工作副本；落库于 consolidation_cursor 表）
+        _cursor: int，已处理到的消息数游标（工作副本；落库于 bio_memory_consolidation_cursor 表）
     """
 
     def __init__(self, agent_state, block_manager, message_manager,
@@ -173,7 +173,7 @@ class MemoryConsolidator:
         self.enable = enable
         self._running = False
         self._failures = 0
-        #: 已处理到的消息数量游标（工作副本；真身落 consolidation_cursor 表，
+        #: 已处理到的消息数量游标（工作副本；真身落 bio_memory_consolidation_cursor 表，
         #: consolidate() 入口在持锁状态下从 DB 水合——跨进程游标不靠内存）
         self._cursor = 0
         # 跨进程消费锁的连接串：取块管理器背后的 MemoryDB；缺失（纯 mock）时
@@ -183,7 +183,7 @@ class MemoryConsolidator:
     def _hydrate_cursor(self) -> None:
         """持锁状态下从 DB 水合游标；行不存在按当前消息数初次回填（自愈语义）。"""
         row = self.block_manager.db.execute(
-            "SELECT `cursor` FROM consolidation_cursor WHERE agent_id=?",
+            "SELECT `cursor` FROM bio_memory_consolidation_cursor WHERE agent_id=?",
             (self.agent_state.agent_id,)).fetchone()
         if row is not None:
             self._cursor = int(row["cursor"])
@@ -198,7 +198,7 @@ class MemoryConsolidator:
         """
         self._cursor = value
         self.block_manager.db.execute(
-            "REPLACE INTO consolidation_cursor (agent_id, `cursor`, updated_at)"
+            "REPLACE INTO bio_memory_consolidation_cursor (agent_id, `cursor`, updated_at)"
             " VALUES (?,?,?)",
             (self.agent_state.agent_id, value,
              datetime.now(timezone.utc).isoformat()))

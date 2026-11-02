@@ -58,7 +58,7 @@ class Block(BaseBlock):
     """持久化块：在 BaseBlock 之上加 id / 版本号 / 时间戳等 DB 字段。
 
     version 是乐观锁计数：由 orm/BlockManager 每次更新时 +1，写前快照进
-    block_history 作撤销/重做链；它只做写入标注与历史排序，不做并发比较。
+    bio_memory_block_history 作撤销/重做链；它只做写入标注与历史排序，不做并发比较。
 
     说明：
         - 单用户 + 全局写锁场景下，并发写已被串行化，因此 version 不作为 CAS 比较字段，
@@ -69,7 +69,7 @@ class Block(BaseBlock):
 
     Attributes:
         id: str，主键（"block-<hex>" 自动生成）
-        version: int，乐观锁计数；每次更新 +1，写前快照进 block_history 作撤销/重做链
+        version: int，乐观锁计数；每次更新 +1，写前快照进 bio_memory_block_history 作撤销/重做链
         project_id: str | None，预留：项目归属
         organization_id: str | None，预留：组织归属
         created_by_id: str | None，预留：创建者 ID

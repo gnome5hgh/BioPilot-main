@@ -64,7 +64,7 @@ from biopilot.core.skills import SkillRegistry
 from biopilot.core.agent.constants.base_prompt import BASE_PROMPT
 from biopilot.core.security import ConfirmRequired, SecurityMiddleware
 from biopilot.core.tool import SUMMARY_TERMINAL, ToolResult
-from biopilot.core.common.services.text import sanitize_surrogates
+from biopilot.common.core.utils.text import sanitize_surrogates
 
 #: Agent 与意图识别之间只有一个缝：可选的集成适配器。未装配时整套意图层不存在。
 from biopilot.core.intent.services.service import IntentService
@@ -603,7 +603,7 @@ class Agent:
         Returns:
             dict: {total, limit, parts: {...}}，parts 键与 head 组装顺序一致。
         """
-        from biopilot.core.common.services.tokenization import estimate_text_tokens
+        from biopilot.common.core.utils.tokenization import estimate_text_tokens
         from biopilot.core.memory.services.compaction import estimate_tokens
 
         parts: dict[str, int] = {}
@@ -640,10 +640,10 @@ class Agent:
         token = None
         rag_token = None
         if self._memory_context is not None:
-            from biopilot.tools.memory.runtime_context import set_memory_context
+            from biopilot.core.tool.services.runtime_context import set_memory_context
             token = set_memory_context(self._memory_context)
         # RAG 用户域随 run 绑定：检索/索引工具落在本用户的 collection
-        from biopilot.tools.rag.runtime_context import (
+        from biopilot.core.tool.services.runtime_context import (
             reset_rag_domain, set_rag_domain)
         rag_token = set_rag_domain(getattr(self, "user_id", "local"))
         # 流式回调按次覆盖：缓存的 Agent 逐次运行可换回调（会话锁保证同
@@ -656,7 +656,7 @@ class Agent:
         finally:
             self.stream_callback = old_cb
             if token is not None:
-                from biopilot.tools.memory.runtime_context import reset_memory_context
+                from biopilot.core.tool.services.runtime_context import reset_memory_context
                 reset_memory_context(token)
             reset_rag_domain(rag_token)
 
@@ -773,6 +773,10 @@ class Agent:
                     messages, tools=tools,
                     on_delta=lambda d: self.stream_callback(
                         AgentEvent(AgentEventKind.CONTENT, d, self.agent_type)),
+                    # 思维链单独成道：前端把它放进可折叠的「思考过程」，
+                    # 与最终回答分开渲染；端点不返回 reasoning_content 时该回调从不触发
+                    on_reasoning=lambda d: self.stream_callback(
+                        AgentEvent(AgentEventKind.REASONING, d, self.agent_type)),
                     telemetry_callback=self._make_llm_telemetry(turn),
                 )
             else:

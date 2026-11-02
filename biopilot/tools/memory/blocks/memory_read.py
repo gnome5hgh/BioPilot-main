@@ -1,6 +1,6 @@
 """MemoryReadTool：按 label 读记忆块当前值（只读）。"""
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.memory.runtime_context import get_memory_context
+from biopilot.core.tool.services.runtime_context import get_memory_context
 
 __all__ = ["MemoryReadTool"]
 

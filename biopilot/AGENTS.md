@@ -9,14 +9,16 @@
 
 - 角色：`package-root-manifest`
 - 职责：主包唯一入口。`biopilot.cli` 是装配根，把配置、安全中间件链、记忆服务、意图层、Agent 装配与 REPL 串成一个进程。
+- 定位：**只承载 agent 运行时与引擎领域状态**；平台业务 CRUD 归 Java（`server/`）。分工与单写者规则以根 `AGENTS.md` 的「Python 与 Java 的职责边界」为准。
 
 ## Directory Structure
 
-- `cli/` — 装配根：启动预检 + 对象图组装（有 manifest）
+- `cli/` — 装配根：启动预检 + 对象图组装 + 工具装配（有 manifest）
 - `config/` — 全局可调参数：默认值的声明点 + 三级加载（有 manifest）
-- `core/` — 核心运行层，内含 `rag/` 与 `vision/`（有 manifest，其下各子包各有）
+- `common/` — 跨层共享基础设施：常量/通用工具/存储原语（不是 agent 核心，也不是业务层）
+- `core/` — agent 系统技术核心，内含 `rag/` 与 `vision/`（有 manifest，其下各子包各有）
 - `citations/` — 引用管理（`references.bib`，有 manifest）
-- `tools/` — 面向 agent 的原子工具，按域分包（有 manifest）
+- `tools/` — 面向 LLM 的工具声明，按域分包（有 manifest）
 - `terminal/` — 终端交互隔离层（有 manifest）
 - `__init__.py` / `__main__.py` — 包标记与 `python -m` 的结构性入口
 
@@ -25,7 +27,10 @@
 - 提供进程入口与装配根（`cli/`）。
 - 定义全局可调参数及其加载优先级（`config/`）。
 - 承载全部运行层能力（`core/`）与它们的对外工具、终端交互、引用管理。
+- `common/` 只放跨层纯能力；平台数据访问归 Java `bio-catalog`，不再设 Python 数据适配层。
 - 通过包门面暴露重量组件，不让外部深入组件内部结构。
+- **保留 agent 运行时 API**：对话 SSE/确认/上下文用量、知识库状态与试检索、引用库、终端、`/internal/*` 索引触发。论文/文件/文档/定时任务/文献搜索的平台 CRUD 不在本包新增。
+- **数据所有权**：`bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event` 由本包写；`bio_paper` 只写 `indexed/index_status/index_error/indexed_at/chunk_count`；`bio_document` 的 agent 侧写者只有 `save_document` 工具。
 
 ## Core Logic
 
@@ -43,7 +48,7 @@
 
 ## Usage And Change Notes
 
-- **包根只留 `__init__.py` 与 manifest**：模块按角色收进子包（`cli/services/`、`config/schemas/`、`core/agent/services/`、`core/tool/domain/`、`core/common/services/` 都是这么落的），**全仓已无包根裸模块**。新增模块先选子包再落文件；包内 import 一律指向具体子模块路径（不可经包 `__init__`，那会成环）。
+- **包根只留 `__init__.py` 与 manifest**：模块按角色收进子包（`cli/services/`、`config/schemas/`、`core/agent/services/`、`core/tool/domain/`、`common/core/utils/` 都是这么落的），**全仓已无包根裸模块**。新增模块先选子包再落文件；包内 import 一律指向具体子模块路径（不可经包 `__init__`，那会成环）。
 - **manifest 与它覆盖的单元同层**：同层有代码模块不影响能不能放 manifest——判据是「这个单元有没有自成体系的约定」，真正要避免的是为只有一两个内聚模块、没有独立约定的目录单设一份。
 - **改任何子包的内部模块名，都要同步 `tests/` 里的 monkeypatch 字符串目标**（见调查规则第 4 条）。
 - 新增重量组件照「懒加载单例」的形状做，不要在导入期构造。
@@ -79,7 +84,8 @@ conda run -n biopilot python -m pytest tests/cli tests/core -q
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
 - 直接子包：[`cli/`](cli/AGENTS.md) / [`config/`](config/AGENTS.md) / [`core/`](core/AGENTS.md) / [`citations/`](citations/AGENTS.md) / [`tools/`](tools/AGENTS.md) / [`terminal/`](terminal/AGENTS.md)
-- `core/` 之下：[`agent/`](core/agent/AGENTS.md) / [`llm/`](core/llm/AGENTS.md) / [`memory/`](core/memory/AGENTS.md) / [`intent/`](core/intent/AGENTS.md) / [`rag/`](core/rag/AGENTS.md) / [`vision/`](core/vision/AGENTS.md) / [`security/`](core/security/AGENTS.md) / [`skills/`](core/skills/AGENTS.md) / [`mcp/`](core/mcp/AGENTS.md) / [`tool/`](core/tool/AGENTS.md) / [`common/`](core/common/AGENTS.md) / [`constants/`](core/constants/AGENTS.md)
+- `core/` 之下：[`agent/`](core/agent/AGENTS.md) / [`llm/`](core/llm/AGENTS.md) / [`memory/`](core/memory/AGENTS.md) / [`intent/`](core/intent/AGENTS.md) / [`rag/`](core/rag/AGENTS.md) / [`vision/`](core/vision/AGENTS.md) / [`security/`](core/security/AGENTS.md) / [`skills/`](core/skills/AGENTS.md) / [`mcp/`](core/mcp/AGENTS.md) / [`tool/`](core/tool/AGENTS.md) / [`constants/`](core/constants/AGENTS.md)
+- 跨层共享基础设施：[`common/`](common/AGENTS.md)
 
 ## References
 

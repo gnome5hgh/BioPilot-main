@@ -11,11 +11,11 @@ from dataclasses import fields, replace
 from datetime import datetime, timezone
 
 from biopilot.core.llm import Message, ResponseMeta, response_meta_from_dict
-from biopilot.core.common.constants import MessageRole
+from biopilot.common.core.constants import MessageRole
 from biopilot.core.memory.storage import message as message_orm
 from biopilot.core.memory.storage.database import MemoryDB
 from biopilot.core.memory.schemas.stored_message import StoredMessage
-from biopilot.core.common.services.text import sanitize_surrogates
+from biopilot.common.core.utils.text import sanitize_surrogates
 
 __all__ = ["MessageManager"]
 

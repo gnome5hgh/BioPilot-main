@@ -1,4 +1,4 @@
-"""messages 表操作：对话消息的落盘与查询（Recall 的数据源）。
+"""bio_message 表操作：对话消息的落盘与查询（Recall 的数据源）。
 
 本文件只有裸 SQL 函数，不含业务规则；surrogate 清洗等语义由
 services/message_manager.py 持有。
@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from biopilot.core.common.constants import MessageRole
+from biopilot.common.core.constants import MessageRole
 from biopilot.core.llm.domain.dto import response_meta_to_dict
 from biopilot.core.memory.storage.database import MemoryDB
 from biopilot.core.memory.schemas.stored_message import StoredMessage
@@ -54,7 +54,7 @@ def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage,
         - created_at 若未显式设置，则使用当前 UTC 时间。
     """
     db.execute(
-        "INSERT INTO messages (id, agent_id, user_id, session_id, role, content, tool_calls,"
+        "INSERT INTO bio_message (id, agent_id, user_id, session_id, role, content, tool_calls,"
         " tool_call_id, step_id, run_id, otid, meta, created_at)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         # user_id=None（测试预置等直接调用）按列默认值 'local' 归一；
@@ -86,7 +86,7 @@ def select_messages_by_agent(db: MemoryDB, agent_id: str,
         - 主排序 created_at（字符串 ISO 时间可字典序比较）。
         - 辅助排序 seq（自增插入序）确保同一时刻消息顺序稳定。
     """
-    sql = "SELECT * FROM messages WHERE agent_id=? ORDER BY created_at, seq"
+    sql = "SELECT * FROM bio_message WHERE agent_id=? ORDER BY created_at, seq"
     params: list = [agent_id]
     if limit is not None:
         sql += " LIMIT ?"
@@ -117,7 +117,7 @@ def select_messages_by_ids(db: MemoryDB, ids: list[str]) -> list[dict]:
     if not ids:
         return []
     placeholders = ",".join("?" for _ in ids)
-    cur = db.execute(f"SELECT * FROM messages WHERE id IN ({placeholders})", tuple(ids))
+    cur = db.execute(f"SELECT * FROM bio_message WHERE id IN ({placeholders})", tuple(ids))
     rows = [dict(r) for r in cur.fetchall()]
     # 构建 id 到索引位置的映射
     order = {i: idx for idx, i in enumerate(ids)}
@@ -138,7 +138,7 @@ def select_messages_by_session(db: MemoryDB, session_id: str,
     Returns:
         消息行 dict 列表，按 created_at、seq 升序。
     """
-    sql = ("SELECT * FROM messages WHERE COALESCE(session_id, agent_id)=?"
+    sql = ("SELECT * FROM bio_message WHERE COALESCE(session_id, agent_id)=?"
            " ORDER BY created_at, seq")
     params: list = [session_id]
     if limit is not None:
@@ -157,5 +157,5 @@ def count_messages(db: MemoryDB, agent_id: str) -> int:
     Returns:
         消息总条数（包括所有历史消息，即使已被压缩移出窗口，因为物理行未删除）。
     """
-    cur = db.execute("SELECT COUNT(*) AS c FROM messages WHERE agent_id=?", (agent_id,))
+    cur = db.execute("SELECT COUNT(*) AS c FROM bio_message WHERE agent_id=?", (agent_id,))
     return cur.fetchone()["c"]

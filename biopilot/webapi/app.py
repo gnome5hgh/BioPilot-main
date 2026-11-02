@@ -22,14 +22,14 @@ import yaml as yaml_mod
 import uuid
 from dataclasses import dataclass
 
-from biopilot.core.common.storage.user_files import user_file_prefix
-from fastapi import FastAPI, Header, HTTPException, Request, UploadFile, WebSocket
+from biopilot.webapi.shell import ShellManager
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
-#: 论文上传的单文件上限：超限直接拒绝，不把大文件整个读进内存
-_PAPER_UPLOAD_LIMIT = 200 * 1024 * 1024
+#: 附件清单注入任务文本时使用的固定抬头：历史回放据此把注入块从展示正文中剥掉。
+_ATTACHMENT_HEADER = "【附件】以下数据文件已就位"
 
 #: 设置端点可写的键 → config.yaml 里的嵌套落点（覆盖链：schema 默认 ← config.yaml ← env）。
 #: 只开语义子集，凭据类字段永不经此通道。
@@ -73,6 +73,35 @@ def _shared_db():
     return _db_instance
 
 
+#: 确认框里不展示取值的参数名（凭证类一律脱敏，避免用户在看确认框时泄露密钥）
+_SECRET_PARAM_KEYS = {"api_key", "apikey", "token", "password", "secret", "access_key", "secret_key"}
+
+
+def _confirm_params_view(params) -> dict:
+    """把工具入参整理成确认框可展示的扁平字典。
+
+    只保留能帮助用户判断「这次要做什么」的信息：长文本截断，凭证类脱敏。
+    展示的是用户自己的调用，不做内容审核——审核归内容防护中间件。
+
+    Args:
+        params: 工具入参 dict（策略引擎提供的原始参数）。
+
+    Returns:
+        dict: 键为参数名、值为字符串的展示视图；不是 dict 时返回空字典。
+    """
+    if not isinstance(params, dict):
+        return {}
+    view = {}
+    for key, value in params.items():
+        name = str(key)
+        if name.lower() in _SECRET_PARAM_KEYS:
+            view[name] = "***"
+            continue
+        text = value if isinstance(value, str) else repr(value)
+        view[name] = text if len(text) <= 500 else text[:500] + "…"
+    return view
+
+
 async def _autotitle(user_id: str, conversation_id: str, task: str) -> None:
     """首条任务生成会话标题：name 为空才设（不覆盖手动改名），取任务前 20 字。
 
@@ -81,11 +110,11 @@ async def _autotitle(user_id: str, conversation_id: str, task: str) -> None:
     try:
         db = _shared_db()
         row = db.execute(
-            "SELECT name FROM agent_state WHERE agent_id=? AND user_id=?",
+            "SELECT name FROM bio_agent_state WHERE agent_id=? AND user_id=?",
             (conversation_id, user_id)).fetchone()
         if row is not None and row["name"] is None:
             title = task.strip().replace("\n", " ")[:20]
-            db.execute("UPDATE agent_state SET name=? WHERE agent_id=? AND user_id=?",
+            db.execute("UPDATE bio_agent_state SET name=? WHERE agent_id=? AND user_id=?",
                        (title, conversation_id, user_id))
     except Exception as e:      # pragma: no cover
         logger.warning("会话标题生成失败: %r", e)
@@ -108,6 +137,9 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         agent_factory = _default_agent_factory
 
     app = FastAPI(title="BioPilot Agent Adapter", docs_url=None, redoc_url=None)
+    #: 网页终端的持久 shell：一个用户一条，跨会话/面板开关复用
+    shell_manager = ShellManager()
+    app.state.shell_manager = shell_manager
     agents: dict[tuple[str, str], object] = {}
     #: 全局并发闸（run 粒度在途上限；多用户总闸，单学生的批量派发占不满全部外部资源）
     llm_gate = asyncio.Semaphore(getattr(config, "llm_max_concurrency", 8))
@@ -115,6 +147,10 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     user_runs: dict[str, int] = {}
     #: agent 最后使用时刻（idle 驱逐依据）
     agent_last_used: dict[tuple[str, str], float] = {}
+    #: 上下文用量的固定开销基线：(user_id, model) -> {parts, limit}。Agent 装配好
+    #  即快照一份（此时窗口为空，parts 恰好只含 head 各块 + 工具 schema）；会话
+    #  未装配（新会话/进程重启/空闲驱逐）时按基线 + DB 消息估算回答案指示器数据
+    usage_baseline: dict[tuple[str, str], dict] = {}
     #: 进行中的确认等待：(user_id, conversation_id, req_id) -> Future[bool]
     pending_confirms: dict[tuple[str, str, str], asyncio.Future] = {}
     #: 正在 run 的会话流队列（确认帧投到对应请求的流里）
@@ -141,8 +177,15 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         await queue.put({
             "type": "confirm",
             "req_id": req_id,
+            # 前端此前只能拿到工具名，用户实际是在「不知道要写哪个文件」的情况下点批准。
+            # 这里把策略引擎已掌握的风险、副作用、触发原因与入参一并下行，确认框据此
+            # 说明「这次问的是哪件事」。
             "summary": getattr(req, "summary", "") or "",
             "tool_name": getattr(req, "tool_name", "") or "",
+            "risk_level": getattr(req, "risk_level", "") or "",
+            "cause": getattr(req, "cause", "") or "",
+            "side_effects": getattr(req, "side_effects", None) or [],
+            "params": _confirm_params_view(getattr(req, "params", None)),
         })
         try:
             return await asyncio.wait_for(fut, timeout=config.confirm_timeout_seconds)
@@ -162,13 +205,20 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def _flush_consolidations() -> None:
-        """停服时把活跃会话的整合队列 flush（游标推进走 DB 锁，多进程安全）。"""
+        """停服时 flush 整合队列，并结束所有网页终端 shell。"""
         for q in _queues:
             try:
                 await q.flush()
             except Exception as e:      # pragma: no cover
                 logger.warning("停服整合 flush 失败（游标由 DB 兜底）: %r", e)
         _queues.clear()
+        reaper = getattr(app.state, "shell_reaper", None)
+        if reaper is not None:
+            reaper.cancel()
+        try:
+            await shell_manager.shutdown()
+        except Exception:
+            logger.warning("停服结束终端 shell 失败", exc_info=True)
 
     @app.get("/health")
     async def health() -> dict:
@@ -236,63 +286,13 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         skills = [{"name": n,
                    "version": ((reg.get_skill(n).metadata or {}).get("version", "")
                                if reg.get_skill(n) else ""),
-                   "description": (reg.get_skill(n).description[:120]
+                   # 描述给到前端后由卡片自行折叠；在服务端截断会让用户
+                   # 永远看不到「触发/边界」这些关键约定。
+                   "description": (reg.get_skill(n).description[:2000]
                                    if reg.get_skill(n) else ""),
                    "enabled": lock.get(n, {}).get("enabled", True)}
                   for n in reg.list_skills()]
         return {"skills": skills}
-
-    # ---------- 对话附件（数据文件：csv/h5ad/xlsx 等，先入 OSS 再挂沙箱） ----------
-
-    #: 附件大小上限：数据集文件，比论文上限收紧
-    _FILE_UPLOAD_LIMIT = 100 * 1024 * 1024
-
-    @app.post("/files/upload")
-    async def files_upload(file: UploadFile, x_user_id: str | None = Header(default=None)) -> dict:
-        """上传对话附件：入 OSS（users/<uid>/files/uploads/）并登记元数据行。
-
-        Args:
-            file: multipart 上传的数据文件。
-            x_user_id: 内网信任头。
-
-        Returns:
-            dict: file_id/name/size/content_type（前端附件 chips 与发送体引用）。
-        """
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        data = await file.read()
-        if not data:
-            raise HTTPException(status_code=422, detail="上传内容为空")
-        if len(data) > _FILE_UPLOAD_LIMIT:
-            raise HTTPException(status_code=413, detail="文件超过大小上限")
-        file_id = uuid.uuid4().hex
-        name = pathlib.PurePosixPath(file.filename or "data.bin").name or "data.bin"
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
-        db = _shared_db()
-        # 对话上传的 PDF 只是会话附件：不入论文目录、不触发索引——要进知识库
-        # 请走论文目录页上传。全部文件统一 OSS uploads 前缀 + 元数据行。
-        oss_key = _user_files().put(
-            x_user_id, f"uploads/{file_id}/{name}", data,
-            file.content_type or "application/octet-stream")
-        db.execute(
-            "INSERT INTO uploaded_file (id, user_id, name, oss_key, size_bytes,"
-            " content_type, created_at) VALUES (?,?,?,?,?,?,?)",
-            (file_id, x_user_id, name, oss_key, len(data),
-             file.content_type or "", now))
-        return {"file_id": file_id, "name": name, "size": len(data),
-                "content_type": file.content_type or ""}
-
-    @app.get("/files")
-    async def files_list(x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        db = _shared_db()
-        rows = db.execute(
-            "SELECT id, name, size_bytes, content_type, created_at FROM uploaded_file"
-            " WHERE user_id=? ORDER BY created_at DESC LIMIT 100",
-            (x_user_id,)).fetchall()
-        return {"files": [dict(r) for r in rows]}
 
     def _resolve_attachments(x_user_id: str, attachments: list[dict],
                              conversation_id: str) -> list[dict]:
@@ -304,11 +304,11 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
         Args:
             x_user_id: 归属用户。
-            attachments: 消息体里的 {file_id, name} 列表。
+            attachments: 消息体里的 {file_id|paper_id, name, size, oss_key} 列表。
             conversation_id: 会话 id（本地副本目录的一部分）。
 
         Returns:
-            list[dict]: [{name, size, path}]，本地绝对路径清单。
+            list[dict]: [{name, size, path, file_id, paper_id, oss_key}]，本地绝对路径清单。
         """
         db = _shared_db()
         out = []
@@ -316,26 +316,27 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             att = att or {}
             file_id = att.get("file_id", "")
             paper_id = att.get("paper_id", "")
-            if file_id:
+            oss_key = att.get("oss_key", "")
+            name = att.get("name", "")
+            size = att.get("size", 0)
+            if not oss_key and file_id:
                 row = db.execute(
-                    "SELECT name, oss_key, size_bytes FROM uploaded_file"
+                    "SELECT name, oss_key, size_bytes FROM bio_file_upload"
                     " WHERE id=? AND user_id=?", (file_id, x_user_id)).fetchone()
                 if row is None:
                     continue
                 name, oss_key, size = row["name"], row["oss_key"], row["size_bytes"]
-            elif paper_id:
-                # 论文目录引用：论文原文在同前缀下，论文行校验归属
+            elif not oss_key and paper_id:
                 prow = db.execute(
-                    "SELECT oss_key FROM papers WHERE id=? AND user_id=?",
+                    "SELECT oss_key FROM bio_paper WHERE id=? AND user_id=?",
                     (paper_id, x_user_id)).fetchone()
                 if prow is None:
                     continue
                 oss_key = prow["oss_key"]
-                name = pathlib.PurePosixPath(oss_key).name
-                size = 0
-            else:
+                name = name or pathlib.PurePosixPath(oss_key).name
+            if not oss_key:
                 continue
-            data = _user_files().get(oss_key)
+            data = _object_store().get(oss_key) if _object_store() is not None else None
             if data is None:
                 continue
             target = (pathlib.Path(cfg_runtime_workspace()) / "users" / x_user_id
@@ -345,72 +346,80 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             if not target.exists() or target.stat().st_size != len(data):
                 target.write_bytes(data)
             out.append({"name": name, "size": size or len(data),
-                        "path": str(target), "paper_id": paper_id or None})
+                        "path": str(target), "file_id": file_id or None,
+                        "paper_id": paper_id or None, "oss_key": oss_key})
         return out
 
-    # ---------- 定时任务（webapi 进程内调度器；REPL 不跑调度） ----------
+    def _attachment_meta(attachments: list[dict]) -> list[dict]:
+        """从解析结果里取「展示用」附件元数据（历史回放复现文件卡片）。
 
-    @app.get("/schedules")
-    async def schedules_list(x_user_id: str | None = Header(default=None)) -> dict:
-        """本用户的定时任务清单（新→旧）。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        db = _shared_db()
-        rows = db.execute(
-            "SELECT id, conversation_id, name, task, interval_minutes, paused,"
-            " last_run_at, next_run_at FROM scheduled_task"
-            " WHERE user_id=? ORDER BY created_at DESC", (x_user_id,)).fetchall()
-        return {"schedules": [dict(r) for r in rows]}
+        Args:
+            attachments: _resolve_attachments 的返回值。
 
-    @app.post("/schedules")
-    async def schedules_create(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
-        """新建定时任务：到点把任务文本投进指定会话跑一遍，回答落该会话。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from datetime import datetime, timedelta, timezone
-        b = body or {}
-        name = (b.get("name") or "").strip()[:200]
-        task = (b.get("task") or "").strip()
-        conversation_id = (b.get("conversation_id") or "").strip()
-        interval = int(b.get("interval_minutes") or 0)
-        if not name or not task or not conversation_id or interval < 5:
-            raise HTTPException(status_code=422,
-                                detail="name/task/conversation_id 必填，interval_minutes ≥ 5")
-        db = _shared_db()
-        now = datetime.now(timezone.utc)
-        db.execute(
-            "INSERT INTO scheduled_task (id, user_id, conversation_id, name, task,"
-            " interval_minutes, paused, next_run_at, created_at) VALUES (?,?,?,?,?,?,0,?,?)",
-            (uuid.uuid4().hex, x_user_id, conversation_id, name, task,
-             interval, (now + timedelta(minutes=interval)).isoformat(), now.isoformat()))
-        return {"status": "ok"}
+        Returns:
+            list[dict]: [{file_id|paper_id, name, size, oss_key}]，足以渲染卡片并定位原文。
+        """
+        meta = []
+        for att in attachments:
+            item = {"name": att.get("name", ""), "size": att.get("size", 0)}
+            if att.get("paper_id"):
+                item["paper_id"] = att["paper_id"]
+            elif att.get("file_id"):
+                item["file_id"] = att["file_id"]
+            else:
+                continue
+            if att.get("oss_key"):
+                item["oss_key"] = att["oss_key"]
+            meta.append(item)
+        return meta
 
-    @app.post("/schedules/{task_id}/pause")
-    async def schedules_pause(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
-        """暂停定时任务（不动已排队的下一次执行时间，恢复后照常）。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        _shared_db().execute("UPDATE scheduled_task SET paused=1 WHERE id=? AND user_id=?",
-                             (task_id, x_user_id))
-        return {"status": "ok"}
+    def _persist_user_attachments(user_id: str, conversation_id: str, task: str,
+                                  attachments: list[dict]) -> None:
+        """把本轮附件元数据回填到用户消息行的 meta（历史回放展示用）。
 
-    @app.post("/schedules/{task_id}/resume")
-    async def schedules_resume(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
-        """恢复已暂停的定时任务。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        _shared_db().execute("UPDATE scheduled_task SET paused=0 WHERE id=? AND user_id=?",
-                             (task_id, x_user_id))
-        return {"status": "ok"}
+        用户消息由引擎在 run 内落盘，适配层拿不到它的 id；这里按「会话 + 归属 +
+        role=user + 落盘正文的前缀」定位最近一行回填。匹配用注入块前缀而不是全文：
+        意图层可能给任务追加澄清附录，正文与送进引擎的文本不必逐字相同。同一会话的
+        run 由运行锁串行化，前缀又含本轮附件清单，定位不会串到别的轮次。回填失败
+        只丢卡片，不影响本轮回答（错误一律降级为文本）。
 
-    @app.delete("/schedules/{task_id}")
-    async def schedules_delete(task_id: str, x_user_id: str | None = Header(default=None)) -> dict:
-        """删除定时任务（行删除；执行中的一次跑到自然结束）。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        _shared_db().execute("DELETE FROM scheduled_task WHERE id=? AND user_id=?",
-                             (task_id, x_user_id))
-        return {"status": "ok"}
+        Args:
+            user_id: 归属用户。
+            conversation_id: 会话 id。
+            task: 实际传给引擎的任务文本（含附件清单注入）。
+            attachments: 展示用附件元数据。
+        """
+        if not attachments:
+            return
+        prefix = task.split("\n\n", 1)[0] + "\n\n"
+        try:
+            _shared_db().execute(
+                "UPDATE bio_message SET meta=? WHERE agent_id=? AND user_id=?"
+                " AND role='user' AND LEFT(content, ?)=?"
+                " ORDER BY seq DESC LIMIT 1",
+                (json.dumps({"attachments": attachments}, ensure_ascii=False),
+                 conversation_id, user_id, len(prefix), prefix))
+        except Exception:
+            logger.warning("附件元数据回填失败（不影响本轮回答）", exc_info=True)
+
+    def _display_task(content: str) -> str:
+        """剥掉注入的附件清单块，只留用户原话（历史回放展示用）。
+
+        注入块形如「抬头行 + 若干清单行 + 空行 + 用户原话」。抬头是固定文案，
+        据此定位第一个空行，后面就是用户原话。
+
+        Args:
+            content: messages.content 原文。
+
+        Returns:
+            str: 去掉注入块后的正文；不含注入块时原样返回。
+        """
+        if not content or not content.startswith(_ATTACHMENT_HEADER):
+            return content
+        marker = content.find("\n\n")
+        return content[marker + 2:] if marker >= 0 else content
+
+    # ---------- 定时任务（定义维护归 Java；这里只跑到期扫描与执行） ----------
 
     async def _scheduler_loop():
         """调度循环：每 60 秒扫一次到期任务（扫描与执行逻辑在模块级 run_due_schedules）。"""
@@ -424,8 +433,9 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.on_event("startup")
     async def _start_scheduler():
-        """应用启动时拉起调度循环；随应用关停由事件循环统一回收。"""
+        """应用启动时拉起调度循环与终端回收；随应用关停由事件循环统一回收。"""
         app.state.scheduler = asyncio.create_task(_scheduler_loop())
+        app.state.shell_reaper = asyncio.create_task(shell_manager.reaper())
 
     @app.get("/chat/history")
     async def chat_history(
@@ -435,7 +445,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         """取一段会话的可见历史（user/assistant 两条腿，按时间正序）。
 
         会话列表点击回续时前端用它回放消息；tool/system 行不外露——那是
-        引擎的内部轨迹，不是对话内容。
+        引擎的内部轨迹，不是对话内容。用户消息带本轮附件时一并返回附件元数据，
+        展示正文剥掉注入给模型看的路径清单，只留用户原话。
         """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
@@ -443,11 +454,26 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             return {"messages": []}
         db = _shared_db()
         rows = db.execute(
-            "SELECT role, content, created_at FROM messages"
+            "SELECT role, content, meta, created_at FROM bio_message"
             " WHERE agent_id=? AND user_id=? AND role IN ('user','assistant')"
             " AND content IS NOT NULL AND content != ''"
             " ORDER BY seq", (conversation_id, x_user_id)).fetchall()
-        return {"messages": [dict(r) for r in rows]}
+        messages = []
+        for row in rows:
+            item = {
+                "role": row["role"],
+                "content": _display_task(row["content"]),
+                "created_at": row["created_at"],
+            }
+            if row["role"] == "user" and row["meta"]:
+                try:
+                    attachments = json.loads(row["meta"]).get("attachments")
+                except (ValueError, AttributeError):
+                    attachments = None
+                if attachments:
+                    item["attachments"] = attachments
+            messages.append(item)
+        return {"messages": messages}
 
     @app.delete("/chat/session")
     async def chat_session_delete(
@@ -463,9 +489,9 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         if not conversation_id:
             raise HTTPException(status_code=422, detail="缺少 conversation_id")
         db = _shared_db()
-        db.execute("DELETE FROM messages WHERE agent_id=? AND user_id=?",
+        db.execute("DELETE FROM bio_message WHERE agent_id=? AND user_id=?",
                    (conversation_id, x_user_id))
-        gone = db.execute("DELETE FROM agent_state WHERE agent_id=? AND user_id=?",
+        gone = db.execute("DELETE FROM bio_agent_state WHERE agent_id=? AND user_id=?",
                           (conversation_id, x_user_id))
         agents.pop((x_user_id, conversation_id, user_models.get(x_user_id)), None)
         agent_last_used.pop((x_user_id, conversation_id), None)
@@ -479,21 +505,44 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     ) -> dict:
         """当前会话的上下文窗口用量分解（head 各块 + 工具 schema + 消息）。
 
-        会话未装配（Agent 不在缓存里）时返回 usage=None——前端据此隐藏指示器
-        （新会话没有历史，首条消息发出后才有意义）。
+        会话已装配（Agent 在缓存里）时给实时值；未装配（新会话/进程重启/空闲
+        驱逐）时退回「固定开销基线 + DB 消息估算」——指示器常显，不因缓存缺席
+        而消失。两者都拿不到（该用户从没装配过 Agent）才返回 usage=None。
         """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         if not conversation_id:
             return {"usage": None}
         agent = agents.get((x_user_id, conversation_id, user_models.get(x_user_id)))
-        if agent is None:
+        if agent is not None:
+            try:
+                return {"usage": agent.context_usage()}
+            except Exception:
+                logger.warning("上下文用量计算失败", exc_info=True)
+        # 未装配路径：基线（head + 工具 schema）+ 消息份（从 DB 逐行估算，
+        # 与 estimate_tokens 同口径：正文 + 每条固定协议开销 4）
+        baseline = usage_baseline.get((x_user_id, user_models.get(x_user_id)))
+        if baseline is None:
             return {"usage": None}
+        parts = dict(baseline["parts"])
         try:
-            return {"usage": agent.context_usage()}
+            from biopilot.common.core.utils.tokenization import (
+                estimate_text_tokens)
+            rows = _shared_db().execute(
+                "SELECT role, content, tool_calls FROM bio_message"
+                " WHERE agent_id=? AND user_id=?",
+                (conversation_id, x_user_id)).fetchall()
+            msg_tokens = 0
+            for r in rows:
+                text = f"{r['role']}: {r['content'] or ''}"
+                if r["tool_calls"]:
+                    text += r["tool_calls"]
+                msg_tokens += estimate_text_tokens(text) + 4
+            parts["messages"] = msg_tokens
         except Exception:
-            logger.warning("上下文用量计算失败", exc_info=True)
-            return {"usage": None}
+            parts["messages"] = 0
+        return {"usage": {"total": sum(parts.values()),
+                          "limit": baseline["limit"], "parts": parts}}
 
     @app.post("/chat/stream")
     async def chat_stream(
@@ -531,8 +580,11 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         # 附件：落本地副本 + 生成清单（元数据行注入任务文本；沙箱挂目录读数据）
         attachments = _resolve_attachments(
             x_user_id, (body or {}).get("attachments") or [], conversation_id)
+        attachment_meta = _attachment_meta(attachments)
+        # 用户原话先留一份：标题与历史展示都只取原话，不取后面注入的路径清单
+        user_task = task
         if attachments:
-            lines = ["【附件】以下数据文件已就位（沙箱内见 /corpus/uploads/，本机见列出的路径）："]
+            lines = [f"{_ATTACHMENT_HEADER}（沙箱内见 /corpus/uploads/，本机见列出的路径）："]
             for a in attachments:
                 lines.append(f"- {a['name']}（{a['size']} 字节）路径：{a['path']}")
             task = "\n".join(lines) + "\n\n" + task
@@ -544,6 +596,17 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                                   project_id)
             # 工厂可为同步或异步（真实装配是 async，测试替身是同步 lambda）
             agents[key] = await built if asyncio.iscoroutine(built) else built
+            # 装配即快照固定开销基线（head 各块 + 工具 schema）：装配后窗口为空，
+            # 消息份为 0，正好是要缓存的份额；失败只少一份基线，不阻塞对话
+            try:
+                snap = agents[key].context_usage()
+                usage_baseline[(x_user_id, user_models.get(x_user_id))] = {
+                    "parts": {k: v for k, v in snap["parts"].items()
+                              if k != "messages"},
+                    "limit": snap["limit"],
+                }
+            except Exception:
+                logger.debug("上下文用量基线快照失败", exc_info=True)
         agent = agents[key]
         agent_last_used[key] = now
         # 单用户并发配额：超限即拒绝（fail-closed，不排队饿死其他用户）
@@ -570,20 +633,27 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 })
 
             async def run_task() -> str:
-                # 全局并发闸（run 粒度）：多用户在途 run 总上限，批量派发占不满外部资源
-                async with llm_gate:
-                    answer = await agent.run(task, stream_callback=on_event)
-                await _autotitle(x_user_id, conversation_id, task)
-                # 轮末整合：与 REPL 同语义（一轮对话结束 → 沉淀进记忆）；
-                # 只 enqueue，防抖与游标推进由队列/DB 锁自理
-                queue = getattr(agent, "_consolidation_queue", None)
-                if queue is not None:
-                    try:
-                        queue.enqueue()
-                    except Exception:
-                        logger.warning("整合入队失败（不影响本轮回答）",
-                                       exc_info=True)
-                return answer
+                # 标题在 run 开始时就落库：用户中断长任务后会话也不该只剩一个 UUID 片段；
+                # 它只读一次 name，不会覆盖之后的手工改名。用用户原话，不用注入清单。
+                await _autotitle(x_user_id, conversation_id, user_task)
+                try:
+                    # 全局并发闸（run 粒度）：多用户在途 run 总上限，批量派发占不满外部资源
+                    async with llm_gate:
+                        answer = await agent.run(task, stream_callback=on_event)
+                    # 轮末整合：与 REPL 同语义（一轮对话结束 → 沉淀进记忆）；
+                    # 只 enqueue，防抖与游标推进由队列/DB 锁自理
+                    queue = getattr(agent, "_consolidation_queue", None)
+                    if queue is not None:
+                        try:
+                            queue.enqueue()
+                        except Exception:
+                            logger.warning("整合入队失败（不影响本轮回答）",
+                                           exc_info=True)
+                    return answer
+                finally:
+                    # 用户消息此时已随 run 落盘：回填附件元数据，历史回放才能复现文件卡片
+                    _persist_user_attachments(x_user_id, conversation_id, task,
+                                              attachment_meta)
 
             # run 任务句柄挂流作用域：断开监视与 drain 共享（此前是 drain 局部变量，
             # 断开分支引用它会 NameError，run 取消失效）
@@ -739,7 +809,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         db = _shared_db()
-        db.execute("UPDATE agent_state SET user_id=CONCAT('deleting:', user_id)"
+        db.execute("UPDATE bio_agent_state SET user_id=CONCAT('deleting:', user_id)"
                    " WHERE user_id=? AND user_id NOT LIKE 'deleting:%'", (target_id,))
         return {"status": "marked"}
 
@@ -753,97 +823,148 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         db = _shared_db()
-        for table in ("messages", "blocks", "block_history", "papers", "documents"):
+        for table in ("bio_message", "bio_memory_block", "bio_memory_block_history",
+                      "bio_paper", "bio_document"):
             db.execute(f"DELETE FROM {table} WHERE user_id=?", (target_id,))
-        db.execute("DELETE FROM agent_state WHERE user_id=?"
+        db.execute("DELETE FROM bio_agent_state WHERE user_id=?"
                    " OR user_id LIKE CONCAT('deleting:', ?)", (target_id, target_id))
         return {"status": "purged", "user_id": target_id}
 
-    # 终端 WebSocket：PTY 跑 biopilot REPL（用户自己的终端，非 agent 工具）。
-    # fail-closed：缺 X-User-Id 直接拒连（与 HTTP 端点同一信任边界）；
-    # 子进程是该用户的 biopilot REPL（同库、带确认中间件）——绝不给裸宿主 shell。
+    # 终端：按用户持久化的宿主 shell（面板关闭/切换会话不杀进程）。
+    # 是否允许启动宿主 shell 由 runtime.allow_host_shell 显式控制；缺 X-User-Id
+    # 一律拒连（与 HTTP 端点同一信任边界）。
+    @app.get("/terminal/config")
+    async def terminal_config(x_user_id: str | None = Header(default=None)) -> dict:
+        """返回当前部署是否启用宿主终端（前端据此决定按钮是否可用）。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.config import BioPilotConfig
+        cfg = BioPilotConfig.from_env()
+        shell = os_env("SHELL", "/bin/sh") or "/bin/sh"
+        return {
+            "enabled": bool(cfg.runtime.allow_host_shell),
+            "shell": pathlib.Path(shell).name,
+        }
+
+    @app.post("/terminal/restart")
+    async def terminal_restart(x_user_id: str | None = Header(default=None)) -> dict:
+        """结束该用户当前的 shell；下一次打开面板会启动新进程。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.config import BioPilotConfig
+        if not BioPilotConfig.from_env().runtime.allow_host_shell:
+            raise HTTPException(status_code=403, detail="当前部署未启用宿主终端")
+        restarted = await shell_manager.restart(x_user_id)
+        return {"status": "restarted" if restarted else "no-session"}
+
     @app.websocket("/ws/terminal")
     async def ws_terminal(ws: WebSocket):
-        import os as _os
-        import pty as _pty
-        import sys as _sys
+        """终端 WebSocket：附着到该用户的持久 shell，断线只脱离不杀进程。
+
+        客户端 → 服务端使用 JSON 文本帧（input/resize），服务端 → 客户端是
+        原始终端输出文本；重连时先回放缓冲，用户能看到上次的屏幕内容。
+        """
         x_user_id = ws.headers.get("x-user-id", "")
         if not x_user_id:
             await ws.close(code=1008, reason="缺少 X-User-Id 请求头")
             return
-        await ws.accept()
-        master, slave = _pty.openpty()
-        env = _os.environ.copy()
-        env["BIOPILOT_MEMORY_MYSQL_DSN"] = (
-            _os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN", "mysql://root@127.0.0.1:3306/biopilot"))
-        # 终端身份注入：REPL 以该登录用户的域运行（会话与网页互通）
-        env["BIOPILOT_USER_ID"] = x_user_id
-        proc = await asyncio.create_subprocess_exec(
-            _sys.executable, "-m", "biopilot",
-            stdin=slave, stdout=slave, stderr=slave, env=env,
-            cwd=str(pathlib.Path.cwd()))
-        _os.close(slave)
-
-        async def pump_out():
-            """PTY 输出 → WebSocket 文本帧。"""
-            loop = asyncio.get_event_loop()
-            while True:
-                data = await loop.run_in_executor(None, _os.read, master, 4096)
-                if not data:
-                    break
-                await ws.send_text(data.decode("utf-8", errors="replace"))
-
-        async def pump_in():
-            """WebSocket 文本帧 → PTY 输入。"""
-            while True:
-                msg = await ws.receive_text()
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, _os.write, master, msg.encode())
-
-        # 任一泵退出（客户端断开/子进程退出）就立刻杀子进程——不能等 gather
-        # 收敛：executor 里阻塞的 os.read 无法被取消，等它返回会泄漏 REPL 进程
-        t_out = asyncio.create_task(pump_out())
-        t_in = asyncio.create_task(pump_in())
-        done, pending = await asyncio.wait([t_out, t_in],
-                                           return_when=asyncio.FIRST_COMPLETED)
-        proc.terminate()
-        for t in pending:
-            t.cancel()
-        try:
-            await proc.wait()
-        except Exception:
-            pass
-
-    _paper_endpoints(app)
-    # 索引触发：按用户域重建 RAG collection（RAGService user_domain）
-    @app.post("/kb/reindex")
-    async def kb_reindex(x_user_id: str | None = Header(default=None)) -> dict:
-        """按用户域触发全量重建：后台线程跑 index_all（嵌入耗时可能数十分钟），
-        本端点立即返回；进度用 GET /kb/status 看 indexed 计数爬升。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        if x_user_id in reindex_running:
-            return {"status": "already-running"}
-        _schedule_user_index(x_user_id)
-        return {"status": "started"}
-
-    # KB 展示：索引状态快照（papers 已索引计数 + collection 命名）
-    @app.get("/kb/status")
-    async def kb_status(x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        db = _shared_db()
-        total = db.execute("SELECT COUNT(*) AS c FROM papers WHERE user_id=?",
-                           (x_user_id,)).fetchone()["c"]
-        indexed = db.execute("SELECT COUNT(*) AS c FROM papers WHERE user_id=? AND indexed=1",
-                             (x_user_id,)).fetchone()["c"]
         from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
-        collection = cfg.rag.storage.collection + ("" if x_user_id == "local" else f"_{x_user_id}")
-        return {"total_papers": total, "indexed": indexed,
-                "collection": collection, "recipe": cfg.rag.storage.collection}
+        if not BioPilotConfig.from_env().runtime.allow_host_shell:
+            await ws.close(code=1008, reason="当前部署未启用宿主终端")
+            return
+        await ws.accept()
+        try:
+            session = await shell_manager.attach(x_user_id, ws)
+        except Exception:
+            await ws.close(code=1011, reason="终端启动失败")
+            return
+        try:
+            while True:
+                raw = await ws.receive_text()
+                try:
+                    payload = json.loads(raw)
+                except (TypeError, ValueError):
+                    payload = None
+                if isinstance(payload, dict) and payload.get("type") == "input":
+                    await session.write(str(payload.get("data") or ""))
+                elif isinstance(payload, dict) and payload.get("type") == "resize":
+                    try:
+                        session.resize(int(payload.get("cols") or 0),
+                                       int(payload.get("rows") or 0))
+                    except (TypeError, ValueError):
+                        pass
+                elif payload is None:
+                    # 兼容旧客户端：纯文本即键盘输入
+                    await session.write(raw)
+        except Exception:
+            # 客户端关闭/网络断开：只脱离，保留 shell 供下次继续
+            pass
+        finally:
+            shell_manager.detach(session, ws)
 
-    _doc_endpoints(app)
+
+    # ---------- 内部接口（只给 Java 平台调；索引状态仍由引擎独占写） ----------
+
+    def _internal_user(x_user_id: str | None, x_internal_token: str | None) -> str:
+        """校验内部调用头：token（配置了才校验）+ 归属用户。"""
+        expected = os_env("BIOPILOT_INTERNAL_TOKEN", "") or ""
+        if expected and x_internal_token != expected:
+            raise HTTPException(status_code=403, detail="内部调用 token 无效")
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        return x_user_id
+
+    def _paper_ids(body) -> list[str]:
+        return [str(item) for item in ((body or {}).get("paper_ids") or []) if item]
+
+    @app.post("/internal/kb/enqueue")
+    async def internal_kb_enqueue(
+        body: dict,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        uid = _internal_user(x_user_id, x_internal_token)
+        from biopilot.core.rag.services.paper_state import queue_papers
+        queue_papers(_shared_db(), uid, _paper_ids(body))
+        _schedule_user_index(uid)
+        return {"status": "ok"}
+
+    @app.post("/internal/kb/detach")
+    async def internal_kb_detach(
+        body: dict,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        uid = _internal_user(x_user_id, x_internal_token)
+        from biopilot.core.rag.services.paper_state import detach_papers
+        detach_papers(_shared_db(), uid, _paper_ids(body))
+        _schedule_user_index(uid)
+        return {"status": "ok"}
+
+    @app.post("/internal/kb/retry")
+    async def internal_kb_retry(
+        body: dict,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        uid = _internal_user(x_user_id, x_internal_token)
+        from biopilot.core.rag.services.paper_state import queue_papers
+        queue_papers(_shared_db(), uid, _paper_ids(body))
+        _schedule_user_index(uid)
+        return {"status": "ok"}
+
+    @app.post("/internal/kb/sync")
+    async def internal_kb_sync(
+        body: dict | None = None,
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        uid = _internal_user(x_user_id, x_internal_token)
+        _schedule_user_index(uid)
+        return {"status": "ok"}
+
+    _kb_endpoints(app)
+    _citation_endpoints(app)
     return app
 
 
@@ -893,7 +1014,7 @@ async def run_due_schedules(db, agent_factory, running: set, gate=None) -> int:
     from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc).isoformat()
     due = db.execute(
-        "SELECT * FROM scheduled_task WHERE paused=0 AND next_run_at<=?",
+        "SELECT * FROM bio_schedule_task WHERE paused=0 AND next_run_at<=?",
         (now,)).fetchall()
     ran = 0
     for row in due:
@@ -919,7 +1040,7 @@ async def run_due_schedules(db, agent_factory, running: set, gate=None) -> int:
                 done_at = datetime.now(timezone.utc)
                 nxt = (done_at + timedelta(minutes=row["interval_minutes"])).isoformat()
                 db.execute(
-                    "UPDATE scheduled_task SET last_run_at=?, next_run_at=? WHERE id=?",
+                    "UPDATE bio_schedule_task SET last_run_at=?, next_run_at=? WHERE id=?",
                     (done_at.isoformat(), nxt, row["id"]))
                 running.discard(row["id"])
 
@@ -943,54 +1064,140 @@ def os_env(key: str, default: str | None) -> str | None:
     return os.environ.get(key, default)
 
 
-#: 每用户重建 singleflight（模块级：上传自动索引与手动重建共用，防并发「先删后建」互删）
+#: 每用户索引 singleflight（模块级：加入知识库与手动重建共用，防并发重复跑）
 reindex_running: set[str] = set()
+#: 跑到一半又来了新请求：当前轮结束后再补跑一次（否则新加入的论文会一直排队）
+reindex_pending: set[str] = set()
+#: 最近一次索引结果（内存态，供知识库页展示；重启后清空）
+kb_last_run: dict[str, dict] = {}
+
+
+def _index_user_kb_sync(user_id: str) -> dict:
+    """把该用户「已加入知识库」的论文逐篇索引，并清理已移出的论文。
+
+    逐篇索引用 ``index_document``：它内部先删后建，能给出单篇的分块数与失败原因。
+    已移出的论文走 ``remove_document`` 只删索引，不动 papers 行和 OSS 原文。
+
+    Args:
+        user_id: 归属用户（即 RAG 用户域）。
+
+    Returns:
+        dict: indexed/failed/removed 计数与 finished_at。
+    """
+    from datetime import datetime, timezone
+    from biopilot.config import BioPilotConfig
+    from biopilot.core.rag.constants import IndexOutcomeStatus
+    from biopilot.core.rag.services.rag_service import get_rag_service
+    from biopilot.core.rag.storage.image_store import MinioImageStore
+    from biopilot.core.rag.services.paper_state import (
+        mark_index_result, mark_indexing)
+
+    cfg = BioPilotConfig.from_env()
+    svc = get_rag_service(cfg, user_domain=user_id)
+    db = _shared_db()
+    store = MinioImageStore(cfg.rag.storage.minio)
+    mirror = pathlib.Path(svc.config.corpus.pdf_dir)
+    mirror.mkdir(parents=True, exist_ok=True)
+
+    rows = db.execute(
+        "SELECT id, oss_key, kb_enabled, index_status FROM bio_paper WHERE user_id=?",
+        (user_id,)).fetchall()
+    enabled = {row["id"]: row for row in rows if row["kb_enabled"]}
+
+    # 已移出知识库（或已删除）的论文：删镜像与索引块；文件本身在 OSS 里不动
+    removed = 0
+    for path in mirror.glob("*.pdf"):
+        if path.stem in enabled:
+            continue
+        try:
+            svc.remove_document(str(path))
+            path.unlink(missing_ok=True)
+            removed += 1
+        except Exception:
+            logger.warning("清理已移出论文的索引失败（%s）", path, exc_info=True)
+
+    todo = []
+    for paper_id, row in enabled.items():
+        target = mirror / f"{paper_id}.pdf"
+        if row["index_status"] == "indexed" and target.exists():
+            continue
+        todo.append((paper_id, row, target))
+
+    indexed = failed = 0
+    if todo:
+        mark_indexing(db, user_id, [paper_id for paper_id, _row, _target in todo])
+    for paper_id, row, target in todo:
+        try:
+            if not target.exists():
+                data = store.get(row["oss_key"])
+                if not data:
+                    raise RuntimeError("对象存储取回失败")
+                target.write_bytes(data)
+            outcome = svc.index_document(str(target))
+            status = getattr(outcome, "status", None)
+            if status == IndexOutcomeStatus.INDEXED:
+                mark_index_result(db, user_id, paper_id, True,
+                                  chunks=int(getattr(outcome, "chunks", 0) or 0))
+                indexed += 1
+            else:
+                reason = getattr(outcome, "reason", "") or f"未入库（{status}）"
+                mark_index_result(db, user_id, paper_id, False, error=reason)
+                failed += 1
+        except Exception as exc:
+            logger.warning("论文索引失败（%s）", paper_id, exc_info=True)
+            mark_index_result(db, user_id, paper_id, False, error=str(exc))
+            failed += 1
+
+    summary = {
+        "indexed": indexed,
+        "failed": failed,
+        "removed": removed,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    }
+    kb_last_run[user_id] = summary
+    return summary
 
 
 def _schedule_user_index(user_id: str) -> None:
-    """在事件循环里后台触发一次该用户的增量索引（singleflight 去重）。
+    """在事件循环里后台触发一次该用户的知识库索引（singleflight + 补跑）。
+
+    旧实现在重建期间直接丢弃新请求；用户连续勾选两批论文时第二批会永远停在
+    queued。这里用 pending 标记在当前轮结束后补跑。
 
     Args:
         user_id: 归属用户（即 RAG 用户域）。
     """
-
-    def _job() -> None:
-        try:
-            from biopilot.config import BioPilotConfig
-            from biopilot.core.rag.services.rag_service import get_rag_service
-            from biopilot.core.rag.storage.image_store import MinioImageStore
-            cfg = BioPilotConfig.from_env()
-            svc = get_rag_service(cfg, user_domain=user_id)
-            svc.index_user_papers(user_id, _shared_db(), MinioImageStore(cfg.rag.storage.minio))
-        except Exception:
-            logger.warning("上传后自动索引失败（%s）", user_id, exc_info=True)
-
     if user_id in reindex_running:
+        reindex_pending.add(user_id)
         return
     reindex_running.add(user_id)
 
     async def _runner():
         try:
-            await asyncio.to_thread(_job)
+            while True:
+                reindex_pending.discard(user_id)
+                await asyncio.to_thread(_index_user_kb_sync, user_id)
+                if user_id not in reindex_pending:
+                    break
+        except Exception:
+            logger.warning("知识库索引失败（%s）", user_id, exc_info=True)
         finally:
             reindex_running.discard(user_id)
 
     asyncio.get_running_loop().create_task(_runner())
 
 
-def _user_files():
-    """用户数据文件存取器（惰性单例；MinIO 不可达自动回退本地同键）。"""
-    global _user_files_instance
-    if _user_files_instance is None:
+def _object_store():
+    """通用对象存储（惰性单例；MinIO 不可达时回退本地同键）。"""
+    global _object_store_instance
+    if _object_store_instance is None:
         from biopilot.config import BioPilotConfig
-        from biopilot.core.common.storage.user_files import make_user_file_store
-        cfg = BioPilotConfig.from_env()
-        _user_files_instance = make_user_file_store(
-            cfg, str(pathlib.Path(cfg.runtime.workspace) / "user-files"))
-    return _user_files_instance
+        from biopilot.common.storage.minio import make_object_store
+        _object_store_instance = make_object_store(BioPilotConfig.from_env())
+    return _object_store_instance
 
 
-_user_files_instance = None
+_object_store_instance = None
 
 
 def cfg_runtime_workspace() -> str:
@@ -999,210 +1206,246 @@ def cfg_runtime_workspace() -> str:
     return BioPilotConfig.from_env().runtime.workspace
 
 
-def _paper_store():
-    """论文对象的存取器：与图表原图共用同一 MinIO 连接配置与 bucket。
 
-    独立成模块级工厂是为了测试可注入（论文上传测试换内存替身）。
-    """
+def _kb_endpoints(app: FastAPI) -> None:
+    """知识库端点：状态概览、论文勾选加入/移出/重试、试检索、分块列表。"""
+    import time as _time
+
     from biopilot.config import BioPilotConfig
-    from biopilot.core.rag.storage.image_store import MinioImageStore
-    return MinioImageStore(BioPilotConfig.from_env().rag.storage.minio)
+    from biopilot.core.rag.services.rag_service import get_rag_service
+    from biopilot.core.rag.services.paper_state import kb_counts, paper_map
 
+    def _chunk_view(chunk, score=None) -> dict:
+        """把 Chunk 转成前端可渲染的字典（正文截断，避免一次返回整篇）。"""
+        return {
+            "id": chunk.id,
+            "text": (chunk.text or "")[:800],
+            "path": chunk.path,
+            "title": chunk.title,
+            "heading": chunk.heading,
+            "caption": chunk.caption,
+            "chunk_type": chunk.chunk_type,
+            "chunk_index": chunk.chunk_index,
+            "page": list(chunk.page_num) if chunk.page_num else [],
+            "has_image": bool(chunk.image_key),
+            "score": score,
+        }
 
-def _sanitize_paper_filename(name: str | None) -> str:
-    """把上传文件名收敛成安全的对象键尾段：剥掉路径部分与控制字符。
+    def _paper_map(user_id: str) -> dict:
+        """paper_id → {file_name,title}；镜像文件名就是 paper_id.pdf。"""
+        return paper_map(_shared_db(), user_id)
 
-    Args:
-        name: 浏览器报来的原始文件名（可能带路径、可能为 None）。
-
-    Returns:
-        str: 只含文件名主体的安全字符串；剥完为空（如 ".."）时回退固定名。
-    """
-    import re
-    base = pathlib.PurePosixPath(name or "").name
-    cleaned = re.sub(r"[\x00-\x1f\\/]", "_", base).strip("_ ")
-    return cleaned or "paper.pdf"
-
-
-def _paper_endpoints(app: FastAPI) -> None:
-    """论文目录端点：上传/登记/列表/删除，元数据在 papers 表、原文在 OSS。"""
-    from biopilot.tools.papers import register_paper, list_papers, remove_paper
-
-    # 上传路由必须先于 /papers/{paper_id} 声明，否则 "upload" 会被路径参数吞掉
-    @app.post("/papers/upload")
-    async def papers_upload(
-        file: UploadFile,
-        x_user_id: str | None = Header(default=None),
-    ) -> dict:
-        """接收浏览器上传的论文原文：对象先落 OSS，成功后才写元数据行（失败留孤儿对象，
-        不留死行）。
-
-        标题恒为空串——标题只来自解析器出口，绝不回退到 PDF 文件名。
-
-        Args:
-            file: 浏览器 multipart 上传的论文文件（PDF）。
-            x_user_id: 内网信任头（SpringBoot 注入的登录用户 id）。
-
-        Returns:
-            dict: status/id/oss_key。
-
-        Raises:
-            HTTPException: 缺头 403；空内容 422；超限 413；对象存储不可用 502。
-        """
+    @app.get("/kb/status")
+    async def kb_status(x_user_id: str | None = Header(default=None)) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        data = await file.read()
-        if not data:
-            raise HTTPException(status_code=422, detail="上传内容为空")
-        if len(data) > _PAPER_UPLOAD_LIMIT:
-            raise HTTPException(status_code=413, detail="文件超过大小上限")
-        paper_id = uuid.uuid4().hex
-        oss_key = (f"users/{x_user_id}/papers/{paper_id}/"
-                   f"{_sanitize_paper_filename(file.filename)}")
-        if not _paper_store().put_file(oss_key, data,
-                                       file.content_type or "application/pdf"):
-            raise HTTPException(status_code=502, detail="对象存储不可用，上传失败")
-        register_paper(_shared_db(), x_user_id, paper_id, "", oss_key, len(data))
-        # 上传即触发该用户域的增量索引：
-        # 后台跑，不阻塞上传响应；重建中的 singleflight 由 reindex_running 保证
+        counts = kb_counts(_shared_db(), x_user_id)
+        cfg = BioPilotConfig.from_env()
+        collection = cfg.rag.storage.collection + (
+            "" if x_user_id == "local" else f"_{x_user_id}")
+        last = _shared_db().execute(
+            "SELECT MAX(indexed_at) AS t FROM bio_paper"
+            " WHERE user_id=? AND index_status='indexed'", (x_user_id,)).fetchone()
+        return {
+            "total_papers": counts["total"],
+            "kb_enabled": counts["kb_enabled"],
+            "indexed": counts["indexed"],
+            "queued": counts["queued"],
+            "indexing": counts["indexing"],
+            "failed": counts["failed"],
+            "not_added": counts["not_added"],
+            "chunks": counts["chunks"],
+            "collection": collection,
+            "embedding_model": cfg.rag.embedding.embed_model,
+            "last_indexed_at": (last or {}).get("t"),
+            "running": x_user_id in reindex_running,
+            "last_run": kb_last_run.get(x_user_id),
+        }
+
+    @app.post("/kb/reindex")
+    async def kb_reindex(
+        body: dict | None = None,
+        force: bool = False,
+        x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """重建知识库：默认只补排队/失败/缺文件的论文；force=true 时全部重扫。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        if force:
+            _shared_db().execute(
+                "UPDATE bio_paper SET index_status='queued', index_error=NULL"
+                " WHERE user_id=? AND kb_enabled=1", (x_user_id,))
         _schedule_user_index(x_user_id)
-        return {"status": "ok", "id": paper_id, "oss_key": oss_key}
+        return {"status": "started", "already_running": x_user_id in reindex_running}
 
-    @app.post("/papers/{paper_id}")
-    async def papers_register(
-        paper_id: str, body: dict,
-        x_user_id: str | None = Header(default=None),
-    ) -> dict:
+    @app.post("/kb/search")
+    async def kb_search(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        oss_key = (body or {}).get("oss_key", "")
-        # OSS 写围栏：登记的对象键必须落在本人前缀下（防登记/删除他人对象）
-        if not oss_key.startswith(f"users/{x_user_id}/"):
-            raise HTTPException(status_code=422,
-                                detail="oss_key 必须以 users/<本人>/ 开头")
-        db = _shared_db()
-        register_paper(db, x_user_id, paper_id,
-                       (body or {}).get("title", ""),
-                       oss_key,
-                       int((body or {}).get("size_bytes", 0)))
-        return {"status": "ok"}
+        query = ((body or {}).get("query") or "").strip()
+        if not query:
+            raise HTTPException(status_code=422, detail="query 不能为空")
+        try:
+            top_k = int((body or {}).get("top_k") or 8)
+        except (TypeError, ValueError):
+            top_k = 8
+        top_k = max(1, min(top_k, 30))
+        cfg = BioPilotConfig.from_env()
+        svc = get_rag_service(cfg, user_domain=x_user_id)
+        started = _time.monotonic()
+        hits = svc.retrieve_scored(query, top_k)
+        elapsed = int((_time.monotonic() - started) * 1000)
+        papers = _paper_map(x_user_id)
+        results = []
+        for chunk, score in hits:
+            paper_id = Path(chunk.path).stem
+            paper = papers.get(paper_id) or {}
+            item = _chunk_view(chunk, score=round(float(score or 0), 4))
+            item["paper_id"] = paper_id
+            item["file_name"] = paper.get("file_name", "")
+            item["paper_title"] = paper.get("title", "")
+            results.append(item)
+        return {"results": results, "elapsed_ms": elapsed, "query": query}
 
-    @app.get("/papers")
-    async def papers_list(x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        return {"papers": list_papers(_shared_db(), x_user_id)}
-
-    @app.delete("/papers/{paper_id}")
-    async def papers_delete(
+    @app.get("/kb/papers/{paper_id}/chunks")
+    async def kb_paper_chunks(
         paper_id: str, x_user_id: str | None = Header(default=None),
     ) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        oss_key = remove_paper(_shared_db(), x_user_id, paper_id)
-        if oss_key is None:
+        papers = _paper_map(x_user_id)
+        if paper_id not in papers:
             raise HTTPException(status_code=404, detail="论文不存在")
-        # 删除方向：行先行、对象随后；对象删除失败只留孤儿，可后台按前缀对账清扫
-        _paper_store().remove(oss_key)
-        return {"status": "ok", "oss_key": oss_key}
+        cfg = BioPilotConfig.from_env()
+        svc = get_rag_service(cfg, user_domain=x_user_id)
+        path = str(Path(svc.config.corpus.pdf_dir) / f"{paper_id}.pdf")
+        chunks = svc.list_document_chunks(path)
+        chunks.sort(key=lambda chunk: chunk.chunk_index)
+        return {"chunks": [_chunk_view(chunk) for chunk in chunks],
+                "paper": papers[paper_id]}
 
 
-def _doc_endpoints(app: FastAPI) -> None:
-    """文档编辑器端点：markdown 文档的 CRUD（内容行存，OSS 留同步口）。"""
-    from biopilot.core.memory.storage.database import MemoryDB as _MDB
+def _citation_endpoints(app: FastAPI) -> None:
+    """引用库端点：列表/搜索、格式化、删除、导出、从论文入库。
 
-    @app.get("/documents")
-    async def documents_list(x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        db = _shared_db()
-        rows = db.execute("SELECT id, name, updated_at FROM documents"
-                          " WHERE user_id=? ORDER BY seq DESC", (x_user_id,)).fetchall()
-        return {"documents": [dict(r) for r in rows]}
+    引用库按用户隔离（users/<uid>/citations/references.bib）；写操作与 agent 侧
+    共用同一把 MySQL 命名锁，网页和终端不会同时改写同一份 bib。
+    """
+    from biopilot.citations import get_citation_manager
+    from biopilot.config import BioPilotConfig
+    from biopilot.core.memory.storage.named_lock import NamedLock
 
-    @app.post("/documents")
-    async def documents_create(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from datetime import datetime, timezone
-        db = _shared_db()
-        doc_id = uuid.uuid4().hex
-        name = (body or {}).get("name", "新文档.md")
-        content = (body or {}).get("content", "")
-        db.execute("INSERT INTO documents (id, user_id, name, content, updated_at)"
-                   " VALUES (?,?,?,?,?)",
-                   (doc_id, x_user_id, name, content,
-                    datetime.now(timezone.utc).isoformat()))
-        return {"status": "ok", "id": doc_id}
+    def _manager(user_id: str):
+        return get_citation_manager(BioPilotConfig.from_env(), user_domain=user_id)
 
-    @app.get("/documents/{doc_id}")
-    async def documents_get(doc_id: str, x_user_id: str | None = Header(default=None)) -> dict:
-        """读文档：oss_key 有值时正文取自 OSS，content 列只兜底遗留行。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        db = _shared_db()
-        row = db.execute("SELECT id, name, content, oss_key, updated_at FROM documents"
-                         " WHERE id=? AND user_id=?", (doc_id, x_user_id)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="文档不存在")
-        doc = dict(row)
-        if doc.get("oss_key"):
-            data = _user_files().get(doc["oss_key"])
-            if data is not None:
-                doc["content"] = data.decode("utf-8", errors="replace")
-        doc.pop("oss_key", None)
-        return doc
+    def _entry_view(entry) -> dict:
+        return {
+            "key": entry.key,
+            "entry_type": entry.entry_type,
+            "title": entry.title,
+            "authors": entry.authors,
+            "year": entry.year,
+            "journal": (entry.fields or {}).get("journal", ""),
+        }
 
-    @app.put("/documents/{doc_id}")
-    async def documents_save(
-        doc_id: str, body: dict, x_user_id: str | None = Header(default=None),
-    ) -> dict:
-        """保存文档：正文写 OSS（无 oss_key 的遗留行先补一个键）并更新行时间戳。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from datetime import datetime, timezone
-        content = (body or {}).get("content", "")
-        db = _shared_db()
-        row = db.execute("SELECT oss_key FROM documents WHERE id=? AND user_id=?",
-                         (doc_id, x_user_id)).fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail="文档不存在")
-        oss_key = row["oss_key"]
-        if not oss_key:
-            import uuid as _uuid
-            oss_key = f"documents/{_uuid.uuid4().hex}"
-        # 对象先落 OSS、行后写（一致性方向红线）
-        _user_files().put(x_user_id, oss_key.removeprefix(
-            user_file_prefix(x_user_id)), content.encode("utf-8"), "text/markdown")
-        db.execute("UPDATE documents SET content=?, oss_key=?, updated_at=? WHERE id=? AND user_id=?",
-                   (content, oss_key, datetime.now(timezone.utc).isoformat(), doc_id, x_user_id))
-        return {"status": "ok"}
+    def _with_write_lock(user_id: str, action):
+        cfg = BioPilotConfig.from_env()
+        lock = NamedLock(cfg.runtime.memory_dsn)
+        name = f"citation:{user_id}"
+        acquired = False
+        try:
+            acquired = lock.acquire(name, timeout=5)
+            if not acquired:
+                raise HTTPException(status_code=409,
+                                    detail="引用库正在被另一个进程修改，请稍后重试")
+            return action()
+        finally:
+            if acquired:
+                lock.release(name)
 
-    @app.get("/literature/search")
-    async def literature_search(
+    @app.get("/citations")
+    async def citations_list(
         q: str = "", x_user_id: str | None = Header(default=None),
     ) -> dict:
-        """文献搜索（PubMed E-utilities，AI 搜索走 agent 主链路）。"""
-        if not x_user_id or not q.strip():
-            return {"results": []}
-        import httpx as _httpx
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        entries = _manager(x_user_id).search(q or "")
+        return {"entries": [_entry_view(entry) for entry in entries]}
+
+    @app.post("/citations/format")
+    async def citations_format(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        keys = [str(key) for key in ((body or {}).get("keys") or []) if key]
+        style = (body or {}).get("style") or "author-year"
+        if not keys:
+            raise HTTPException(status_code=422, detail="keys 不能为空")
+        text = _manager(x_user_id).format(keys, style=style)
+        return {"text": text, "style": style}
+
+    @app.delete("/citations/{key}")
+    async def citations_delete(key: str, x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+
+        def _delete():
+            return _manager(x_user_id).remove(key)
+
+        result = _with_write_lock(x_user_id, _delete)
+        return {"status": "ok", "result": result}
+
+    @app.get("/citations/export")
+    async def citations_export(x_user_id: str | None = Header(default=None)) -> dict:
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        manager = _manager(x_user_id)
         try:
-            async with _httpx.AsyncClient(timeout=10) as hc:
-                r = await hc.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                                 params={"db": "pubmed", "term": q, "retmax": 10,
-                                         "retmode": "json"})
-                ids = r.json().get("esearchresult", {}).get("idlist", [])
-            if not ids:
-                return {"results": []}
-            async with _httpx.AsyncClient(timeout=10) as hc:
-                r = await hc.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
-                                 params={"db": "pubmed", "id": ",".join(ids),
-                                         "retmode": "json"})
-                result = r.json().get("result", {})
-            out = [{"id": uid, "title": v.get("title", ""),
-                    "journal": v.get("source", ""), "pubdate": v.get("pubdate", "")}
-                   for uid, v in result.items() if uid != "uids"]
-            return {"results": out}
-        except Exception as e:
-            logger.warning("PubMed 搜索失败: %r", e)
-            return {"results": [], "error": str(e)}
+            text = pathlib.Path(manager.bib_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = ""
+        return {"text": text}
+
+    @app.post("/citations/from-paper")
+    async def citations_from_paper(
+        body: dict, x_user_id: str | None = Header(default=None),
+    ) -> dict:
+        """把文件管理里的论文登记进当前用户的引用库（从 PDF 抽取书目）。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        paper_id = (body or {}).get("paper_id", "")
+        if not paper_id:
+            raise HTTPException(status_code=422, detail="paper_id 不能为空")
+        row = _shared_db().execute(
+            "SELECT oss_key, file_name FROM bio_paper WHERE id=? AND user_id=?",
+            (paper_id, x_user_id)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="论文不存在")
+        cfg = BioPilotConfig.from_env()
+        import re as _re
+        safe = _re.sub(r"[^A-Za-z0-9_-]", "_", x_user_id)
+        mirror = (pathlib.Path(cfg.runtime.workspace) / "rag" / "users"
+                  / safe / "papers" / f"{paper_id}.pdf")
+        temp_path = None
+        source = mirror
+        if not mirror.exists():
+            store = _object_store()
+            data = store.get(row["oss_key"]) if store is not None else None
+            if not data:
+                raise HTTPException(status_code=502, detail="论文原文取回失败")
+            temp_dir = pathlib.Path(".biopilot/run/imports")
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = temp_dir / f"{uuid.uuid4().hex}.pdf"
+            temp_path.write_bytes(data)
+            source = temp_path
+        try:
+            def _add():
+                return _manager(x_user_id).add_from_pdf(str(source))
+            result = _with_write_lock(x_user_id, _add)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"引用入库失败：{exc}")
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+        return {"status": "ok", "result": result}

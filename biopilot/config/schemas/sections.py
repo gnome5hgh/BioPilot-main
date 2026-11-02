@@ -135,11 +135,12 @@ class RuntimeConfig:
         workspace: str，运行时数据根目录（milvus/memory/audit 等）
         agents_dir: str，Agent 插件扫描目录
         confirm_above: str，会话免问上限档（风险档高于它的工具执行前需用户确认）
+        allow_host_shell: bool，是否允许网页终端启动宿主 shell（拥有服务账号权限）
     """
 
     #: 运行时数据根目录，存放 milvus、memory、audit 等（与用户级数据目录 .biopilot/ 同一处）
     workspace: str = ".biopilot"
-    #: 记忆/会话真相源的 MySQL 连接串（Python 侧 blocks/block_history/messages；
+    #: 记忆/会话真相源的 MySQL 连接串（Python 侧 bio_memory_block/bio_memory_block_history/bio_message；
     #: 测试经 BIOPILOT_MEMORY_MYSQL_DSN 覆盖到 biopilot_test 库）
     memory_dsn: str = "mysql://root@127.0.0.1:3306/biopilot"
     #: 多模型条目（名称/端点/key/费率展示值）；会话内切换下一次 run 生效。
@@ -168,6 +169,10 @@ class RuntimeConfig:
     #: 会话免问上限档：工具风险档**高于**此档的，执行前升级为人工确认
     #:（不拒绝）；不高于的静默放行。取值 ∈ RISK_ORDER 的键。
     confirm_above: str = "medium"
+
+    #: 网页终端是否允许启动宿主 shell。默认关闭——宿主 shell 拥有服务账号的
+    #: 文件与环境访问权；共享部署上开启前必须自行评估，或改用沙箱终端。
+    allow_host_shell: bool = False
 
 
 @dataclass
@@ -277,7 +282,7 @@ class SecurityConfig:
 
 @dataclass
 class SandboxConfig:
-    """沙箱代码执行配置（run_python/code-agent 依赖；缺它整条链路不可用）。
+    """沙箱代码执行配置（run_python/bio-agent 依赖；缺它整条链路不可用）。
 
     Attributes:
         enabled: bool，总开关（关掉时 run_python 直接返回未启用文本）
@@ -717,16 +722,17 @@ class AgentsConfig:
     各值按该 agent 完整任务的典型时长留余量设定：note-agent 覆盖含内审重试的纯笔记
     端到端，paper-agent 覆盖大批量新颖性检索，review-agent 覆盖全文审阅，research-agent
     覆盖完整研究链路；paper-agent 还要覆盖读整篇与图表问题，citation-agent 要覆盖
-    逐篇读首页取元数据加查引/入库/渲染一整套，memory-agent 要覆盖记忆与清单的读写。
-    表里没有的类型落回 SpawnSubAgentTool.timeout 的类默认（120s）——新增角色时一并补进
-    本表，别让它在表外静默用类默认。某 agent 反复撞帽说明任务时长需要重新评估，
-    而不是继续调大。
+    逐篇读首页取元数据加查引/入库/渲染一整套，memory-agent 要覆盖记忆与清单的读写，
+    bio-agent 要覆盖读数据、多步分析执行与失败重试的整轮。表里没有的类型落回
+    SpawnSubAgentTool.timeout 的类默认（120s）——新增角色时一并补进本表，别让它在表外
+    静默用类默认。某 agent 反复撞帽说明任务时长需要重新评估，而不是继续调大。
 
     max_turns 是同类自由 dict（agent 类型 → ReAct 轮数上限），仅 YAML 可配；表里没有的
     类型落回 Agent 的类默认 20 轮。轮数是「一次派发内允许多少次推理-行动」的预算：单次
     派发要串联多阶段的角色（research-agent 的选题链路含盘点、成稿、idea 卡、外部检索、
-    计划成稿）在 20 轮内做不完，会以 MaxTurnsExceeded 收场且无产物；给这类角色单独提额度，
-    其余保持默认。撞帽本身是信号——要么任务该拆，要么额度该调。
+    计划成稿；bio-agent 的分析链路含探查、分步执行与修正重试）在 20 轮内做不完，会以
+    MaxTurnsExceeded 收场且无产物；给这类角色单独提额度，其余保持默认。撞帽本身是信号
+    ——要么任务该拆，要么额度该调。
 
     Attributes:
         timeouts: dict[str, int]，agent 类型 → 超时秒数（仅 YAML 可配；按各 agent 完整任务典型时长留余量）
@@ -737,12 +743,12 @@ class AgentsConfig:
         default_factory=lambda: {
             "note-agent": 900, "paper-agent": 420, "review-agent": 300,
             "research-agent": 1800, "rag-agent": 900,
-            "citation-agent": 300, "memory-agent": 180,
+            "citation-agent": 300, "memory-agent": 180, "bio-agent": 1800,
         })
 
     #: 只有单次派发内需要串联多阶段的角色才提额度；表外角色一律用 Agent 的默认 20 轮。
     max_turns: dict[str, int] = field(
-        default_factory=lambda: {"research-agent": 45})
+        default_factory=lambda: {"research-agent": 45, "bio-agent": 40})
 
 
 _SERVER_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")

@@ -20,8 +20,8 @@ from dataclasses import dataclass
 
 import httpx
 
-from biopilot.core.common.constants import RETRY_BACKOFF_BASE
-from biopilot.core.common.services.text import sanitize_surrogates
+from biopilot.common.core.constants import RETRY_BACKOFF_BASE
+from biopilot.common.core.utils.text import sanitize_surrogates
 
 logger = logging.getLogger(__name__)
 

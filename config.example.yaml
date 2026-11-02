@@ -109,3 +109,10 @@ memory:
   consolidation_enabled: true
   debounce_seconds: 30             # 静默窗口：连续多轮合并成一次整合
   max_delay_seconds: 300           # 连续活跃会话的强制整合上限
+
+# 运行时（安全档位与网页终端）
+runtime:
+  confirm_above: medium          # low=严格 / medium=标准 / high=宽松
+  # 网页终端是否允许启动宿主 shell（拥有服务账号的文件与环境访问权）。
+  # 只在本人本机使用时开启；共享部署保持 false。
+  allow_host_shell: false

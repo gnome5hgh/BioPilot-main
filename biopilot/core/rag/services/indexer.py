@@ -612,6 +612,38 @@ class RagIndexer:
 
         return IndexOutcome(IndexOutcomeStatus.INDEXED, chunks=len(chunks))
 
+    def remove_document(self, path: str) -> bool:
+        """把一篇文档从索引里整体移除（不动磁盘文件与 papers 元数据行）。
+
+        与 index_document 的「先删后建」共用同一套清理动作：按路径定点取块 id，
+        删 BM25 行、向量行、图表对象，最后从状态文件移除该路径。用于「移出知识库
+        但保留文件」——不能走 index_all，那会顺带重扫整个语料根。
+
+        Args:
+            path: 文档的绝对路径（会被解析）。
+
+        Returns:
+            bool: 路径属于语料根并执行了移除时为 True；否则 False。
+        """
+        key = str(Path(path).resolve())
+        if self._rel_path(key) is None:
+            return False
+        store = self.service._ensure_vector_store()
+        bm25 = self.service._ensure_bm25()
+        chunk_ids = store.doc_chunk_ids(key)
+        image_keys = self._collect_media_keys(chunk_ids)
+        for chunk_id in chunk_ids:
+            bm25.remove_document(chunk_id)
+        store.delete_doc(key)
+        self._remove_media_objects(image_keys)
+        raw = self._read_state()
+        if raw is not None:
+            docs = raw[1]
+            if key in docs:
+                docs.pop(key, None)
+                self._save_state(docs)
+        return True
+
     def index_all(self) -> IndexRunOutcome:
         """全量增量扫描：只重索引新增或变更的文档，并清理已删除的文档。
 

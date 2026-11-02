@@ -15,7 +15,7 @@ from biopilot.tools import (
     ReadFileTool, ReadPdfTool, ExtractTitleTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool,
 )
-from biopilot.tools.common.factory import make_tools
+from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
 from biopilot.tools.docs import SaveDocumentTool
 from biopilot.tools.recall import get_recall_tools

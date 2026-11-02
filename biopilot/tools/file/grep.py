@@ -9,7 +9,7 @@ from pathlib import Path
 
 from biopilot.core.security.middleware.workspace import is_denied_path
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import SEARCH_HINTS
+from biopilot.core.tool.constants import SEARCH_HINTS
 
 _TEXT_SUFFIXES = (".md", ".txt", ".py", ".jsonl")
 

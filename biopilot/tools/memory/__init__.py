@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading
 
 from biopilot.core.tool import Tool
-from biopilot.tools.memory.runtime_context import (
+from biopilot.core.tool.services.runtime_context import (
     MemoryToolsContext, set_memory_context, get_memory_context)
 from biopilot.tools.memory.blocks.memory_replace import MemoryReplaceTool
 from biopilot.tools.memory.blocks.memory_insert import MemoryInsertTool

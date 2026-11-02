@@ -9,8 +9,8 @@ from pathlib import Path
 
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.security.middleware.workspace import is_denied_path
-from biopilot.tools.common.constants import NOTE_HINTS
-from biopilot.tools.file.atomic import atomic_write
+from biopilot.core.tool.constants import NOTE_HINTS
+from biopilot.common.storage.atomic import atomic_write
 
 
 class WriteFileTool(Tool):

@@ -9,8 +9,8 @@ LLM 只需输出变更部分(省 token),且不误伤无关内容。安全边界�
 from pathlib import Path
 
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import NOTE_HINTS
-from biopilot.tools.file.atomic import atomic_write
+from biopilot.core.tool.constants import NOTE_HINTS
+from biopilot.common.storage.atomic import atomic_write
 
 
 class EditFileTool(Tool):

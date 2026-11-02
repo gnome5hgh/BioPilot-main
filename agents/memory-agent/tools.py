@@ -14,7 +14,7 @@
 """
 from biopilot.config import BioPilotConfig
 from biopilot.tools import GlobTool, ReadFileTool
-from biopilot.tools.common.factory import make_tools
+from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools.memory import get_memory_tools
 from biopilot.tools.recall import get_recall_tools
 

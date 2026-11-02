@@ -1,4 +1,4 @@
-"""blocks / block_history 表操作：块的读写与写前快照（撤销/重做历史）。
+"""bio_memory_block / bio_memory_block_history 表操作：块的读写与写前快照（撤销/重做历史）。
 
 本文件只有裸 SQL 函数，不含业务规则；业务不变式（read_only / limit / 版本号
 推进）由 services/block_manager.py 持有。所有函数都要求 user_id：记忆块是
@@ -43,7 +43,7 @@ def insert_block(db: MemoryDB, b: Block, user_id: str, version: int = 1) -> None
         - created_at 和 updated_at 自动取当前 UTC 时间。
     """
     db.execute(
-        "INSERT INTO blocks (id, user_id, label, value, `limit`, description, metadata_,"
+        "INSERT INTO bio_memory_block (id, user_id, label, value, `limit`, description, metadata_,"
         " read_only, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (b.id, user_id, b.label, b.value, b.limit, b.description,
          json.dumps(b.metadata_, ensure_ascii=False), int(b.read_only), version,
@@ -61,7 +61,7 @@ def select_block(db: MemoryDB, block_id: str, user_id: str) -> dict | None:
     Returns:
         若存在则返回该行的 dict（含所有列），否则返回 None。
     """
-    cur = db.execute("SELECT * FROM blocks WHERE id=? AND user_id=?",
+    cur = db.execute("SELECT * FROM bio_memory_block WHERE id=? AND user_id=?",
                      (block_id, user_id))
     row = cur.fetchone()
     return dict(row) if row else None
@@ -87,7 +87,7 @@ def select_block_by_label(db: MemoryDB, label: str, user_id: str,
     """
     # MySQL 语法序：FOR UPDATE 必须在 ORDER BY 之后
     lock = " FOR UPDATE" if for_update else ""
-    cur = db.execute(f"SELECT * FROM blocks WHERE label=? AND user_id=? ORDER BY seq{lock}",
+    cur = db.execute(f"SELECT * FROM bio_memory_block WHERE label=? AND user_id=? ORDER BY seq{lock}",
                      (label, user_id))
     row = cur.fetchone()
     return dict(row) if row else None
@@ -103,7 +103,7 @@ def select_blocks(db: MemoryDB, user_id: str) -> list[dict]:
     Returns:
         该用户的块行 dict 列表，按 created_at 升序排列。
     """
-    cur = db.execute("SELECT * FROM blocks WHERE user_id=? ORDER BY created_at",
+    cur = db.execute("SELECT * FROM bio_memory_block WHERE user_id=? ORDER BY created_at",
                      (user_id,))
     return [dict(r) for r in cur.fetchall()]
 
@@ -128,7 +128,7 @@ def update_block(db: MemoryDB, block_id: str, value: str,
         - updated_at 自动设为当前 UTC 时间。
     """
     cur = db.execute(
-        "UPDATE blocks SET value=?, version=?, updated_at=?"
+        "UPDATE bio_memory_block SET value=?, version=?, updated_at=?"
         " WHERE id=? AND user_id=? AND version=?",
         (value, expected_version + 1, _now(), block_id, user_id, expected_version))
     if cur.rowcount == 0:
@@ -147,7 +147,7 @@ def update_block_label(db: MemoryDB, block_id: str, label: str, user_id: str) ->
         label: 新 label。
         user_id: 归属用户。
     """
-    db.execute("UPDATE blocks SET label=? WHERE id=? AND user_id=?",
+    db.execute("UPDATE bio_memory_block SET label=? WHERE id=? AND user_id=?",
                (label, block_id, user_id))
 
 
@@ -161,13 +161,13 @@ def delete_block(db: MemoryDB, block_id: str, user_id: str) -> None:
 
     注意：物理删除不可恢复，建议在业务层确保 read_only 校验和备份。
     """
-    db.execute("DELETE FROM blocks WHERE id=? AND user_id=?", (block_id, user_id))
+    db.execute("DELETE FROM bio_memory_block WHERE id=? AND user_id=?", (block_id, user_id))
 
 
 def checkpoint_block(db: MemoryDB, block_id: str, label: str, value: str,
                      limit: int, description: str | None, metadata_: dict,
                      version: int, user_id: str) -> None:
-    """写前快照：把块当前状态整体插入 block_history（撤销/重做的依据）。
+    """写前快照：把块当前状态整体插入 bio_memory_block_history（撤销/重做的依据）。
 
     version 记录的是被快照那一刻的版本号，用于历史链排序与回滚定位。
 
@@ -187,7 +187,7 @@ def checkpoint_block(db: MemoryDB, block_id: str, label: str, value: str,
         - 也可通过 BlockManager.checkpoint_block 手动调用（此时 version 常为 0）。
     """
     db.execute(
-        "INSERT INTO block_history (block_id, user_id, label, value, `limit`, description,"
+        "INSERT INTO bio_memory_block_history (block_id, user_id, label, value, `limit`, description,"
         " metadata_, version, checkpointed_at) VALUES (?,?,?,?,?,?,?,?,?)",
         (block_id, user_id, label, value, limit, description,
          json.dumps(metadata_, ensure_ascii=False), version, _now()))
@@ -204,7 +204,7 @@ def select_block_history(db: MemoryDB, block_id: str, user_id: str) -> list[dict
     Returns:
         历史快照行列表，按主键 id（自增）升序排列，即从最早到最近。
     """
-    cur = db.execute("SELECT * FROM block_history WHERE block_id=? AND user_id=?"
+    cur = db.execute("SELECT * FROM bio_memory_block_history WHERE block_id=? AND user_id=?"
                      " ORDER BY id", (block_id, user_id))
     return [dict(r) for r in cur.fetchall()]
 
@@ -214,7 +214,7 @@ def restore_block_history(db: MemoryDB, history_id: int, user_id: str) -> dict:
 
     Args:
         db: 数据库连接。
-        history_id: block_history 表的主键 ID（自增）。
+        history_id: bio_memory_block_history 表的主键 ID（自增）。
         user_id: 归属用户。
 
     Returns:
@@ -223,11 +223,11 @@ def restore_block_history(db: MemoryDB, history_id: int, user_id: str) -> dict:
     Raises:
         KeyError: 当 history_id 在表中不存在时。
 
-    注意：该函数只取快照数据，实际回滚（写回 blocks 表）由 BlockManager.restore_block 执行。
+    注意：该函数只取快照数据，实际回滚（写回 bio_memory_block 表）由 BlockManager.restore_block 执行。
     """
-    cur = db.execute("SELECT * FROM block_history WHERE id=? AND user_id=?",
+    cur = db.execute("SELECT * FROM bio_memory_block_history WHERE id=? AND user_id=?",
                      (history_id, user_id))
     row = cur.fetchone()
     if row is None:
-        raise KeyError(f"block_history id={history_id} not found")
+        raise KeyError(f"bio_memory_block_history id={history_id} not found")
     return dict(row)

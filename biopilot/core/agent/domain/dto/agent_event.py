@@ -8,16 +8,16 @@ from biopilot.core.agent.constants import AgentEventKind
 class AgentEvent:
     """引擎事件：kind 取 AgentEventKind；agent_type 区分 root/child。
 
-    载荷按 kind 分家。content 事件装 text（正文增量）；tool 事件装 tool_name 与
-    args（工具名与已解析的参数）——**工具事件的 text 是空串**：活动行摘要与调用行
-    都由终端层从 args 现算，这里不存排版结果。tool_end 另带耗时、写类 diffstat 与
-    结果文本（completion / error）。
+    载荷按 kind 分家。content / reasoning 事件装 text（增量片段）；tool 事件装
+    tool_name 与 args（工具名与已解析的参数）——**工具事件的 text 是空串**：活动行
+    摘要与调用行都由终端层从 args 现算，这里不存排版结果。tool_end 另带耗时、写类
+    diffstat 与结果文本（completion / error）。
 
     全部可选字段带默认值：旧位置构造（content 事件）兼容不变。
 
     Attributes:
-        kind: AgentEventKind，事件类型（content | tool_start | tool_end）
-        text: str，正文增量片段（仅 content 事件；tool 事件为空串）
+        kind: AgentEventKind，事件类型（content | reasoning | tool_start | tool_end）
+        text: str，增量片段（content / reasoning 事件；tool 事件为空串）
         agent_type: str，产出事件的 agent（root/child 区分）
         tool_name: str | None，工具名（仅 tool_* 事件）
         args: dict | None，已解析的工具参数（仅 tool_* 事件；终端的展示素材）

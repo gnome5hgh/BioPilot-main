@@ -12,23 +12,26 @@
 
 ## Directory Structure
 
-- `file/` — 读 / 写 / 编辑 / glob / grep / 读 PDF / 取标题（+ 原子写盘）
-- `search/` — 下载 PDF（含 SSRF 校验与写盘后处理）
-- `review/` — 审查裁决、模板体检、期刊会议等级查询
+- `file/` — 读 / 写 / 编辑 / glob / grep / 读 PDF / 取标题（只做工具声明与降级文案）
+- `search/` — 下载 PDF（下载核心在 `core/security/services/pdf_fetch.py`）
+- `review/` — 审查裁决、模板体检、期刊会议等级查询（helper 已并入工具文件）
 - `citations/` — 引用工具（只装配给 `citation-agent`）
 - `rag/` — 检索、看图、入库、全量收敛、索引体检（只装配给 `rag-agent`）
 - `vision/` — 图表提取与看图分析
-- `memory/` — 记忆读写/管理工具集（9 件，只装配给 `memory-agent`）
+- `memory/` — 记忆读写/管理工具集（9 件，只装配给 `memory-agent`；编辑语义在 `core/memory/services/`）
 - `recall/` — 只读召回包（`read_tool_result`，装配给所有 agent）
-- `orchestration/` — 子 agent 派发（唯一的调度工具）
+- `orchestration/` — 子 agent 派发（唯一的调度工具；按当前约定整文件保留）
 - `skills/` — 加载 skill 正文与资源
-- `common/` — 装配工厂与共享 HTTP 基础设施
+
+工具装配不在本包：`make_tools` 在 `cli/services/tool_assembly.py`；工具运行时上下文在
+`core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在 `biopilot/common/` 与 `core/security/`。
+平台数据端口（论文目录/文件/文档）已迁 Java `bio-catalog`，本包不再保留数据访问 adapter。
 
 ## Responsibilities
 
 - 为每个工具声明名字、描述、参数 schema、安全元数据与风险档位。
 - 把工具结果（含各种失败）统一成结构化结果回传模型。
-- 提供装配工厂，由装配层决定「哪个 agent 拿到哪些工具」。
+- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `core/*/services`，装配由 `cli/services/tool_assembly.py` 负责。
 
 ## Core Logic
 
@@ -43,7 +46,8 @@
 
 ## Key Entry Points
 
-- `common/` — 装配工厂
+- `cli/services/tool_assembly.py` — 工具装配工厂（`make_tools`）
+- `core/tool/services/runtime_context.py` — 工具运行时上下文（记忆管理器 + RAG 用户域）
 - `orchestration/spawn.py` — 派发工具与五道闸
 - `memory/` — 记忆写入/管理工具集（惰性单例，8 件）
 - `recall/` — 只读召回包（会话检索 + 工具结果回取）

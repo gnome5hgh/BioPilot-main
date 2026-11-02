@@ -5,7 +5,16 @@
 非法输入返回可行动报错文本，不静默吞（让 review-agent 的 LLM 修正后重试）。
 """
 from biopilot.core.tool import SUMMARY_TERMINAL, Tool, ToolResult
-from biopilot.tools.review._validate import VERDICTS, enum_check
+
+#: verdict/decision 合法值（与笔记审查共用）
+VERDICTS = ("pass", "fail")
+
+
+def enum_check(value, allowed: tuple, label: str) -> str | None:
+    """枚举成员校验：合法返回 None；否则返回可行动报错文本。"""
+    if value not in allowed:
+        return f"{label} 非法: {value}，应为 {', '.join(allowed)}"
+    return None
 
 
 class SubmitDownloadReviewTool(Tool):

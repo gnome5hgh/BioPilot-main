@@ -1,6 +1,6 @@
 """add_citation：把论文加入 references.bib（语料库内 PDF，或库外 EXTERNAL）。"""
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import ScopeRoot
+from biopilot.core.tool.constants import ScopeRoot
 
 
 class AddCitationTool(Tool):

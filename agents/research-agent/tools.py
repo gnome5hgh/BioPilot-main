@@ -13,7 +13,7 @@ from biopilot.tools import (
     ReadFileTool, ReadPdfTool, ExtractTitleTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool,
 )
-from biopilot.tools.common.factory import make_tools
+from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools.docs import SaveDocumentTool
 from biopilot.tools.recall import get_recall_tools
 
@@ -24,5 +24,5 @@ TOOLS = make_tools(BioPilotConfig.from_env(), [
     GlobTool, GrepTool,
     SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
                    max_turns=BioPilotConfig.from_env().agents.max_turns),
-    SaveDocumentTool(),  # 研究计划成稿入库（网页文档编辑器可见）
+    SaveDocumentTool(),  # 四份研究产物成稿后入库（网页文档编辑器可见）
 ], default_write_root="research") + get_recall_tools()

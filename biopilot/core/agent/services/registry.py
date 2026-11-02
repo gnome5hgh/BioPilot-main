@@ -20,7 +20,7 @@ import importlib.util
 from pathlib import Path
 
 from biopilot.core.agent.config import AgentConfig
-from biopilot.core.common.services.frontmatter import parse_frontmatter
+from biopilot.common.core.utils.frontmatter import parse_frontmatter
 from biopilot.core.tool import Tool, validate_tool
 
 
@@ -110,7 +110,7 @@ class AgentRegistry:
 
     def _parse_agent_md(self, path: Path) -> tuple[dict, str]:
         """
-        解析 AGENT.md 文件，分离 YAML frontmatter 和 Markdown body（解析实现在 core/common/services/frontmatter.py 共享）。
+        解析 AGENT.md 文件，分离 YAML frontmatter 和 Markdown body（解析实现在 common/core/utils/frontmatter.py 共享）。
 
         AGENT.md 格式::
 

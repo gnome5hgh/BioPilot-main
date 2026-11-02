@@ -9,8 +9,8 @@ import logging
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.domain import section_label
 from biopilot.core.rag.services.rag_service import get_rag_service
-from biopilot.tools.rag.runtime_context import get_rag_domain
-from biopilot.tools.memory.runtime_context import get_memory_context
+from biopilot.core.tool.services.runtime_context import get_rag_domain
+from biopilot.core.tool.services.runtime_context import get_memory_context
 
 logger = logging.getLogger(__name__)
 

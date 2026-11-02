@@ -15,6 +15,8 @@ class AgentEventKind(StrEnum):
 
     #: 正文增量（text 为新增片段）
     CONTENT = "content"
+    #: 思维链增量（text 为新增片段；端点不返回 reasoning_content 时从不出现）
+    REASONING = "reasoning"
     #: 工具调用开始（携工具名与活动行摘要）
     TOOL_START = "tool_start"
     #: 工具调用结束（携耗时、写类 diffstat 与完成行文本）

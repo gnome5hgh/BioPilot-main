@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from biopilot.core.common.services.text import sanitize_surrogates
+from biopilot.common.core.utils.text import sanitize_surrogates
 
 __all__ = ["ResumeReplay", "build_resume_replay", "render_resume_replay"]
 

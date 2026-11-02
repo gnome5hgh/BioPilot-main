@@ -302,24 +302,24 @@ class RAGService:
         return self._rewriter
 
     def index_user_papers(self, user_id: str, db, store) -> dict:
-        """把该用户在 papers 表登记的论文（原文在 OSS）索引进本人 collection。
+        """把该用户在 bio_paper 表登记的论文（原文在 OSS）索引进本人 collection。
 
-        平台的论文原文在对象存储、元数据行在 papers 表；本方法把它们同步到
+        平台的论文原文在对象存储、元数据行在 bio_paper 表；本方法把它们同步到
         本域的镜像语料根（<paper_id>.pdf，稳定路径保证块 id 跨次重建稳定），
         然后走与本地语料同一条 index_all 管线（增量、删除清理、BM25 重建）。
-        索引成功的行置 papers.indexed=1；解析/取回失败的行保持 0，下次重建重试。
-        papers 行被删除的论文，其镜像文件同步删除，index_all 据此清掉旧块。
+        索引成功的行置 bio_paper.indexed=1；解析/取回失败的行保持 0，下次重建重试。
+        bio_paper 行被删除的论文，其镜像文件同步删除，index_all 据此清掉旧块。
 
         Args:
             user_id: 归属用户（即本服务实例的用户域）。
-            db: MemoryDB，papers 元数据读写。
+            db: MemoryDB，bio_paper 元数据读写。
             store: 对象存取器（put/get 语义，论文原文来源）。
 
         Returns:
             dict: synced（本次下载篇数）/ indexed（置 1 篇数）/ failed（失败清单）。
         """
         rows = db.execute(
-            "SELECT id, oss_key, size_bytes, indexed FROM papers WHERE user_id=?",
+            "SELECT id, oss_key, size_bytes, indexed FROM bio_paper WHERE user_id=?",
             (user_id,)).fetchall()
         mirror = Path(self.config.corpus.pdf_dir)
         mirror.mkdir(parents=True, exist_ok=True)
@@ -339,7 +339,7 @@ class RAGService:
             target.write_bytes(data)
             synced += 1
 
-        # 镜像里已不在 papers 表的文件清掉（论文被删 → 块随 index_all 清理）
+        # 镜像里已不在 bio_paper 表的文件清掉（论文被删 → 块随 index_all 清理）
         for old in mirror.glob("*.pdf"):
             if str(old) not in wanted:
                 old.unlink()
@@ -356,7 +356,7 @@ class RAGService:
             target = str(mirror / f"{r['id']}.pdf")
             if state.get(target):
                 if not r["indexed"]:
-                    db.execute("UPDATE papers SET indexed=1 WHERE id=? AND user_id=?",
+                    db.execute("UPDATE bio_paper SET indexed=1 WHERE id=? AND user_id=?",
                                (r["id"], user_id))
                 indexed += 1
             else:
@@ -418,6 +418,53 @@ class RAGService:
             top_k = self.config.rag.retriever.top_k
         with self.lock:
             return self.get_retriever().retrieve(query, top_k)
+
+    def retrieve_scored(self, query: str, top_k: int | None = None):
+        """检索入口（持锁），返回 (块, RRF 融合分) 有序对。
+
+        知识库的「试检索」需要把排序依据展示给用户；与 retrieve 共用同一段
+        检索实现，不会出现两个出口结果不一致。
+
+        Args:
+            query: 检索查询文本。
+            top_k: 需要返回的结果块数；None 时取配置默认值。
+
+        Returns:
+            list[tuple[Chunk, float]]: 按相关度降序排列的块与融合分。
+        """
+        if top_k is None:
+            top_k = self.config.rag.retriever.top_k
+        with self.lock:
+            return self.get_retriever().retrieve_scored(query, top_k)
+
+    def list_document_chunks(self, path: str):
+        """列出某篇文档当前索引里的全部块（持锁，只读）。
+
+        Args:
+            path: 文档的绝对路径（与 Chunk.path 同口径）。
+
+        Returns:
+            list[Chunk]: 该文档的块列表；文档不在索引里时为空列表。
+        """
+        with self.lock:
+            store = self._ensure_vector_store()
+            return [chunk for chunk, _mtime in store.all_documents()
+                    if chunk.path == str(path)]
+
+    def remove_document(self, path: str) -> bool:
+        """把一篇文档从索引里整体移除（持锁）。
+
+        用于「移出知识库但保留文件」：只删该路径的块、BM25 行与图表对象，
+        不动 papers 行与 OSS 原文。
+
+        Args:
+            path: 文档的绝对路径。
+
+        Returns:
+            bool: 属于本语料并执行了移除时为 True。
+        """
+        with self.lock:
+            return self.get_indexer().remove_document(path)
 
 
 # ---------- 模块级服务缓存（按用户域一域一例） ----------

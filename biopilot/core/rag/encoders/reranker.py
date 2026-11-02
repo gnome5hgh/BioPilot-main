@@ -10,8 +10,8 @@ import httpx
 
 from biopilot.core.security.services import endpoint_guard
 
-from biopilot.core.common.constants import RETRY_BACKOFF_BASE
-from biopilot.core.common.services.text import sanitize_surrogates
+from biopilot.common.core.constants import RETRY_BACKOFF_BASE
+from biopilot.common.core.utils.text import sanitize_surrogates
 
 
 class Reranker(Protocol):

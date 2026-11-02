@@ -9,7 +9,7 @@ FetchPdfTool（对门禁通过的论文下载 PDF）、glob/grep 定位工具、
 需要用户拿主意时把问题写进最终回答（问用户不需要工具），不自行猜。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.tools.common.factory import make_tools
+from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
 from biopilot.tools import (
     FetchPdfTool, DeleteFileTool, GlobTool, GrepTool, ReadPdfTool, ExtractTitleTool,

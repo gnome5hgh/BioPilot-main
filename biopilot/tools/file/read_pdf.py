@@ -8,7 +8,7 @@
 from pathlib import Path
 
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import ScopeRoot
+from biopilot.core.tool.constants import ScopeRoot
 from biopilot.core.rag.parsers.pdf_extract import extract_pdf
 
 

@@ -1,7 +1,7 @@
 """MemoryTool：统一记忆块管理（create / replace / delete / rename）。"""
+from biopilot.core.memory.services.block_management import manage_block
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.memory.runtime_context import get_memory_context
-from biopilot.tools.memory.blocks._common import rewrite_block
+from biopilot.core.tool.services.runtime_context import get_memory_context
 
 
 class MemoryTool(Tool):
@@ -28,54 +28,22 @@ class MemoryTool(Tool):
 
     def execute(self, action: str, label: str, value: str | None = None,
                 **kwargs) -> ToolResult:
-        """按 action 分发到块的增改删查；错误一律降级为文本返回（errors-as-data）。
+        """按 action 分发到块的增改删查；错误一律降级为文本返回。
 
         Args:
-            action: str，动作：create | replace | delete | rename
-            label: str，目标块标签
-            value: str | None，块内容（create/replace 用）
-            kwargs: dict，rename 时的新标签 new_label
+            action: create | replace | delete | rename。
+            label: 目标块标签。
+            value: 块内容（create/replace 用）；rename 时可作 new_label 兜底。
+            kwargs: rename 时的新标签 new_label。
 
         Returns:
-            ToolResult；未装配记忆服务/标签冲突/只读/未知动作都降级为文本（errors-as-data）。
+            ToolResult；未装配记忆服务/标签冲突/只读/未知动作都降级为文本。
         """
         ctx = get_memory_context()
         if ctx is None:
             return ToolResult(text="记忆服务未装配，记忆工具不可用")
         try:
-            bm = ctx.block_manager
-            # label 在 blocks 表无 UNIQUE 约束——create/rename 必须先查重，
-            # 否则重复 label 会静默建出「查得到却取不到」的不可达幽灵块。
-            if action == "create":
-                if bm.get_block_by_label(label) is not None:
-                    return ToolResult(text=f"Error: label '{label}' already exists")
-                bm.create_block(label, value or "")
-                return ToolResult(text=f"Created block {label}")
-            if action == "replace":
-                return ToolResult(text=rewrite_block(bm, label, value or ""))
-            if action == "delete":
-                b = bm.get_block_by_label(label)
-                if b is None:
-                    return ToolResult(text=f"Error: no block with label {label}")
-                if b.read_only:
-                    return ToolResult(text="Error: block is read-only")
-                bm.delete_block(b.id)
-                return ToolResult(text=f"Deleted block {label}")
-            if action == "rename":
-                b = bm.get_block_by_label(label)
-                if b is None:
-                    return ToolResult(text=f"Error: no block with label {label}")
-                new_label = kwargs.get("new_label", value or label)
-                if new_label == label:
-                    return ToolResult(text=f"Renamed block {label} -> {new_label}")
-                if bm.get_block_by_label(new_label) is not None:
-                    return ToolResult(text=f"Error: label '{new_label}' already exists")
-                bm.create_block(new_label, b.value, limit=b.limit,
-                                description=b.description, read_only=b.read_only)
-                # rename 是重建（保护元数据迁移到新块），不是删除——走不检查 read_only
-                # 的底层 _delete；直接 delete_block 会因 read_only 拒绝留下半完成的孤儿新块。
-                bm._delete(b.id)
-                return ToolResult(text=f"Renamed block {label} -> {new_label}")
-            return ToolResult(text=f"Error: unknown action {action}")
+            return ToolResult(text=manage_block(ctx.block_manager, action, label,
+                                                value, **kwargs))
         except Exception as e:
             return ToolResult(text=f"Error: {e}")

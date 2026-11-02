@@ -1,11 +1,9 @@
-"""biopilot.tools —— 原子 Tool 公共导入面。
+"""biopilot.tools —— 常用 LLM 工具的公共导入面（file/review/search）。
 
-一工具一文件（每个 Tool 类一个模块），此处再导出全部 12 个 Tool 供消费方
-`from biopilot.tools import ReadFileTool, ...` 统一导入——隐藏子包拆分细节。
-工具按领域分拣到 file/ search/ review/ 子包，agent 协调工具归 orchestration/，
-跨域共享基础设施归 common/。导出符号名即工具名，消费方导入不受子包拆分影响。
-私有共享模块（_venue_rank / common/_http 等）不在此再导出；跨域共享的词汇与常量
-在 common/constants/，需要时直接从那里取。
+这里只再导出最常用的原子工具，方便测试与装配方统一导入；它不是全量清单。
+memory / rag / citations / vision / code / docs / recall / orchestration 等工具
+从各自子包导入。工具名与定义仍在各子模块；跨层共享的常量/工具函数在
+`biopilot.common` 与 `biopilot.core.tool.constants`，不要放回 tools 包根。
 """
 from biopilot.tools.file.glob import GlobTool
 from biopilot.tools.file.grep import GrepTool

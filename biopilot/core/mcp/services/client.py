@@ -13,10 +13,12 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import os
 import shutil
 import threading
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 from biopilot.config import McpServerConfig
 from biopilot.core.mcp.constants import McpConnectionState
@@ -94,7 +96,22 @@ async def _default_session_factory(cfg: McpServerConfig):
         if cfg.transport == "stdio":
             params = StdioServerParameters(command=cfg.command, args=cfg.args,
                                            env=cfg.env or None)
-            read, write = await stack.enter_async_context(stdio_client(params))
+            # MCP 子进程的日志默认会继承主进程 stderr——网页终端里就是用户看到的
+            # 「No CORE API key provided」那一屏噪音。改写到运行日志文件：排障仍可查，
+            # 交互界面只留下可用的欢迎信息。
+            errlog = None
+            try:
+                log_path = Path(os.environ.get(
+                    "BIOPILOT_MCP_STDERR_LOG", ".biopilot/run/mcp-stderr.log"))
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                errlog = open(log_path, "a", encoding="utf-8", buffering=1)
+                # 先登记关闭回调：AsyncExitStack 后进先出，确保 stdio 子进程
+                # 退出时文件还开着。
+                stack.callback(errlog.close)
+            except OSError:
+                errlog = None
+            read, write = await stack.enter_async_context(
+                stdio_client(params, errlog=errlog))
         else:
             read, write, _sid = await stack.enter_async_context(
                 streamablehttp_client(cfg.url, headers=cfg.headers or None))

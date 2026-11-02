@@ -12,8 +12,8 @@ from pathlib import Path
 from biopilot.config import BioPilotConfig
 from biopilot.core.llm import LLMClient
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import ScopeRoot
-from biopilot.tools.file.atomic import atomic_write_bytes
+from biopilot.core.tool.constants import ScopeRoot
+from biopilot.common.storage.atomic import atomic_write_bytes
 from biopilot.core.vision import FigureAnalyzer, FigureExtractor
 
 #: 单次分析图数上限（防超长论文拖死工具；超限截断并如实标注）

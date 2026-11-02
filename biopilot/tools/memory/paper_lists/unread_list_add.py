@@ -1,7 +1,7 @@
 """UnreadListAddTool：把论文加入未读清单。title 必须来自提取链/用户（禁文件名）。"""
+from biopilot.core.memory.services.paper_lists import append_line
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.memory.runtime_context import get_memory_context
-from biopilot.tools.memory.paper_lists._common import append_line
+from biopilot.core.tool.services.runtime_context import get_memory_context
 
 
 class UnreadListAddTool(Tool):
@@ -29,8 +29,8 @@ class UnreadListAddTool(Tool):
         """追加 `- 标题 (来源)` 行到 unread_list 块；title 为空直接拒绝（禁文件名）。
 
         Args:
-            title: str，论文标题（空则拒绝）
-            source: str，来源标注（可选）
+            title: 论文标题（空则拒绝）。
+            source: 来源标注（可选）。
 
         Returns:
             ToolResult，文本为追加结果或错误说明。

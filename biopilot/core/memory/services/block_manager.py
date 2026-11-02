@@ -38,7 +38,7 @@ class BlockManager:
     """核心块业务层：持有 read_only / limit 不变式，维护写前快照历史链。
 
     Attributes:
-        db: MemoryDB，blocks/block_history 表的连接
+        db: MemoryDB，bio_memory_block/bio_memory_block_history 表的连接
     """
 
     def __init__(self, db: MemoryDB, user_id: str):
@@ -85,7 +85,7 @@ class BlockManager:
             label: 块的标签名称。
 
         Returns:
-            该块的历史快照列表（block_history 表行），若块不存在返回空列表。
+            该块的历史快照列表（bio_memory_block_history 表行），若块不存在返回空列表。
         """
         row = block_orm.select_block_by_label(self.db, label, self.user_id)
         if row is None:
@@ -144,7 +144,7 @@ class BlockManager:
         return self._to_schema(row) if row else None
 
     def get_block_history(self, block_id: str) -> list[dict]:
-        """按块 id 返回其全部历史快照（从旧到新，即 block_history 表行）。
+        """按块 id 返回其全部历史快照（从旧到新，即 bio_memory_block_history 表行）。
 
         Args:
             block_id: 块的唯一标识。
@@ -331,7 +331,7 @@ class BlockManager:
         block_orm.delete_block(self.db, block_id, self.user_id)
 
     def checkpoint_block(self, block_id: str) -> None:
-        """手动快照：把当前块状态写进 block_history（version 记为 0，表示非更新前快照）。
+        """手动快照：把当前块状态写进 bio_memory_block_history（version 记为 0，表示非更新前快照）。
 
         Args:
             block_id: 块的唯一标识。
@@ -345,10 +345,10 @@ class BlockManager:
                                    user_id=self.user_id)
 
     def restore_block(self, block_history_id: int) -> Block:
-        """按历史快照回滚块：把快照的值写回 blocks 行，返回回滚后的块。
+        """按历史快照回滚块：把快照的值写回 bio_memory_block 行，返回回滚后的块。
 
         Args:
-            block_history_id: block_history 表的自增主键 ID。
+            block_history_id: bio_memory_block_history 表的自增主键 ID。
 
         Returns:
             回滚后的 Block 对象。
@@ -357,8 +357,8 @@ class BlockManager:
             KeyError: 快照不存在，或其对应块行已被删除。
 
         回滚逻辑：
-            - 从 block_history 读取快照数据（包含 block_id, value）。
-            - 以「当前行版本」为 CAS 期望版本，把快照值写回 blocks 行：写入成功后
+            - 从 bio_memory_block_history 读取快照数据（包含 block_id, value）。
+            - 以「当前行版本」为 CAS 期望版本，把快照值写回 bio_memory_block 行：写入成功后
               版本推进为当前版本 + 1（回滚也照常推进版本，不做版本回退）。快照里的
               version 是历史写入时的标注，不能当 CAS 期望值。
             - 注意：回滚不会生成新的历史记录（不记录“回滚操作”本身），

@@ -7,8 +7,17 @@
 修正后重试。
 """
 from biopilot.core.tool import SUMMARY_TERMINAL, Tool, ToolResult
-from biopilot.tools.common.constants import ScopeRoot
-from biopilot.tools.review._validate import VERDICTS, enum_check
+from biopilot.core.tool.constants import ScopeRoot
+
+#: verdict 合法值（与下载审查共用）
+VERDICTS = ("pass", "fail")
+
+
+def enum_check(value, allowed: tuple, label: str) -> str | None:
+    """枚举成员校验：合法返回 None；否则返回可行动报错文本。"""
+    if value not in allowed:
+        return f"{label} 非法: {value}，应为 {', '.join(allowed)}"
+    return None
 
 #: severity 合法值(blocking 必须修才能通过;major 应修;minor 可忽略)
 SEVERITIES = ("blocking", "major", "minor")

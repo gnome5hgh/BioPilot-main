@@ -10,7 +10,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from biopilot.core.common.constants import MessageRole
+from biopilot.common.core.constants import MessageRole
 
 __all__ = ["Message"]
 

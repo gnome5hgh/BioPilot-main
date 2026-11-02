@@ -244,12 +244,14 @@ class LLMClient:
         return msg
 
     async def chat_stream(self, messages, tools=None, tool_choice="auto",
-                          on_delta=None, telemetry_callback=None) -> AssistantMessage:
+                          on_delta=None, on_reasoning=None,
+                          telemetry_callback=None) -> AssistantMessage:
         """流式版 chat()：stream=True + 边收边回调 on_delta，返回完整回复。
 
         仅 Agent（ReAct）消费；StructuredOutput 等要完整 JSON 的调用方继续用 chat()。
         Args:
             on_delta: 每段 content 片段同步回调（跑在 to_thread 流线程内—— 非主事件循环线程，回调只能做追加/打印，别碰事件循环）
+            on_reasoning: 每段思维链片段同步回调；端点不返回 reasoning_content 时从不触发
             telemetry_callback: 与 chat() 同语义的元数据回调，token 数来自 最后一个带 usage 的 chunk；端点不支持流式 usage 时 tokens 记 None。流式 token 归因依赖 stream_options={"include_usage": True}（OpenAI 兼容 端点默认不返回流式 usage）；老端点不支持该参数时自动降级重试一次
 
         """
@@ -289,7 +291,8 @@ class LLMClient:
                     stream = self.client.chat.completions.create(**kwargs)
                 else:
                     raise
-            content, tool_calls, meta = _accumulate_stream_chunks(stream, on_delta)
+            content, tool_calls, meta = _accumulate_stream_chunks(
+                stream, on_delta, on_reasoning)
             if telemetry_callback is not None:
                 # 流式 usage 仅部分端点提供（多在收尾 chunk 上）；缺失时元数据
                 # 留空，不落 content——与 chat() 一致地只回传元数据
@@ -327,10 +330,11 @@ class LLMClient:
         }
 
 
-def _accumulate_stream_chunks(chunks, on_delta):
+def _accumulate_stream_chunks(chunks, on_delta, on_reasoning=None):
     """把 OpenAI 流式 chunks 累加为 (content, tool_calls, meta)。
 
-    on_delta 每收到一段 content 片段即同步回调（跑在流线程内，须线程安全）。
+    on_delta / on_reasoning 分别收到正文与思维链片段即同步回调（跑在流线程内，
+    须线程安全）。
 
     正文与 tool_calls 从 delta 分片累加；信封（``ResponseMeta``）在同一个循环里收齐：
     finish_reason / usage / model / id / created / system_fingerprint 都取**最后一个带值
@@ -343,6 +347,8 @@ def _accumulate_stream_chunks(chunks, on_delta):
     Args:
         chunks: 可迭代的 OpenAI 流式 chunk 序列
         on_delta: 回调 | None，每收到一段 content 片段即同步调用（跑在流线程内，须线程安全）
+        on_reasoning: 回调 | None，每收到一段 reasoning_content 片段即同步调用；
+            None 表示不向外暴露思维链（仍会累加进 meta）
 
     Returns:
         ``(content, tool_calls, meta)``；content 为空串表示没有文本增量，tool_calls 无则 None。
@@ -389,6 +395,8 @@ def _accumulate_stream_chunks(chunks, on_delta):
         reasoning = getattr(delta, "reasoning_content", None)
         if reasoning:
             reasoning_parts.append(reasoning)
+            if on_reasoning:
+                on_reasoning(reasoning)
         refusal = getattr(delta, "refusal", None)
         if refusal:
             refusal_parts.append(refusal)
@@ -499,7 +507,7 @@ def _message_to_openai(m: Message) -> dict:
     # 出站边界清洗未配对 surrogate（PDF 提取/工具结果可能携带）——否则 openai
     # SDK UTF-8 编码消息时抛 UnicodeEncodeError: surrogates not allowed，
     # 整轮 ReAct 崩溃（见 core/security/text.py）。
-    from biopilot.core.common.services.text import sanitize_surrogates
+    from biopilot.common.core.utils.text import sanitize_surrogates
     content = m.content
     if isinstance(content, list):
         # 视觉 content parts：逐 part 清洗 text 的 surrogate，图片 part 原样透传
@@ -525,7 +533,7 @@ def _sanitize_content_part(part: dict) -> dict:
     Returns:
         清洗后的新 dict（仅 text part 被改写，图片 part 原样透传）。
     """
-    from biopilot.core.common.services.text import sanitize_surrogates
+    from biopilot.common.core.utils.text import sanitize_surrogates
     if part.get("type") == "text" and isinstance(part.get("text"), str):
         part = dict(part)
         part["text"] = sanitize_surrogates(part["text"])

@@ -31,9 +31,11 @@ __all__ = ["MemoryDB"]
 # ============================================================================
 # 数据库 Schema 定义（幂等建表）
 # ============================================================================
+# 表名规范：系统域 sys_<entity>，BioPilot 业务域 bio_<domain>_<entity>。
+# 这里只列引擎侧的表；Java 侧的 sys_* / bio_project 由 server/script/sql 维护。
 _SCHEMA = """
--- blocks 表：核心记忆块存储（业务主表）
-CREATE TABLE IF NOT EXISTS blocks (
+-- bio_memory_block 表：核心记忆块存储（业务主表）
+CREATE TABLE IF NOT EXISTS bio_memory_block (
     id VARCHAR(64) NOT NULL,            -- 块唯一标识
     user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
     label VARCHAR(191) NOT NULL,        -- 业务标签（如 "assistant", "profile"）
@@ -51,8 +53,8 @@ CREATE TABLE IF NOT EXISTS blocks (
     KEY idx_blocks_label (label)
 );
 
--- block_history 表：块历史快照（撤销/重做链）
-CREATE TABLE IF NOT EXISTS block_history (
+-- bio_memory_block_history 表：块历史快照（撤销/重做链）
+CREATE TABLE IF NOT EXISTS bio_memory_block_history (
     id BIGINT NOT NULL AUTO_INCREMENT,  -- 自增主键（排序依据）
     user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
     block_id VARCHAR(64) NOT NULL,      -- 对应的块 ID
@@ -67,17 +69,17 @@ CREATE TABLE IF NOT EXISTS block_history (
     KEY idx_block_history_block (block_id)
 );
 
--- consolidation_cursor 表：整合消费权游标（跨进程认领；行存在即已消费到该位置）
--- 行存在即「该 agent 已消费到 cursor 条」；行不存在时按 messages 行数初次回填。
-CREATE TABLE IF NOT EXISTS consolidation_cursor (
-    agent_id VARCHAR(191) NOT NULL,     -- 归属 agent（主键，与 messages.agent_id 同宽）
+-- bio_memory_consolidation_cursor 表：整合消费权游标（跨进程认领；行存在即已消费到该位置）
+-- 行存在即「该 agent 已消费到 cursor 条」；行不存在时按 bio_message 行数初次回填。
+CREATE TABLE IF NOT EXISTS bio_memory_consolidation_cursor (
+    agent_id VARCHAR(191) NOT NULL,     -- 归属 agent（主键，与 bio_message.agent_id 同宽）
     `cursor` BIGINT NOT NULL,           -- 已消费的消息数游标
     updated_at VARCHAR(40) NOT NULL,    -- 最近推进时间
     PRIMARY KEY (agent_id)
 );
 
--- audit_event 表：安全审计事件（insert-only；核心列供查询，payload 存全量取证）
-CREATE TABLE IF NOT EXISTS audit_event (
+-- bio_security_audit_event 表：安全审计事件（insert-only；核心列供查询，payload 存全量取证）
+CREATE TABLE IF NOT EXISTS bio_security_audit_event (
     id BIGINT NOT NULL AUTO_INCREMENT,
     user_id VARCHAR(191) NULL,
     event_type VARCHAR(40) NOT NULL,
@@ -100,8 +102,8 @@ CREATE TABLE IF NOT EXISTS audit_event (
     KEY idx_audit_session (session_id, created_at),
     KEY idx_audit_user (user_id, created_at)
 );
--- uploaded_file 表：对话附件（数据文件先入 OSS，任务执行时挂进沙箱）
-CREATE TABLE IF NOT EXISTS uploaded_file (
+-- bio_file_upload 表：对话附件（数据文件先入 OSS，任务执行时挂进沙箱）
+CREATE TABLE IF NOT EXISTS bio_file_upload (
     id VARCHAR(64) NOT NULL,
     user_id VARCHAR(191) NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -112,8 +114,8 @@ CREATE TABLE IF NOT EXISTS uploaded_file (
     PRIMARY KEY (id),
     KEY idx_upload_user (user_id)
 );
--- scheduled_task 表：定时任务（webapi 进程内调度器消费；REPL 不跑调度）
-CREATE TABLE IF NOT EXISTS scheduled_task (
+-- bio_schedule_task 表：定时任务（webapi 进程内调度器消费；REPL 不跑调度）
+CREATE TABLE IF NOT EXISTS bio_schedule_task (
     id VARCHAR(64) NOT NULL,
     user_id VARCHAR(191) NOT NULL,
     conversation_id VARCHAR(64) NOT NULL,
@@ -129,14 +131,20 @@ CREATE TABLE IF NOT EXISTS scheduled_task (
     KEY idx_sched_next (next_run_at)
 );
 
--- papers 表：用户论文目录元数据（原文在 MinIO users/<uid>/papers/，行级 user_id 隔离）
-CREATE TABLE IF NOT EXISTS papers (
+-- bio_paper 表：用户论文目录元数据（原文在 MinIO users/<uid>/papers/，行级 user_id 隔离）
+CREATE TABLE IF NOT EXISTS bio_paper (
     id VARCHAR(64) NOT NULL,             -- 论文唯一标识
     user_id VARCHAR(191) NOT NULL,       -- 归属用户
     title VARCHAR(500) NOT NULL,         -- 标题（解析器出口；宁空勿错）
+    file_name VARCHAR(255) NULL,         -- 原始文件名（展示与同名查重用；不参与标题）
     oss_key VARCHAR(500) NOT NULL,       -- MinIO 对象键
     size_bytes BIGINT NOT NULL DEFAULT 0,
-    indexed INTEGER NOT NULL DEFAULT 0,  -- RAG 索引状态（0=未索引）
+    indexed INTEGER NOT NULL DEFAULT 0,  -- 兼容旧字段：1=已进知识库且索引成功
+    kb_enabled TINYINT NOT NULL DEFAULT 0,  -- 用户是否把它加入知识库（0=只躺在文件管理）
+    index_status VARCHAR(20) NOT NULL DEFAULT 'not_added',  -- not_added/queued/indexing/indexed/failed
+    index_error VARCHAR(500) NULL,       -- 最近一次索引失败原因
+    indexed_at VARCHAR(40) NULL,         -- 最近一次索引成功时间
+    chunk_count INT NOT NULL DEFAULT 0,  -- 最近一次索引产出的分块数
     created_at VARCHAR(40) NOT NULL,
     seq BIGINT NOT NULL AUTO_INCREMENT,
     PRIMARY KEY (id),
@@ -144,8 +152,8 @@ CREATE TABLE IF NOT EXISTS papers (
     KEY idx_papers_user (user_id)
 );
 
--- documents 表：文档编辑器产物（markdown 存 OSS，内容在行内 TEXT）
-CREATE TABLE IF NOT EXISTS documents (
+-- bio_document 表：文档编辑器产物（markdown 存 OSS，内容在行内 TEXT）
+CREATE TABLE IF NOT EXISTS bio_document (
     id VARCHAR(64) NOT NULL,
     user_id VARCHAR(191) NOT NULL,
     name VARCHAR(200) NOT NULL,
@@ -158,8 +166,8 @@ CREATE TABLE IF NOT EXISTS documents (
     KEY idx_documents_user (user_id)
 );
 
--- messages 表：对话消息持久化
-CREATE TABLE IF NOT EXISTS messages (
+-- bio_message 表：对话消息持久化
+CREATE TABLE IF NOT EXISTS bio_message (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识
     user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
     agent_id VARCHAR(191) NOT NULL,      -- 所属 agent（具体对话）
@@ -183,18 +191,40 @@ CREATE TABLE IF NOT EXISTS messages (
 
 # 增量列迁移清单：(表, 列名, 列定义)。建表脚本只能建出新库——已有库不会因为
 # _SCHEMA 多写一列就自动获得它，故给已有表**加列**时必须同时在这里登记一行，
-# init_schema 会按它比对 information_schema 并补齐。messages 只增不改，历史行新列为 NULL。
+# init_schema 会按它比对 information_schema 并补齐。bio_message 只增不改，历史行新列为 NULL。
 _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("messages", "meta", "meta MEDIUMTEXT NULL"),
-    ("messages", "session_id", "session_id VARCHAR(191) NULL"),
+    ("bio_message", "meta", "meta MEDIUMTEXT NULL"),
+    ("bio_message", "session_id", "session_id VARCHAR(191) NULL"),
     # user_id：多用户行级隔离。存量行（单用户时代）落 'local'。
-    ("messages", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
-    ("blocks", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
-    ("block_history", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
-    # agent_state 由 AgentManager 自建（不在 _SCHEMA 管辖）；此处登记使存量库在
+    ("bio_message", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    ("bio_memory_block", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    ("bio_memory_block_history", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    # bio_agent_state 由 AgentManager 自建（不在 _SCHEMA 管辖）；此处登记使存量库在
     # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
-    ("agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
-    ("agent_state", "project_id", "project_id VARCHAR(64) NULL"),
+    ("bio_agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
+    ("bio_agent_state", "project_id", "project_id VARCHAR(64) NULL"),
+    # 论文从「上传即索引」改为「用户显式加入知识库」：旧库靠这些列承接状态机。
+    ("bio_paper", "file_name", "file_name VARCHAR(255) NULL"),
+    ("bio_paper", "kb_enabled", "kb_enabled TINYINT NOT NULL DEFAULT 0"),
+    ("bio_paper", "index_status", "index_status VARCHAR(20) NOT NULL DEFAULT 'not_added'"),
+    ("bio_paper", "index_error", "index_error VARCHAR(500) NULL"),
+    ("bio_paper", "indexed_at", "indexed_at VARCHAR(40) NULL"),
+    ("bio_paper", "chunk_count", "chunk_count INT NOT NULL DEFAULT 0"),
+)
+
+#: 旧表名 → 规范表名。init_schema 在建表前自动改名，保证存量库升级不丢数据。
+#: 旧表与新表同时存在时拒绝启动——那意味着有人手工建过表，继续跑会把数据写散。
+_RENAMED_TABLES: tuple[tuple[str, str], ...] = (
+    ("blocks", "bio_memory_block"),
+    ("block_history", "bio_memory_block_history"),
+    ("consolidation_cursor", "bio_memory_consolidation_cursor"),
+    ("audit_event", "bio_security_audit_event"),
+    ("uploaded_file", "bio_file_upload"),
+    ("scheduled_task", "bio_schedule_task"),
+    ("papers", "bio_paper"),
+    ("documents", "bio_document"),
+    ("messages", "bio_message"),
+    ("agent_state", "bio_agent_state"),
 )
 
 #: 连接池上限：覆盖「多线程子 agent 并发写记忆 + 事务钉住」的常规并发量。
@@ -327,13 +357,57 @@ class MemoryDB:
         conn = self._checkout()
         try:
             with conn.cursor() as cur:
+                self._migrate_rename_tables(cur)
                 for stmt in _SCHEMA.split(";"):
                     if stmt.strip():
                         cur.execute(stmt)
                 self.migrate_additive_columns(cur)
+                self._backfill_papers(cur)
             conn.commit()
         finally:
             self._release(conn)
+
+    def _migrate_rename_tables(self, cur) -> None:
+        """把旧表名改成规范名（幂等）。
+
+        只在「旧表存在且新表不存在」时执行 RENAME；两者同时存在说明库被手工
+        改动过，继续启动会把数据写散，因此直接报错要求人工合并。
+
+        Args:
+            cur: 当前游标（init_schema 已开启连接）。
+
+        Raises:
+            RuntimeError: 旧表与新表同时存在。
+        """
+        for old, new in _RENAMED_TABLES:
+            cur.execute(
+                "SELECT TABLE_NAME FROM information_schema.TABLES"
+                " WHERE TABLE_SCHEMA=%s AND TABLE_NAME IN (%s, %s)",
+                (self._kwargs["database"], old, new))
+            existing = {row["TABLE_NAME"] for row in cur.fetchall()}
+            if old in existing and new in existing:
+                raise RuntimeError(
+                    f"旧表 {old} 与新表 {new} 同时存在，请先人工合并数据后再启动")
+            if old in existing:
+                cur.execute(f"RENAME TABLE `{old}` TO `{new}`")
+
+    def _backfill_papers(self, cur) -> None:
+        """把旧库的 papers 行迁到新的知识库状态字段（幂等）。
+
+        旧版本只有 indexed 布尔值：补 file_name 供展示/查重；indexed=1 的行视为
+        用户已加入知识库。用户主动移出后会把 indexed 置 0，因此这个条件不会
+        把已移出的论文重新启用。
+
+        Args:
+            cur: 当前游标（init_schema 已开启连接）。
+        """
+        cur.execute(
+            "UPDATE bio_paper SET file_name=SUBSTRING_INDEX(oss_key, '/', -1)"
+            " WHERE file_name IS NULL OR file_name=''")
+        cur.execute(
+            "UPDATE bio_paper SET kb_enabled=1, index_status='indexed',"
+            " indexed_at=COALESCE(indexed_at, created_at)"
+            " WHERE indexed=1 AND kb_enabled=0 AND index_status='not_added'")
 
     def migrate_additive_columns(self, cur=None) -> None:
         """按 _ADDITIVE_COLUMNS 给已存在的表补列（幂等）。

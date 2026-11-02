@@ -11,7 +11,7 @@
 派发 citation-agent——引用库的读写归它,本角色不装配引用工具,也不信任标注本身。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.tools.common.factory import make_tools
+from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools import (
     ReadFileTool, ReadPdfTool, FormatCheckTool, SubmitReviewTool,
     LookupVenueRankTool, SubmitDownloadReviewTool, GlobTool, GrepTool,

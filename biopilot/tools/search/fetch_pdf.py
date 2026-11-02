@@ -1,21 +1,32 @@
 """FetchPdfTool：从检索结果（含 MCP 工具结果）中的 PDF 链接下载 PDF 到本地资料库（独立下载工具）。
 
 下载职责独立成工具，让搜索工具保持纯只读：写盘副作用集中在本工具，审计日志里
-「写盘」动作归于 fetch_pdf，不藏在名为 search 的工具下。SSRF 校验与搜索客户端
-共用同一套（见 biopilot/tools/common/_http.py），本工具在 _fetch 里做逐跳重定向
-校验 + %PDF magic bytes 校验，绝不把非 PDF 响应体写盘。
+「写盘」动作归于 fetch_pdf，不藏在名为 search 的工具下。SSRF 与下载核心在
+`core/security/services/pdf_fetch.py`（逐跳重定向校验 + %PDF magic bytes），
+本工具只负责参数、查重与落盘，绝不把非 PDF 响应体写盘。
 """
 import httpx
 from httpx import HTTPStatusError as _HttpxStatusError
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 from biopilot.core.security.services.network import validate_url_target
+from biopilot.core.security.services.pdf_fetch import fetch_pdf_bytes
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common.constants import ScopeRoot
+from biopilot.core.tool.constants import ScopeRoot
 from biopilot.citations import get_citation_manager
-from biopilot.tools.file.atomic import atomic_write_bytes
-from biopilot.tools.search._common import _norm_title
+from biopilot.common.storage.atomic import atomic_write_bytes
+from biopilot.common.core.utils.text import normalize_title
+
+
+def _current_user_domain() -> str:
+    """取当前 run 的用户域；未绑定上下文时回退 local（REPL/单机）。"""
+    try:
+        from biopilot.core.tool.services.runtime_context import get_memory_context
+        ctx = get_memory_context()
+        return getattr(ctx, "user_id", None) or "local"
+    except Exception:
+        return "local"
 
 
 class FetchPdfTool(Tool):
@@ -114,23 +125,8 @@ class FetchPdfTool(Tool):
         Returns:
             无返回值（就地写盘）；每跳 SSRF 校验，非 PDF 响应体或不完整重定向抛错。
         """
-        ssrf_check(url)                         # 起始 URL 校验（validate_url_target 要求公网 IP）
-        current = url
-        for _ in range(5):
-            r = client.get(current, follow_redirects=False)
-            if not r.is_redirect:
-                break
-            location = r.headers.get("location", "")
-            if not location:
-                raise RuntimeError(f"重定向缺 Location 头: {current}")
-            current = urljoin(current, location)
-            ssrf_check(current)                 # 每一跳都校验（防先跳合法站再跳私网）
-        else:
-            raise RuntimeError(f"重定向超过 5 跳: {url}")
-        r.raise_for_status()                    # 4xx/5xx
-        if not r.content.startswith(b"%PDF"):
-            raise ValueError(f"响应不是 PDF（缺 %PDF magic bytes）: {url}")
-        atomic_write_bytes(dest, r.content)
+        atomic_write_bytes(dest, fetch_pdf_bytes(
+            url, client=client, ssrf_check=ssrf_check))
 
     def effective_target_path(self, args: dict) -> str | None:
         """导出写互斥键：本次下载的落盘路径。
@@ -188,7 +184,7 @@ class FetchPdfTool(Tool):
                      "这是重复调用——不得重试，请如实报告下载失败并给出替代方案。",
                 is_error=True)
         if _run_state is not None:
-            title_key = f"title:{_norm_title(title)}" if title else None
+            title_key = f"title:{normalize_title(title)}" if title else None
             hit = getattr(_run_state, "downloaded", {}).get(url) or (
                 title_key and getattr(_run_state, "downloaded", {}).get(title_key))
             if hit:
@@ -196,7 +192,8 @@ class FetchPdfTool(Tool):
                     text=f"本任务内已下载过该论文: {hit}，无需重复下载。")
         if title:
             try:
-                resolved = get_citation_manager(self._config).resolve(title)
+                resolved = get_citation_manager(
+                    self._config, user_domain=_current_user_domain()).resolve(title)
                 if resolved.status == "in_corpus":
                     loc = resolved.pdf_path or resolved.key or "语料库"
                     return ToolResult(text=f"语料库已有该论文（{loc}），无需下载。")
@@ -238,7 +235,7 @@ class FetchPdfTool(Tool):
         if _run_state is not None:
             _run_state.downloaded[url] = str(dest)
             if title:
-                _run_state.downloaded[f"title:{_norm_title(title)}"] = str(dest)
+                _run_state.downloaded[f"title:{normalize_title(title)}"] = str(dest)
             # 写盘已成功（_fetch 内完成），登记产物路径 -> 生产者
             _run_state.artifacts[str(dest)] = "fetch_pdf"
         # 索引不在这里做：下载成功后由调用方派发 rag-agent 入库

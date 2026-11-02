@@ -8,5 +8,14 @@ from biopilot.core.tool.constants.constants import (
     SUMMARY_TERMINAL,
     SUMMARY_VIOLATIONS,
 )
+from biopilot.core.tool.constants.scope import (
+    NOTE_HINTS,
+    READ_HINTS,
+    SEARCH_HINTS,
+    ScopeRoot,
+)
 
-__all__ = ["SUMMARY_DECISION", "SUMMARY_TERMINAL", "SUMMARY_VIOLATIONS"]
+__all__ = [
+    "SUMMARY_DECISION", "SUMMARY_TERMINAL", "SUMMARY_VIOLATIONS",
+    "ScopeRoot", "NOTE_HINTS", "SEARCH_HINTS", "READ_HINTS",
+]

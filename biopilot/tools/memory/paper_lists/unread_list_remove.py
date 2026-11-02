@@ -1,7 +1,7 @@
 """UnreadListRemoveTool：把论文移出未读清单（按权威标题精确删行）。"""
+from biopilot.core.memory.services.paper_lists import remove_line_by_key
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.memory.runtime_context import get_memory_context
-from biopilot.tools.memory.paper_lists._common import remove_line_by_key
+from biopilot.core.tool.services.runtime_context import get_memory_context
 
 
 class UnreadListRemoveTool(Tool):
@@ -26,7 +26,7 @@ class UnreadListRemoveTool(Tool):
         """按权威标题删行；块缺失或行不命中时返回显式错误（不物化空块）。
 
         Args:
-            title: str，论文标题（用于前缀匹配删行）
+            title: 论文标题（用于前缀匹配删行）。
 
         Returns:
             ToolResult，文本为删除结果或错误说明（不物化空块）。
@@ -35,6 +35,7 @@ class UnreadListRemoveTool(Tool):
         if ctx is None:
             return ToolResult(text="记忆服务未装配，记忆工具不可用")
         try:
-            return ToolResult(text=remove_line_by_key(ctx.block_manager, "unread_list", title))
+            return ToolResult(text=remove_line_by_key(ctx.block_manager,
+                                                       "unread_list", title))
         except Exception as e:
             return ToolResult(text=f"Error: {e}")

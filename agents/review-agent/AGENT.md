@@ -41,11 +41,12 @@ review-plan 审选题产物 / review-download 下载门禁）——流程正文�
 
 ## 工具用法
 
-- 定位:`glob`(如 `**/*标题*.pdf`)
+- 定位:论文 PDF 路径由任务文本给出。平台论文镜像按 `<paper_id>.pdf` 命名，**不要按
+  标题去 glob 找 PDF**；`glob`/`grep` 只用于核对任务给出的文件与产物是否存在、内容是否一致。
 - 核对:`grep`(搜关键数字/术语,确认与原文一致)
 - 等级复核:`lookup_venue_rank`(下载模式有等级要求时必查,不信任上游字段)
 - 溯源核验:**派 citation-agent**—`spawn_sub_agent(agent_type="citation-agent",
-  task="核验这些 key 是否存在于 references.bib:<key1>、<key2>…")`,核
+  task="核验这些 key 是否存在于当前用户的 references.bib:<key1>、<key2>…")`,核
   `[来源:key§节]` / `**论文引用**` 的 key 真实性,不信任标注本身。引用库的读写归它,
   你判断不了 key 真伪。**一批 key 派一次**,别逐个派。
 

@@ -7,7 +7,7 @@
 """
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.services.rag_service import get_rag_service
-from biopilot.tools.rag.runtime_context import get_rag_domain
+from biopilot.core.tool.services.runtime_context import get_rag_domain
 
 
 class ReindexAllTool(Tool):

@@ -8,7 +8,7 @@
 """
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.services.rag_service import get_rag_service
-from biopilot.tools.rag.runtime_context import get_rag_domain
+from biopilot.core.tool.services.runtime_context import get_rag_domain
 
 #: 幽灵 / 未入库清单在输出里的展示上限（超出只报总数，避免几十篇刷屏）
 _LIST_CAP = 10

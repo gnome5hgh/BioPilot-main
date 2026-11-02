@@ -8,13 +8,13 @@ review-agent 下载审查模式专属。查询链:本地映射 → LetPub(ISSN) 
 """
 import re
 import urllib.parse
+from collections import OrderedDict
 
 import httpx
 
 from biopilot.core.security.services.network import validate_url_target
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.tools.common._http import _HttpClientMixin
-from biopilot.tools.review._venue_rank import lookup_local, normalize_venue, RANK_CACHE, RANK_CACHE_MAX
+from biopilot.core.security.services.http_client import _HttpClientMixin
 
 
 class _VenueClient(_HttpClientMixin):
@@ -219,7 +219,7 @@ class LookupVenueRankTool(Tool):
         local = lookup_local(venue)
         if local:
             self._cache_put(ckey, local)
-            return ToolResult(text=self._rank_text(local, "本地映射表", "biopilot/tools/review/_venue_rank.py"))
+            return ToolResult(text=self._rank_text(local, "本地映射表", "lookup_venue_rank.py"))
         # ③ LetPub 在线（优先按 ISSN 精确查，避开同名期刊歧义）
         client = self._client or self._make_client()
         try:
@@ -256,13 +256,114 @@ class LookupVenueRankTool(Tool):
 def _venue_passes(rank: dict) -> bool:
     """按「期刊 JCR Q1/Q2、中科院一/二区、会议 CCF-A/B」判定是否通过。
 
-    本地再导一次 passes_q2,避免与 _venue_rank 模块循环 import。
-
     Args:
         rank: dict，等级 dict
 
     Returns:
-        True 表示达到「≥Q2」（本地再导 passes_q2 以避免循环 import）。
+        True 表示达到「≥Q2」。
     """
-    from biopilot.tools.review._venue_rank import passes_q2
     return passes_q2(rank)
+
+
+# ---------- 本地等级表与判定 ----------
+
+VENUE_RANKS: dict[str, dict] = {
+    # 会议（CCF 推荐目录 A/B/C）
+    "www": {"ccf": "A", "jcr": None, "cas": None},          # WWW / The Web Conference
+    "kdd": {"ccf": "A", "jcr": None, "cas": None},
+    "neurips": {"ccf": "A", "jcr": None, "cas": None},
+    "icml": {"ccf": "A", "jcr": None, "cas": None},
+    "iclr": {"ccf": "A", "jcr": None, "cas": None},
+    "acl": {"ccf": "A", "jcr": None, "cas": None},
+    "cvpr": {"ccf": "A", "jcr": None, "cas": None},
+    "iccv": {"ccf": "A", "jcr": None, "cas": None},
+    "nips": {"ccf": "A", "jcr": None, "cas": None},          # NeurIPS 旧名
+    "aaai": {"ccf": "B", "jcr": None, "cas": None},
+    "ijcai": {"ccf": "B", "jcr": None, "cas": None},
+    "sigir": {"ccf": "B", "jcr": None, "cas": None},
+    "emnlp": {"ccf": "B", "jcr": None, "cas": None},
+    "naacl": {"ccf": "B", "jcr": None, "cas": None},
+    "icde": {"ccf": "A", "jcr": None, "cas": None},
+    "sigmod": {"ccf": "A", "jcr": None, "cas": None},
+    "vldb": {"ccf": "A", "jcr": None, "cas": None},
+    # 期刊（JCR / 中科院）
+    "ieeetransactionsonpatternanalysisandmachineintelligence": {"ccf": None, "jcr": "Q1", "cas": "一区"},
+    "ieeetransactionsonknowledgeanddataengineering": {"ccf": None, "jcr": "Q1", "cas": "一区"},
+    "acmtransactionsoninformationsystems": {"ccf": None, "jcr": "Q1", "cas": "二区"},
+    "ieeetransactionsonneuralnetworksandlearningsystems": {"ccf": None, "jcr": "Q1", "cas": "一区"},
+}
+
+#: 等级查询 LRU（venue 规范化名 + issn → rank），跨会话共享。
+#: LRU 逐出逻辑在 lookup_venue_rank 的写缓存路径（超 RANK_CACHE_MAX 时 popitem(last=False)）。
+RANK_CACHE: OrderedDict[tuple, dict] = OrderedDict()
+RANK_CACHE_MAX = 200
+
+#: 规范化时剥离的会议噪音前后缀(小写后匹配)。
+#: 注意:不剥期刊前缀("ieeetransactionson"/"acmtransactionson")——期刊映射键是
+#: "前缀+刊名"的完整小写串(如 ieeetransactionsonknowledgeanddataengineering),剥了
+#: 反而失配。长前缀在前:先剥完整前缀,避免先剥 "proceedingsofthe" 留下 "acm…" 再失配。
+_NOISE_WORDS = (
+    "proceedingsoftheacm",
+    "proceedingsofthe",
+    "theacm",
+    "internationalconferenceon",
+    "conferenceon",
+    "annualmeetingof",
+    "the",
+)
+
+#: 规范化名 → VENUE_RANKS 主键 别名表：常见缩写/官方改名指向主键。
+#: 主键命名规则是"小写全名去空格"，缩写（TPAMI）与改名（Web Conference←WWW）
+#: 无法从全名直接推出，需显式别名。
+_ALIASES = {
+    "webconference": "www",   # "The Web Conference"（原 WWW 会议）官方改名
+    "tpami": "ieeetransactionsonpatternanalysisandmachineintelligence",
+}
+
+
+def normalize_venue(name: str) -> str:
+    """规范化：小写、去非字母数字，剥会议噪音前缀，再查别名表。返回空串则无法匹配。
+
+    Args:
+        name: str，venue 原文（期刊/会议名）
+
+    Returns:
+        规范化键（小写去非字母数字 + 剥噪音前缀 + 查别名）；无法匹配时为空串。
+    """
+    s = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    for w in _NOISE_WORDS:
+        if s.startswith(w):
+            s = s[len(w):]
+    return _ALIASES.get(s, s)
+
+
+def lookup_local(venue: str) -> dict | None:
+    """本地映射表查询；未命中返回 None。
+
+    Args:
+        venue: str，venue 名
+
+    Returns:
+        本地映射表中的等级 dict（含 ccf/jcr/cas）；未命中返回 None。
+    """
+    if not venue:
+        return None
+    return VENUE_RANKS.get(normalize_venue(venue))
+
+
+def passes_q2(rank: dict) -> bool:
+    """等级是否达到「≥Q2」:期刊 JCR Q1/Q2 或中科院一/二区,或会议 CCF-A/B。其余不通过。
+
+    Args:
+        rank: dict，等级 dict（ccf/jcr/cas）
+
+    Returns:
+        True 表示达到「≥Q2」（JCR Q1/Q2、中科院一/二区，或 CCF-A/B）。
+    """
+    if rank.get("jcr") in ("Q1", "Q2"):
+        return True
+    if rank.get("cas") in ("一区", "二区"):
+        return True
+    if rank.get("ccf") in ("A", "B"):
+        return True
+    return False
