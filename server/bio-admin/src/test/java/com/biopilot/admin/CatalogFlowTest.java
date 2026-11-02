@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.biopilot.common.oss.core.MinioTemplate;
 import com.biopilot.common.web.http.AgentInternalClient;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -34,7 +35,7 @@ import org.springframework.util.MultiValueMap;
 /** 论文/数据文件/文档三个文件能力的 HTTP 契约与用户隔离（OSS 与引擎调用打桩）。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/biopilot_test"
+                "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/biopilot_test"
                         + "?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai",
         })
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -218,5 +219,59 @@ class CatalogFlowTest {
                 HttpMethod.DELETE, new HttpEntity<>(authHeaders(other)), Map.class);
         assertThat(foreignDelete.getStatusCode().value()).isEqualTo(404);
         assertThat(list(owner, "/agent/papers", "papers")).hasSize(1);
+    }
+
+    @Test
+    @Order(5)
+    void kb_overview_counts_come_from_platform_table() {
+        String token = tokenFor("catalog-kb");
+        long uid = jdbc.queryForObject(
+                "SELECT user_id FROM sys_user WHERE user_name=?", Long.class, "catalog-kb");
+
+        Map<String, Object> runtime = new LinkedHashMap<>();
+        runtime.put("collection", "biopilot_" + uid);
+        runtime.put("embedding_model", "embed");
+        runtime.put("running", true);
+        runtime.put("last_run", Map.of("indexed", 1));
+        when(internal.kbRuntime(anyLong())).thenReturn(runtime);
+
+        insertKbPaper("k1", uid, 1, "indexed", "2026-01-02T00:00:00Z", 12);
+        insertKbPaper("k2", uid, 1, "queued", null, 0);
+        insertKbPaper("k3", uid, 1, "failed", null, 0);
+        insertKbPaper("k4", uid, 0, "indexed", "2026-01-03T00:00:00Z", 9);
+
+        ResponseEntity<Map> response = rest.exchange("/agent/kb/status", HttpMethod.GET,
+                new HttpEntity<>(authHeaders(token)), Map.class);
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        Map body = response.getBody();
+        assertThat(body.get("total_papers")).isEqualTo(4);
+        assertThat(body.get("kb_enabled")).isEqualTo(3);
+        assertThat(body.get("indexed")).isEqualTo(1);
+        assertThat(body.get("queued")).isEqualTo(1);
+        assertThat(body.get("failed")).isEqualTo(1);
+        assertThat(body.get("not_added")).isEqualTo(1);
+        // 未勾选行即使残留 chunk_count/indexed 也不计入统计
+        assertThat(body.get("chunks")).isEqualTo(12);
+        assertThat(body.get("last_indexed_at")).isEqualTo("2026-01-02T00:00:00Z");
+        assertThat(body.get("collection")).isEqualTo("biopilot_" + uid);
+        assertThat(body.get("embedding_model")).isEqualTo("embed");
+        assertThat(body.get("running")).isEqualTo(true);
+
+        String other = tokenFor("catalog-kb-other");
+        ResponseEntity<Map> isolated = rest.exchange("/agent/kb/status", HttpMethod.GET,
+                new HttpEntity<>(authHeaders(other)), Map.class);
+        assertThat(isolated.getBody().get("total_papers")).isEqualTo(0);
+        assertThat(isolated.getBody().get("kb_enabled")).isEqualTo(0);
+    }
+
+    private void insertKbPaper(String id, long userId, int kb, String status,
+                               String indexedAt, int chunks) {
+        jdbc.update("INSERT INTO bio_paper (id, user_id, title, file_name, oss_key,"
+                        + " size_bytes, indexed, kb_enabled, index_status, indexed_at,"
+                        + " chunk_count, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                id, String.valueOf(userId), "t", id + ".pdf",
+                "users/" + userId + "/papers/" + id + "/a.pdf", 10,
+                "indexed".equals(status) ? 1 : 0, kb, status, indexedAt, chunks,
+                "2026-01-01T00:00:00Z");
     }
 }

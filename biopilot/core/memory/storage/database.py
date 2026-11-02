@@ -222,7 +222,7 @@ class MemoryDB:
             raise ValueError(
                 "未指定记忆库 DSN：装配层应传 config.runtime.memory_dsn，"
                 "或设置环境变量 BIOPILOT_MEMORY_MYSQL_DSN"
-                "（形如 mysql://root@127.0.0.1:3306/biopilot）")
+                "（形如 mysql://root@127.0.0.1:3307/biopilot）")
         self._kwargs = _parse_dsn(self.dsn)
         self._pool: queue.LifoQueue = queue.LifoQueue()
         self._pool_size = pool_size

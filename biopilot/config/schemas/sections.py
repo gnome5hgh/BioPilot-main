@@ -141,7 +141,8 @@ class RuntimeConfig:
     workspace: str = ".biopilot"
     #: 记忆/会话真相源的 MySQL 连接串（Python 侧 bio_memory_block/bio_memory_block_history/bio_message；
     #: 测试经 BIOPILOT_MEMORY_MYSQL_DSN 覆盖到 biopilot_test 库）
-    memory_dsn: str = "mysql://root@127.0.0.1:3306/biopilot"
+    #: 容器实例发布在宿主 3307（3306 常被本机自装 MySQL 占用）
+    memory_dsn: str = "mysql://root@127.0.0.1:3307/biopilot"
     #: 多模型条目（名称/端点/key/费率展示值）；会话内切换下一次 run 生效。
     #: 空列表表示未配置多模型——模型选择器退化为只展示当前主模型。
     models: list[dict] = field(default_factory=list)

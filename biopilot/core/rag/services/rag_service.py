@@ -388,6 +388,18 @@ class RAGService:
             return [chunk for chunk, _mtime in store.all_documents()
                     if chunk.path == str(path)]
 
+    def document_chunk_counts(self) -> dict[str, int]:
+        """按文档路径统计向量库块数（持锁，只读）。
+
+        MySQL 的 `bio_paper` 是知识库成员与索引状态的唯一真相；这里返回向量库
+        实际持有的块数，供对账发现「库里多/少/缺」并触发重建或清理。
+
+        Returns:
+            dict[str, int]: 文档绝对路径 → 块数。
+        """
+        with self.lock:
+            return self._ensure_vector_store().document_chunk_counts()
+
     def remove_document(self, path: str) -> bool:
         """把一篇文档从索引里整体移除（持锁）。
 

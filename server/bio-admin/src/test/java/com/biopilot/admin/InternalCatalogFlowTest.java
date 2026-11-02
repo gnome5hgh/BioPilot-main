@@ -27,7 +27,7 @@ import org.springframework.util.MultiValueMap;
 /** 平台内部端点：索引状态机、附件取回、分析产物登记。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/biopilot_test"
+                "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/biopilot_test"
                         + "?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai",
         })
 class InternalCatalogFlowTest {
@@ -111,6 +111,22 @@ class InternalCatalogFlowTest {
         assertThat(jdbc.queryForObject(
                 "SELECT index_status FROM bio_paper WHERE id='p3'", String.class))
                 .isEqualTo("queued");
+    }
+
+    @Test
+    void requeue_all_only_touches_enabled_rows() {
+        paper("p1", "42", 1, "indexed", 1, 12);
+        paper("p2", "42", 0, "not_added", 0, 0);
+
+        Map<String, Object> out = post("/internal/kb/requeue-all", "42", Map.of());
+
+        assertThat(out.get("queued")).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT index_status FROM bio_paper WHERE id='p1'", String.class))
+                .isEqualTo("queued");
+        assertThat(jdbc.queryForObject(
+                "SELECT index_status FROM bio_paper WHERE id='p2'", String.class))
+                .isEqualTo("not_added");
     }
 
     @Test

@@ -54,7 +54,7 @@ BioPilot-main/
 ## 技术结构
 
 - 语言与运行时：Python ≥ 3.11（引擎与适配层，依赖在 `pyproject.toml`）；Java 21 + SpringBoot 3.5（`server/`，MyBatis-Plus + Sa-Token）；Vue3 + Vite（`web/`）。
-- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图与论文原文的对象存储，回环 9000）+ MySQL 8.4（记忆/会话/业务真相源，回环 3306），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
+- 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图与论文原文的对象存储，回环 9000）+ MySQL 8.4（记忆/会话/业务真相源，回环 3307），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
 - 外部模型端点：对话 LLM、视觉模型、RAG 嵌入与精排都是 OpenAI 兼容的 HTTP 接口，端点、模型名与 key 经配置提供，不硬编码。
 - 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。SpringBoot 侧配置在 `server/bio-admin/src/main/resources/application.yaml`。
 
@@ -83,12 +83,12 @@ BioPilot-main/
 
 三层平台的分工不是「按语言分」，而是「按职责分」。新增代码前先回答：它属于平台业务，还是 agent 运行时？
 
-- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、管理端查询（用户/会话/审计读取）。
-- **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、技能、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索与状态读取（状态写入归 Java）、引擎配置（`config.yaml`）。
+- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_paper` 统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、管理端查询（用户/会话/审计读取）。
+- **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、技能、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、引擎配置（`config.yaml`）。
 - **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_paper` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
 - **单写者规则（按表/列）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
-  - `bio_paper`：Java 独占（身份/文件列、`kb_enabled`、书目字段、`citation_id`，以及 `indexed/index_status/index_error/indexed_at/chunk_count` 索引状态列）；Python 只读身份与勾选列，状态经 `/internal/kb/indexing` 与 `/result` 由 Java 落盘。
+  - `bio_paper`：Java 独占（身份/文件列、`kb_enabled`、书目字段、`citation_id`，以及 `indexed/index_status/index_error/indexed_at/chunk_count` 索引状态列）；Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位，状态落盘一律由 Java 完成。
   - `bio_citation`：Java 独占（引用库行）；Python 不读写。
   - `bio_file_upload`：Java 写（用户上传与 agent 分析产物都经 Java 登记）。
   - `bio_schedule_task`：Java 独占（任务定义与 `last_run_at` / `next_run_at` 进度列都由 Java 写）；Python 只接收 `/internal/schedule/run` 触发后执行 agent。
@@ -111,6 +111,7 @@ BioPilot-main/
 - **写工具必须声明安全元数据**（`risk_level` / `side_effects` / `provenance` 等），注册表加载时校验合法值。
 - **路径检查与写盘共用同一份解析结果**：检查通过的路径参数就地归一化为解析后的绝对路径（防 TOCTOU）。
 - **SQL 是唯一真相源**：压缩与窗口驱逐**永不删 SQL 行**；读—改—写类块写入必须经一次持锁事务，不能「读旧值→算新值→写回」分三步做。
+- **知识库一致性以 `bio_paper` 为唯一真相**：引擎启动与每轮索引都对账向量库——不属于任何「已加入」论文的块直接清理，已就绪论文的向量块数与 `chunk_count` 不一致则重建；`failed` 不自动重试（用户重试由 Java 先置 `queued`），避免对账反复消耗解析与嵌入资源。
 - **压缩只改窗口，旧摘要并入重摘**：每次压缩把上一份摘要作为底稿送回摘要模型（Claude Code 式，集成指令约束漂移），窗口恒只有一份最新摘要、多次压缩不累积；摘要不携带用户原话（业界无代码插全量原话的先例，实测还会挤爆摘要预算）——硬约束、截止时间等边界由任务快照逐字保留（快照从不参与重摘），原话不作回溯；摘要失败时保持原窗口，不拿空摘要替换历史。
 - **摘要不携带用户原话与工具引用**：压缩摘要有损、用户原话不进摘要且不作回溯；跨会话知识只走记忆块（`bio_memory_block`）。工具结果外置后的指针只在窗口内可回取。
 - **领域产物的读写各自归口**：记忆写入归 `memory-agent`、语料索引归 `rag-agent`；这两类工具**其余 agent 一件不装**。引用库是平台功能（Java `bio-citation`），agent 既不读写也不做溯源标注。只读召回（工具结果回取）是例外：它不产生领域产物，装配给所有 agent；supervisor 因此持有 spawn + 只读召回，仍不持有执行类工具。

@@ -57,6 +57,17 @@ public class InternalKbStateController {
     }
 
     /**
+     * 强制重建前的状态复位：把所有已加入知识库的论文重排为 `queued`。
+     *
+     * @param userId 归属用户。
+     * @return {@code {queued: 影响行数}}
+     */
+    @PostMapping("/requeue-all")
+    public Map<String, Object> requeueAll(@RequestHeader("X-User-Id") String userId) {
+        return Map.of("queued", states.requeueAll(userId));
+    }
+
+    /**
      * 批量写入索引结果。
      *
      * @param userId 归属用户。

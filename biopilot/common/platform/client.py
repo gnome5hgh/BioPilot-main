@@ -167,6 +167,21 @@ class PlatformClient:
             "POST", "/internal/kb/normalize", user_id=user_id,
             json={"requeue_indexing": bool(requeue_indexing)}).json()
 
+    def kb_requeue_all(self, user_id: str) -> int:
+        """让 Java 把所有已加入知识库的论文重排为 ``queued``（强制重建）。
+
+        状态列只有 Java 能写；引擎的「全部重新索引」只负责触发，不再直接 UPDATE。
+
+        Args:
+            user_id: 归属用户。
+
+        Returns:
+            int: 实际重排的行数。
+        """
+        data = self._request(
+            "POST", "/internal/kb/requeue-all", user_id=user_id, json={}).json()
+        return int(data.get("queued") or 0)
+
     def kb_indexing(self, user_id: str, paper_ids: list[str]) -> list[str]:
         """把本批论文置为索引中，返回真正被接受的 id。
 

@@ -69,6 +69,22 @@ public class KbStateService {
     }
 
     /**
+     * 把该用户所有已加入知识库的论文重排为 `queued`（强制重建）。
+     *
+     * <p>只会重排 `kb_enabled=1` 的行；已移出的论文不参与。索引列仍由本服务
+     * 在后续 `/indexing` 与 `/result` 中更新，调用方只负责触发。</p>
+     *
+     * @param userId 归属用户。
+     * @return 实际重排的行数。
+     */
+    public int requeueAll(String userId) {
+        return jdbc.update(
+                "UPDATE bio_paper SET index_status='queued', index_error=NULL"
+                        + " WHERE user_id=? AND kb_enabled=1",
+                userId);
+    }
+
+    /**
      * 把仍在知识库的论文置为「索引中」，返回真正被接受的 id。
      *
      * @param userId   归属用户。

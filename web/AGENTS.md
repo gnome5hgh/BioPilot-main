@@ -11,7 +11,7 @@ Vue3 + Vite 前端：BioPilot 平台的呈现层。
 ## 模块定位
 
 - 名称：`biopilot-web`
-- 角色：登录/对话（SSE + 思考过程 + 确认弹框）/文件管理/文献搜索/知识库/引用库/技能/定时任务/设置/管理页的 SPA，以及全局常驻的终端面板（宿主 shell，可选开启）。
+- 角色：登录/对话（SSE + 思考过程 + 确认弹框）/文件管理/文献搜索/知识库/引用库/定时任务/设置/管理页的 SPA，以及全局常驻的终端面板（宿主 shell，可选开启）。
 - 数据通道：全部经 `/api` 前缀 → Vite 代理到 SpringBoot 8080（`vite.config.js` 的 `rewrite` 会剥掉 `/api`）；**没有直连 Python 适配层（8300）的调用**——它是纯内网层。
 - 接口路径归属：平台 CRUD（项目/文件/论文/文档/定时任务/文献搜索/引用库/检索源管理）由 Java 原生控制器处理；agent 运行时（对话流/确认/知识库检索/终端）由 Java 代理到 Python。前端只认 `/api/...` 路径，不按「谁实现」区分，也不得为了绕过代理而改直连。
 
@@ -25,7 +25,7 @@ web/src/
 ├─ stores/terminal.js  # 终端面板开关（全局一块面板、一条会话）
 ├─ components/         # AppSidebar / MarkdownView / FilePreviewModal / TerminalPanel / ToastHost / ConfirmDialog
 ├─ utils/              # time（本地时间）/ toast / confirm / errors / files（原文读取、预览分类、下载）
-└─ views/              # Chat / Store / Papers / Literature / KB / Citations / Settings / Admin / Login / MainLayout
+└─ views/              # Chat / Papers / Literature / KB / Citations / Settings / Admin / Login / MainLayout
 ```
 
 ## 硬规则

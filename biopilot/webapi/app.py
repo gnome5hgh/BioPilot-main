@@ -454,12 +454,16 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         """应用启动时拉起对账循环与终端回收；随应用关停由事件循环统一回收。
 
         启动时先补跑一次知识库对账：上一进程崩溃留下的 indexing/queued 行、
-        跨栈写入留下的半截状态，都会在这里被拉回一致。
+        跨栈写入留下的半截状态，都会在这里被拉回一致。所有知识库用户都要审计一次
+        ——崩溃可能留下「只剩向量、没有镜像/行」的孤儿，只靠数据库与镜像判据发现不了；
+        索引任务幂等，已一致时只做只读对账，不会重复嵌入。
         """
         app.state.shell_reaper = asyncio.create_task(shell_manager.reaper())
         app.state.kb_reconciler = asyncio.create_task(_kb_reconcile_loop())
         try:
-            for user_id in await asyncio.to_thread(_users_needing_reconcile):
+            users = set(await asyncio.to_thread(_users_needing_reconcile))
+            users |= set(await asyncio.to_thread(_users_with_kb))
+            for user_id in sorted(users):
                 _schedule_user_index(user_id)
         except Exception:
             logger.warning("启动时知识库状态恢复失败", exc_info=True)
@@ -961,6 +965,36 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         _schedule_user_index(uid)
         return {"status": "ok"}
 
+    @app.get("/internal/kb/runtime")
+    async def internal_kb_runtime(
+        x_user_id: str | None = Header(default=None),
+        x_internal_token: str | None = Header(default=None),
+    ) -> dict:
+        """知识库运行时信息，供 Java 概览合并（纯内存/配置读取，不碰 RAG 锁）。
+
+        计数与论文清单归 Java 查 `bio_paper`；这里只补 Java 拿不到的引擎侧状态：
+        用户域 collection 名、嵌入模型、索引任务是否在跑、最近一轮结果。
+
+        Args:
+            x_user_id: 归属用户（即 RAG 用户域）。
+            x_internal_token: 内部调用共享 token。
+
+        Returns:
+            dict: ``{collection, embedding_model, running, last_run}``。
+        """
+        from biopilot.config import BioPilotConfig
+
+        uid = _internal_user(x_user_id, x_internal_token)
+        cfg = BioPilotConfig.from_env()
+        collection = cfg.rag.storage.collection + (
+            "" if uid == "local" else f"_{uid}")
+        return {
+            "collection": collection,
+            "embedding_model": cfg.rag.embedding.embed_model,
+            "running": uid in reindex_running,
+            "last_run": kb_last_run.get(uid),
+        }
+
     @app.post("/internal/schedule/run")
     async def internal_schedule_run(
         body: dict,
@@ -1120,8 +1154,8 @@ def _index_user_kb_sync(user_id: str) -> dict:
         user_id: 归属用户（即 RAG 用户域）。
 
     Returns:
-        dict: indexed/failed/removed 计数与 finished_at；skipped=True 表示锁被
-        另一个进程持有，本轮没有做任何事。
+        dict: indexed/failed/removed/orphans/drifted 计数与 finished_at；
+        skipped=True 表示锁被另一个进程持有，本轮没有做任何事。
     """
     from datetime import datetime, timezone
     from biopilot.config import BioPilotConfig
@@ -1140,7 +1174,8 @@ def _index_user_kb_sync(user_id: str) -> dict:
         lock_usable = False
         logger.warning("知识库索引锁不可用，本轮无锁执行（%s）", user_id, exc_info=True)
     if lock_usable and not acquired:
-        return {"indexed": 0, "failed": 0, "removed": 0, "skipped": True,
+        return {"indexed": 0, "failed": 0, "removed": 0, "orphans": 0,
+                "drifted": 0, "skipped": True,
                 "finished_at": datetime.now(timezone.utc).isoformat()}
     try:
         return _index_user_kb_locked(user_id, cfg)
@@ -1150,18 +1185,24 @@ def _index_user_kb_sync(user_id: str) -> dict:
 
 
 def _index_user_kb_locked(user_id: str, cfg) -> dict:
-    """持有该用户索引锁后执行一轮完整索引（收敛 → 逐篇索引 → 清理）。
+    """持有该用户索引锁后执行一轮完整索引（对账 → 逐篇索引 → 清理）。
 
     状态写者只有 Java：本函数通过 ``/internal/kb/normalize``、``/indexing``、
-    ``/result`` 驱动状态迁移；Java 返回的 ``applied`` 决定是否撤回刚建好的
-    向量与镜像。
+    ``/requeue-all``、``/result`` 驱动状态迁移；Java 返回的 ``applied`` 决定是否
+    撤回刚建好的向量与镜像。
+
+    一致性对账以 MySQL 的 ``bio_paper`` 为唯一真相：
+      - 向量库里有、但对应论文不在知识库的块 → 删除（覆盖「镜像已丢、只剩向量」）；
+      - 已就绪论文的向量块数与 ``chunk_count`` 不一致（缺失/偏多/偏少）→ 强制重建；
+      - ``failed`` 不参与自动重试（用户点重试时 Java 先置 ``queued``），避免对账反复
+        消耗解析与嵌入资源。
 
     Args:
         user_id: 归属用户。
         cfg: BioPilotConfig，配置快照。
 
     Returns:
-        dict: indexed/failed/removed 计数与 finished_at。
+        dict: indexed/failed/removed/orphans/drifted 计数与 finished_at。
     """
     from datetime import datetime, timezone
     from biopilot.core.rag.constants import IndexOutcomeStatus
@@ -1172,8 +1213,55 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
     platform = _platform_client()
     mirror = pathlib.Path(svc.config.corpus.pdf_dir)
     mirror.mkdir(parents=True, exist_ok=True)
+    mirror_root = mirror.resolve()
 
-    indexed = failed = removed = 0
+    # ---- 向量库 ↔ 平台表对账（MySQL 是唯一真相） ----
+    # 只在能读到向量库时做：读失败不等于库是空的，不能把所有「已就绪」论文误判成漂移。
+    indexed = failed = removed = orphans = 0
+    drift: set[str] = set()
+    try:
+        vector_counts: dict[str, int] | None = svc.document_chunk_counts()
+    except Exception:
+        vector_counts = None
+        logger.warning("向量库对账读取失败，本轮跳过漂移检测（%s）", user_id,
+                       exc_info=True)
+    if vector_counts is not None:
+        rows = db.execute(
+            "SELECT id, kb_enabled, index_status, chunk_count FROM bio_paper"
+            " WHERE user_id=?", (user_id,)).fetchall()
+        enabled_ids = {row["id"] for row in rows if row["kb_enabled"]}
+        # 1) 向量库里不属于任何「已加入」论文的块：删掉。镜像文件由后面的清理统一删，
+        #    这里覆盖「镜像已经不在、只剩向量」的孤儿——只靠文件扫描发现不了。
+        for path in list(vector_counts):
+            try:
+                resolved = pathlib.Path(path).resolve()
+                resolved.relative_to(mirror_root)
+            except (OSError, ValueError):
+                # 不是本用户镜像目录下的路径：不认识的域，宁可不删
+                continue
+            if resolved.stem in enabled_ids:
+                continue
+            try:
+                if svc.remove_document(path):
+                    orphans += 1
+                    logger.warning("清理孤儿向量：%s（%s）", path, user_id)
+                vector_counts.pop(path, None)
+            except Exception:
+                logger.warning("清理孤儿向量失败（%s）", path, exc_info=True)
+        # 2) 已就绪论文的向量块数必须与平台 chunk_count 一致；缺失、偏多、偏少都重建
+        for row in rows:
+            if not row["kb_enabled"] or row["index_status"] != "indexed":
+                continue
+            paper_id = str(row["id"])
+            expected = int(row.get("chunk_count") or 0)
+            actual = vector_counts.get(
+                str((mirror / f"{paper_id}.pdf").resolve()), 0)
+            if actual == 0 or actual != expected:
+                drift.add(paper_id)
+                logger.warning(
+                    "论文索引与平台状态不一致，将重建：%s（数据库 %d 块，向量库 %d 块）",
+                    paper_id, expected, actual)
+
     seen: set[str] = set()
     for _pass in range(_KB_INDEX_PASSES):
         # 每遍先让 Java 收敛：半截状态与崩溃遗留的 indexing 都拉回可执行状态。
@@ -1193,7 +1281,11 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
             if paper_id in seen:
                 continue
             target = mirror / f"{paper_id}.pdf"
-            if row["index_status"] == "indexed" and target.exists():
+            # 失败等用户显式重试（Java 会先置 queued）；周期/启动对账不能反复烧嵌入
+            if row["index_status"] == "failed":
+                continue
+            if (row["index_status"] == "indexed" and target.exists()
+                    and paper_id not in drift):
                 continue
             todo.append((paper_id, row, target))
         if not todo:
@@ -1281,10 +1373,26 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         "indexed": indexed,
         "failed": failed,
         "removed": removed,
+        "orphans": orphans,
+        "drifted": len(drift),
         "finished_at": datetime.now(timezone.utc).isoformat(),
     }
     kb_last_run[user_id] = summary
     return summary
+
+
+def _users_with_kb() -> list[str]:
+    """列出知识库里还有勾选论文的用户（启动对账用）。
+
+    启动时给每个用户域做一次向量库审计，覆盖「崩溃后只剩向量、数据库行和镜像
+    都已不在」的孤儿——这类残留用数据库与镜像判据都发现不了。
+
+    Returns:
+        list[str]: 用户 id（去重排序）。
+    """
+    rows = _shared_db().execute(
+        "SELECT DISTINCT user_id FROM bio_paper WHERE kb_enabled=1").fetchall()
+    return sorted({str(row["user_id"]) for row in rows if row.get("user_id")})
 
 
 def _users_needing_reconcile() -> list[str]:
@@ -1425,13 +1533,52 @@ def cfg_runtime_workspace() -> str:
 
 
 
+#: 知识库只读端点等待 RAG 锁的上限（秒）。索引持锁期间会跑嵌入与看图，
+#: 可能持续数分钟；只读请求不能排在事件循环里等它，宁可快速失败让前端提示。
+_KB_LOCK_WAIT_SECONDS = 5.0
+
+
+class _KbBusyError(RuntimeError):
+    """知识库正被索引占用，只读请求快速失败而不是排队阻塞。"""
+
+
+def _kb_read_locked(svc, fn, *args, **kwargs):
+    """在 worker 线程里持 RAG 锁执行只读操作，锁被索引占用超限即报错。
+
+    ``fn`` 通常是 RAGService 的只读方法（内部还会再取同一把可重入锁）。
+    调用方必须用 ``asyncio.to_thread`` 执行本函数：直接在事件循环线程里阻塞取锁
+    会把整个适配层卡死——状态、论文清单等无关请求会一起悬挂，前端表现为整页空数据。
+
+    Args:
+        svc: RAGService（或测试替身），需提供可重入的 ``lock``。
+        fn: 只读操作。
+        *args: 传给 ``fn`` 的位置参数。
+        **kwargs: 传给 ``fn`` 的关键字参数。
+
+    Returns:
+        ``fn`` 的返回值。
+
+    Raises:
+        _KbBusyError: 超过 ``_KB_LOCK_WAIT_SECONDS`` 仍未拿到锁。
+    """
+    if not svc.lock.acquire(timeout=_KB_LOCK_WAIT_SECONDS):
+        raise _KbBusyError("知识库正在索引，请稍后再试")
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        svc.lock.release()
+
+
 def _kb_endpoints(app: FastAPI) -> None:
-    """知识库端点：状态概览、论文勾选加入/移出/重试、试检索、分块列表。"""
+    """知识库 RAG 端点：索引触发、试检索、分块列表。
+
+    平台侧的状态概览与论文清单归 Java（`bio_paper` 是唯一真相）；这里只暴露
+    需要读向量库的能力，不再查平台表。
+    """
     import time as _time
 
     from biopilot.config import BioPilotConfig
     from biopilot.core.rag.services.rag_service import get_rag_service
-    from biopilot.core.rag.services.paper_state import kb_counts, paper_map
 
     def _chunk_view(chunk, score=None) -> dict:
         """把 Chunk 转成前端可渲染的字典（正文截断，避免一次返回整篇）。"""
@@ -1449,38 +1596,6 @@ def _kb_endpoints(app: FastAPI) -> None:
             "score": score,
         }
 
-    def _paper_map(user_id: str) -> dict:
-        """paper_id → {file_name,title}；镜像文件名就是 paper_id.pdf。"""
-        return paper_map(_shared_db(), user_id)
-
-    @app.get("/kb/status")
-    async def kb_status(x_user_id: str | None = Header(default=None)) -> dict:
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        counts = kb_counts(_shared_db(), x_user_id)
-        cfg = BioPilotConfig.from_env()
-        collection = cfg.rag.storage.collection + (
-            "" if x_user_id == "local" else f"_{x_user_id}")
-        last = _shared_db().execute(
-            "SELECT MAX(indexed_at) AS t FROM bio_paper"
-            " WHERE user_id=? AND kb_enabled=1 AND index_status='indexed'",
-            (x_user_id,)).fetchone()
-        return {
-            "total_papers": counts["total"],
-            "kb_enabled": counts["kb_enabled"],
-            "indexed": counts["indexed"],
-            "queued": counts["queued"],
-            "indexing": counts["indexing"],
-            "failed": counts["failed"],
-            "not_added": counts["not_added"],
-            "chunks": counts["chunks"],
-            "collection": collection,
-            "embedding_model": cfg.rag.embedding.embed_model,
-            "last_indexed_at": (last or {}).get("t"),
-            "running": x_user_id in reindex_running,
-            "last_run": kb_last_run.get(x_user_id),
-        }
-
     @app.post("/kb/reindex")
     async def kb_reindex(
         body: dict | None = None,
@@ -1491,9 +1606,15 @@ def _kb_endpoints(app: FastAPI) -> None:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         if force:
-            _shared_db().execute(
-                "UPDATE bio_paper SET index_status='queued', index_error=NULL"
-                " WHERE user_id=? AND kb_enabled=1", (x_user_id,))
+            # `bio_paper` 只有 Java 能写；引擎只发触发请求，不直接 UPDATE
+            from biopilot.common.platform import PlatformError
+
+            try:
+                await asyncio.to_thread(
+                    _platform_client().kb_requeue_all, x_user_id)
+            except PlatformError as exc:
+                raise HTTPException(
+                    status_code=503, detail="索引状态重置失败：平台不可达") from exc
         _schedule_user_index(x_user_id)
         return {"status": "started", "already_running": x_user_id in reindex_running}
 
@@ -1512,17 +1633,19 @@ def _kb_endpoints(app: FastAPI) -> None:
         cfg = BioPilotConfig.from_env()
         svc = get_rag_service(cfg, user_domain=x_user_id)
         started = _time.monotonic()
-        hits = svc.retrieve_scored(query, top_k)
+        try:
+            # 检索含嵌入与精排的网络调用，必须挪出事件循环；索引持锁时快速失败，
+            # 否则整页请求会一起排队悬挂。
+            hits = await asyncio.to_thread(
+                _kb_read_locked, svc, svc.retrieve_scored, query, top_k)
+        except _KbBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         elapsed = int((_time.monotonic() - started) * 1000)
-        papers = _paper_map(x_user_id)
         results = []
         for chunk, score in hits:
-            paper_id = Path(chunk.path).stem
-            paper = papers.get(paper_id) or {}
             item = _chunk_view(chunk, score=round(float(score or 0), 4))
-            item["paper_id"] = paper_id
-            item["file_name"] = paper.get("file_name", "")
-            item["paper_title"] = paper.get("title", "")
+            # 只回 paper_id；文件展示字段由 Java 的论文清单在前端 join
+            item["paper_id"] = Path(chunk.path).stem
             results.append(item)
         return {"results": results, "elapsed_ms": elapsed, "query": query}
 
@@ -1532,13 +1655,15 @@ def _kb_endpoints(app: FastAPI) -> None:
     ) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        papers = _paper_map(x_user_id)
-        if paper_id not in papers:
-            raise HTTPException(status_code=404, detail="论文不存在")
         cfg = BioPilotConfig.from_env()
         svc = get_rag_service(cfg, user_domain=x_user_id)
         path = str(Path(svc.config.corpus.pdf_dir) / f"{paper_id}.pdf")
-        chunks = svc.list_document_chunks(path)
+        try:
+            # 分块读取要遍历整库向量，索引写库期间必须让出事件循环，
+            # 锁被占用超限就明确告知「正在索引」，不让页面无限转圈。
+            chunks = await asyncio.to_thread(
+                _kb_read_locked, svc, svc.list_document_chunks, path)
+        except _KbBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         chunks.sort(key=lambda chunk: chunk.chunk_index)
-        return {"chunks": [_chunk_view(chunk) for chunk in chunks],
-                "paper": papers[paper_id]}
+        return {"chunks": [_chunk_view(chunk) for chunk in chunks]}

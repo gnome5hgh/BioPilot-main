@@ -3,12 +3,12 @@
     <div class="page-head">
       <div>
         <h2 class="page-title">文献搜索</h2>
-        <p class="page-sub">检索开放文献；找到全文后可加入论文库，或直接让 Agent 分析。加入论文库不会自动进知识库。</p>
+        <p class="page-sub">跨库检索学术文献；有开放获取全文的可加入论文库，或直接让 Agent 分析。加入论文库不会自动进知识库。</p>
       </div>
     </div>
 
     <div class="search-row">
-      <input v-model="query" class="input search-input" placeholder="搜索 PubMed / Europe PMC 文献…"
+      <input v-model="query" class="input search-input" placeholder="搜索文献标题、关键词或 DOI（多源聚合）…"
              @keyup.enter="search" />
       <button class="btn btn-primary" :disabled="loading || !query.trim()" @click="search">
         {{ loading ? '搜索中…' : '搜索' }}

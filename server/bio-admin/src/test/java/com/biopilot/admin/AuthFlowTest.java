@@ -25,7 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/biopilot_test"
+                "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/biopilot_test"
                         + "?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai",
         })
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)

@@ -9,7 +9,7 @@
 #   前端      http://localhost:5173
 #   服务端    http://127.0.0.1:8080
 #   适配层    http://127.0.0.1:8300
-#   MySQL     127.0.0.1:3306（root / 空密码 / 库 biopilot）
+#   MySQL     127.0.0.1:3307（root / 空密码 / 库 biopilot；3306 留给本机自装 MySQL）
 #
 # 常见问题：
 #   - SpringBoot 起不来提示缺库模块：先在 server/ 下跑一次 mvn install -DskipTests
@@ -21,7 +21,11 @@ RUN_DIR="$ROOT/.biopilot/run"
 mkdir -p "$RUN_DIR"
 
 PY_BIN="$(command -v biopilot || echo /opt/miniconda3/envs/biopilot/bin/biopilot)"
-export BIOPILOT_MEMORY_MYSQL_DSN="${BIOPILOT_MEMORY_MYSQL_DSN:-mysql://root@127.0.0.1:3306/biopilot}"
+# 容器 MySQL 发布到 3307（3306 常被本机自装 MySQL 占用）；适配层 DSN 与
+# SpringBoot 的 datasource 都读这个变量，改端口只改一处。
+MYSQL_PORT="${BIOPILOT_MYSQL_PORT:-3307}"
+export BIOPILOT_MYSQL_PORT="$MYSQL_PORT"
+export BIOPILOT_MEMORY_MYSQL_DSN="${BIOPILOT_MEMORY_MYSQL_DSN:-mysql://root@127.0.0.1:${MYSQL_PORT}/biopilot}"
 
 log() { printf '\033[2m[start]\033[0m %s\n' "$*"; }
 

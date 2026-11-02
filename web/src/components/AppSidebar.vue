@@ -142,7 +142,6 @@ const menu = reactive({ open: false, kind: '', item: null, x: 0, y: 0 })
 
 const navItems = computed(() => {
   const items = [
-    { path: '/store', label: '技能', icon: '✦' },
     { path: '/scheduled', label: '定时任务', icon: '◷' },
     { path: '/papers', label: '文件管理', icon: '▤' },
     { path: '/literature', label: '文献搜索', icon: '⌕' },

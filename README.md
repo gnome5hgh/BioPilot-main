@@ -50,13 +50,19 @@ biopilot
 
 REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/version` 查看版本。历史会话可用 `biopilot --resume` 回放。
 
+`docker/*.Dockerfile` 默认用阿里云镜像装 apt 包与 PyPI 依赖（直连官方源在国内常见只有几十 kB/s）。人在海外或想换别的源，用同名环境变量覆盖后重建：
+
+```bash
+PIP_INDEX_URL=https://pypi.org/simple APT_MIRROR=deb.debian.org docker compose build
+```
+
 ### 网页平台启动
 
 ```bash
 docker compose up -d                       # MySQL + MinIO + Milvus（首启自动建库建表）
 
 # ① Python 适配层（8300；DSN 环境变量必带）
-BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3306/biopilot" biopilot --web
+BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3307/biopilot" biopilot --web
 
 # ② SpringBoot（8080；首次先 cd server && mvn install -DskipTests）
 cd server/bio-admin && mvn spring-boot:run

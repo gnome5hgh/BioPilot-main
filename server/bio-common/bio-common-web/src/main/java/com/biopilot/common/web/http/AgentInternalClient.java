@@ -1,5 +1,6 @@
 package com.biopilot.common.web.http;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -66,6 +67,44 @@ public class AgentInternalClient {
         } catch (Exception e) {
             log.warn("内部调用构造失败 {}: {}", path, e.getMessage());
         }
+    }
+
+    /**
+     * 同步 GET 内部端点；失败返回空 Map（调用方按缺省值降级，不因引擎不可达报错）。
+     *
+     * @param path    适配层路径（以 `/internal/` 开头）。
+     * @param userId  归属用户。
+     * @param timeout 单次调用超时。
+     * @return 解析后的 JSON 对象；网络错误/非 2xx/解析失败时为空 Map。
+     */
+    public Map<String, Object> get(String path, long userId, Duration timeout) {
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(adapterBase + path))
+                    .timeout(timeout)
+                    .header("X-User-Id", String.valueOf(userId))
+                    .GET();
+            if (internalToken != null && !internalToken.isBlank()) {
+                builder.header("X-Internal-Token", internalToken);
+            }
+            HttpResponse<String> resp = client.send(builder.build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 300) {
+                log.warn("内部读取失败 {} status={} body={}", path,
+                        resp.statusCode(), resp.body());
+                return Map.of();
+            }
+            return mapper.readValue(resp.body(),
+                    new TypeReference<Map<String, Object>>() { });
+        } catch (Exception e) {
+            log.warn("内部读取异常 {}: {}", path, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /** 知识库运行时信息（collection/embedding/running/last_run）；不可达时返回空 Map。 */
+    public Map<String, Object> kbRuntime(long userId) {
+        return get("/internal/kb/runtime", userId, Duration.ofSeconds(2));
     }
 
     /** 唤醒索引器：状态已由 Java 在数据库里写好，这里只触发一次扫描。 */

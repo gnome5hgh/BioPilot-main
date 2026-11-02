@@ -3,9 +3,11 @@ server:
 spring:
   datasource:
     # 与 Python 侧同一 MySQL 实例（记忆/会话真相源同库，D6）
-    url: jdbc:mysql://127.0.0.1:3306/biopilot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    # 容器实例发布在宿主 3307（3306 常被本机自装 MySQL 占用）；端口与 start.sh 共用同一个变量
+    url: jdbc:mysql://127.0.0.1:${BIOPILOT_MYSQL_PORT:3307}/biopilot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
     username: root
-    password: "mysql0607"
+    # 容器实例 root 是空密码（回环内默认凭证）；连的是有密码的实例时用环境变量补上
+    password: ${SPRING_DATASOURCE_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
   # 论文 multipart 上传：默认 1MB 会把正常 PDF 全拒掉，上限与适配层侧 200MB 对齐
   servlet:

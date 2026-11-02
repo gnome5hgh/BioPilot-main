@@ -14,9 +14,9 @@
 ## 允许新增的路由类别
 
 - 对话运行时：`/chat/stream`、`/chat/confirm`、`/chat/context-usage`、会话取消/删除。
-- 知识库运行时：`/kb/status`、`/kb/reindex`、`/kb/search`、`/kb/papers/{id}/chunks`。
+- 知识库运行时：`/kb/reindex`、`/kb/search`、`/kb/papers/{id}/chunks`。状态概览与论文清单归 Java（`bio_paper` 是真相），本层只读向量库。
 - 引擎领域产物：`/terminal/*`、`/ws/terminal`。引用库是平台功能，不在此暴露。
-- 内部调用：`/internal/kb/sync`（唤醒索引）、`/internal/schedule/run`（Java 调度器触发一次定时任务）、`/internal/users/*`（删户数据清理）。
+- 内部调用：`/internal/kb/sync`（唤醒索引）、`/internal/kb/runtime`（供 Java 概览合并的运行时信息）、`/internal/schedule/run`（Java 调度器触发一次定时任务）、`/internal/users/*`（删户数据清理）。
 
 ## 禁止新增
 
@@ -32,7 +32,9 @@
 - **SSE 契约**：帧类型含 `token` / `tool` / `round` / `confirm` / `done` / `error`；`done` 帧恒发（含异常路径）；客户端断开映射为取消 run。
 - **确认等待**：由策略引擎计时（默认 300 秒自动拒绝），不依赖 SSE 连接存活。
 - **错误降级**：工具与中间件错误转成文本/错误帧回传模型或客户端，不绕过 ReAct 循环。
-- **数据写入**：只写引擎领域表（`bio_agent_state`/`bio_message`/`bio_memory_*`/`bio_security_audit_event`）；**不写 `bio_paper` 任何列**，索引状态经 `/internal/kb/{normalize,indexing,result}` 上报。`save_document` 只转发 Java `/internal/documents/save`。
+- **阻塞调用进线程**：RAG 检索/分块这类会等锁或走网络的同步调用必须经 `asyncio.to_thread`；在事件循环线程里同步等 RAG 锁会让整个适配层停摆（状态与论文清单等无关请求一起悬挂）。等锁设有上限，索引占用时快速返回 409「正在索引」，不排队阻塞。
+- **数据写入**：只写引擎领域表（`bio_agent_state`/`bio_message`/`bio_memory_*`/`bio_security_audit_event`）；**不直接 INSERT/UPDATE/DELETE `bio_paper`**，索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位。`save_document` 只转发 Java `/internal/documents/save`。
+- **一致性对账**：MySQL 的 `bio_paper` 是知识库唯一真相。每轮索引与启动时都要对账向量库：不属任何「已加入」论文的块删除；已就绪论文的向量块数与 `chunk_count` 不一致则重建；`failed` 不自动重试（用户重试由 Java 先置 `queued`）。
 - **附件解析**：身份只认 body 里的 `file_id`/`paper_id`，字节与文件名由 Java `/internal/attachments/{kind}/{id}` 按 `X-User-Id` 返回；body 里的 `oss_key` 一律忽略（防跨用户读取），本地路径片段先归一化（防穿越）。
 - **出站内部调用**：`search_literature`、`save_document`、附件/论文原文取回、分析产物登记、PDF 抓取、索引状态上报都走 `common/platform` 客户端；失败降级为工具文本，不阻塞启动。
 - **同名约束**：文件目录的唯一性由 `bio_user_file` 的数据库唯一键保证，不在本层做「先查再插」。

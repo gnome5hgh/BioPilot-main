@@ -28,7 +28,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** 引用库平台能力：加入/列表/格式化/导出/移出/删除论文连带清理/用户隔离。 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/biopilot_test"
+                "spring.datasource.url=jdbc:mysql://127.0.0.1:3307/biopilot_test"
                         + "?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai",
         })
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)

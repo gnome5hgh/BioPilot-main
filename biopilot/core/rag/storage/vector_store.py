@@ -419,6 +419,41 @@ class VectorStore:
             it.close()
         return out
 
+    def document_chunk_counts(self) -> dict[str, int]:
+        """按文档路径统计块数（只取 path 字段，不物化正文与向量）。
+
+        用于和平台表 `bio_paper.chunk_count` 对账：全量扫描只读一列，开销远小于
+        `all_documents()`（后者还要还原正文与元数据）。分页读取避免单次 query
+        的返回上限。
+
+        Returns:
+            dict[str, int]: 文档绝对路径 → 块数；库为空时返回空字典。
+        """
+        out: dict[str, int] = {}
+        it = self._client.query_iterator(
+            collection_name=self._collection,
+            filter="",
+            output_fields=["path"],
+            batch_size=self._batch_size,
+            timeout=self._read_timeout,
+        )
+        try:
+            while True:
+                try:
+                    batch = it.next()
+                except StopIteration:
+                    break
+                if not batch:
+                    break
+                for row in batch:
+                    path = row.get("path") or ""
+                    if path:
+                        out[path] = out.get(path, 0) + 1
+        finally:
+            # 分页中途抛非 StopIteration 异常也要关闭迭代器，避免游标泄漏
+            it.close()
+        return out
+
     def count(self) -> int:
         """集合中的块总数。
 

@@ -45,11 +45,14 @@ public class AgentProxyController {
 
     private final com.biopilot.system.service.SysUserService sysUserService;
     private final com.biopilot.catalog.service.PlatformUserDataService platformUserData;
+    private final com.biopilot.catalog.service.PaperService papers;
 
     public AgentProxyController(com.biopilot.system.service.SysUserService sysUserService,
-                                com.biopilot.catalog.service.PlatformUserDataService platformUserData) {
+                                com.biopilot.catalog.service.PlatformUserDataService platformUserData,
+                                com.biopilot.catalog.service.PaperService papers) {
         this.sysUserService = sysUserService;
         this.platformUserData = platformUserData;
+        this.papers = papers;
     }
 
     // 锁死 HTTP/1.1：默认的 h2c 升级头（Upgrade/HTTP2-Settings）会让 uvicorn 按协议
@@ -171,14 +174,11 @@ public class AgentProxyController {
                 + java.net.URLEncoder.encode(conversationId, java.nio.charset.StandardCharsets.UTF_8));
     }
 
-    /** KB 知识库：状态快照、论文列表、勾选加入/移出/重试、试检索、分块。 */
-    @GetMapping("/kb/status")
-    public ResponseEntity<String> kbStatus() {
-        return proxyGet("/kb/status");
-    }
-
+    /** KB 知识库：论文勾选加入/移出/重试、试检索、分块（状态概览由 Java 自己算）。 */
     @GetMapping("/kb/papers/{paperId}/chunks")
     public ResponseEntity<String> kbPaperChunks(@PathVariable String paperId) {
+        // 归属校验留在平台侧：引擎只按 id 读 RAG 索引，不再查 bio_paper
+        papers.get(StpUtil.getLoginIdAsLong(), paperId);
         return proxyGet("/kb/papers/" + paperId + "/chunks");
     }
 

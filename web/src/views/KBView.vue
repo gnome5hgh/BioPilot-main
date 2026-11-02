@@ -13,6 +13,12 @@
       </div>
     </div>
 
+    <div v-if="loadError" class="load-error">
+      <span>{{ loadError }}</span>
+      <button class="btn btn-sm" @click="load">重试</button>
+    </div>
+
+    <template v-if="loaded">
     <div class="overview">
       <div class="stat-card">
         <div class="stat-n">{{ status.total_papers }}</div>
@@ -46,6 +52,8 @@
       <span>最近索引：{{ status.last_indexed_at ? fmtDateTime(status.last_indexed_at) : '—' }}</span>
       <span v-if="status.last_run">
         上轮结果：成功 {{ status.last_run.indexed }} · 失败 {{ status.last_run.failed }} · 清理 {{ status.last_run.removed }}
+        <template v-if="status.last_run.orphans">· 孤儿向量 {{ status.last_run.orphans }} </template>
+        <template v-if="status.last_run.drifted">· 漂移重建 {{ status.last_run.drifted }}</template>
       </span>
     </div>
 
@@ -153,7 +161,7 @@
               <span class="badge" :class="hit.chunk_type === 'text' ? 'badge-muted' : 'badge-info'">
                 {{ hit.chunk_type === 'text' ? '正文' : hit.chunk_type === 'table' ? '表格' : '图' }}
               </span>
-              <span class="hit-source">{{ hit.file_name || hit.paper_title || '未知来源' }}</span>
+              <span class="hit-source">{{ hitSource(hit) }}</span>
               <span v-if="hit.heading" class="faint">{{ hit.heading }}</span>
               <span v-if="hit.page?.length" class="faint">第 {{ hit.page.join(', ') }} 页</span>
               <span class="spacer"></span>
@@ -164,6 +172,10 @@
         </div>
       </div>
     </template>
+    </template>
+
+    <div v-else-if="loading" class="empty">正在读取知识库…</div>
+    <div v-else class="empty">知识库状态暂时不可用，点「刷新」重试。</div>
 
     <div v-if="chunks.open" class="modal-mask" @click.self="chunks.open = false">
       <div class="modal-card">
@@ -205,6 +217,11 @@ const status = reactive({
   last_indexed_at: null, running: false, last_run: null,
 })
 const papers = ref([])
+// 首屏状态：两个请求都成功后才展示统计与清单。请求悬挂/失败时保持「正在读取/不可用」，
+// 不再用默认的 0 冒充「知识库是空的」。
+const loading = ref(true)
+const loaded = ref(false)
+const loadError = ref('')
 const tab = ref('in')
 const outQuery = ref('')
 const outSelected = reactive(new Set())
@@ -220,6 +237,16 @@ let pollTimer = null
 
 const inPapers = computed(() => papers.value.filter((paper) => paper.kb_enabled))
 const outPapers = computed(() => papers.value.filter((paper) => !paper.kb_enabled))
+// 检索结果只回 paper_id；论文展示字段用本页已加载的清单 join，Python 不再读平台表
+const paperById = computed(() => {
+  const map = new Map()
+  for (const paper of papers.value) map.set(paper.id, paper)
+  return map
+})
+function hitSource(hit) {
+  const paper = paperById.value.get(hit.paper_id) || {}
+  return paper.file_name || paper.title || '未知来源'
+}
 const visibleOutPapers = computed(() => {
   const text = outQuery.value.trim().toLowerCase()
   if (!text) return outPapers.value
@@ -235,17 +262,25 @@ onMounted(load)
 onBeforeUnmount(() => { if (pollTimer) window.clearTimeout(pollTimer) })
 
 async function load() {
-  try {
-    const [statusResp, papersResp] = await Promise.all([
-      http.get('/agent/kb/status'),
-      http.get('/agent/kb/papers', { params: { filter: 'all' } }),
-    ])
-    Object.assign(status, statusResp.data)
-    papers.value = papersResp.data.papers || []
-    schedulePoll()
-  } catch (error) {
-    toast(errText(error, '知识库状态读取失败'), 'error')
+  loading.value = true
+  loadError.value = ''
+  // 两个接口分别成败：一个失败不该把另一个的结果也丢掉，更不能让页面停在默认 0。
+  const [statusResp, papersResp] = await Promise.allSettled([
+    http.get('/agent/kb/status', { timeout: 20000 }),
+    http.get('/agent/kb/papers', { params: { filter: 'all' }, timeout: 20000 }),
+  ])
+  if (statusResp.status === 'fulfilled') Object.assign(status, statusResp.value.data)
+  if (papersResp.status === 'fulfilled') {
+    papers.value = papersResp.value.data.papers || []
   }
+  if (statusResp.status === 'fulfilled' && papersResp.status === 'fulfilled') {
+    loaded.value = true
+  } else {
+    const failed = statusResp.status === 'rejected' ? statusResp : papersResp
+    loadError.value = errText(failed.reason, '知识库状态读取失败')
+  }
+  loading.value = false
+  schedulePoll()
 }
 
 function schedulePoll() {
@@ -344,7 +379,6 @@ async function showChunks(paper) {
   try {
     const { data } = await http.get(`/agent/kb/papers/${paper.id}/chunks`)
     chunks.items = data.chunks || []
-    chunks.paper = data.paper || paper
   } catch (error) {
     toast(errText(error, '分块读取失败'), 'error')
   } finally {
@@ -378,6 +412,18 @@ async function runSearch() {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
+}
+.load-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid #f3c7c2;
+  border-radius: 10px;
+  background: #fdf4f3;
+  color: #b42318;
+  font-size: 12px;
 }
 .stat-card {
   border: 1px solid #e6e9ed;

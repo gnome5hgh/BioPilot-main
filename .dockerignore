@@ -1,0 +1,41 @@
+# 构建上下文瘦身：仓库根本身有 3 GB 以上运行时数据（.biopilot 下的
+# Milvus/MinIO/MySQL 卷）、git 历史与前端依赖，不排除掉就要整包传给
+# 构建器。各 Dockerfile 只 COPY 源码目录，不依赖下面被排除的路径。
+.git
+.gitignore
+.dockerignore
+
+# 运行时数据根（compose 以 volume 挂载进容器，不需要进构建上下文）
+.biopilot
+
+# 只供开发与本机读取的目录
+docs
+tests
+scripts
+.scratch
+.superpowers
+.zcode
+.agents
+.claude
+
+# Python 缓存与虚拟环境
+**/__pycache__
+**/*.py[cod]
+.venv
+venv
+*.egg-info
+.pytest_cache
+
+# 前端依赖与构建产物
+**/node_modules
+web/dist
+
+# Java 构建产物
+server/**/target
+
+# 本地配置与环境变量（运行时挂载或由 compose 注入，不能烘焙进镜像）
+.env
+.env.*
+config.yaml
+*.log
+.DS_Store

@@ -88,7 +88,9 @@ services:
       - ./.biopilot/infra/mysql:/var/lib/mysql
       - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "127.0.0.1:3306:3306"
+      # 宿主 3306 常被本机自装的 MySQL 占用，这里默认发布到 3307；换端口用
+      # BIOPILOT_MYSQL_PORT 同时管 start.sh 的 DSN 与 SpringBoot 的 datasource。
+      - "127.0.0.1:${BIOPILOT_MYSQL_PORT:-3307}:3306"
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_0900_ai_ci
     restart: unless-stopped
     healthcheck:
@@ -101,7 +103,15 @@ services:
   # 文献检索 MCP server：默认即启动（dev 与 full 都可连）；只映射回环端口供本机
   # SpringBoot 调试，生产部署走 compose 内网 http://paper-search-mcp:8000/mcp。
   paper-search-mcp:
-    build: { context: ., dockerfile: docker/paper-search-mcp.Dockerfile }
+    build:
+      context: .
+      dockerfile: docker/paper-search-mcp.Dockerfile
+      args:
+        # 默认走阿里云镜像（apt 与 pip）。换源在调用 compose 时用同名环境变量覆盖，例如
+        # PIP_INDEX_URL=https://pypi.org/simple APT_MIRROR=deb.debian.org docker compose build
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     container_name: biopilot-paper-search-mcp
     environment:
       PAPER_SEARCH_MCP_TRANSPORT: streamable-http
@@ -115,7 +125,13 @@ services:
 
   # ---- 平台三件套（部署形态：--profile full 拉起；dev 只起基建） ----
   webapi:
-    build: { context: ., dockerfile: docker/webapi.Dockerfile }
+    build:
+      context: .
+      dockerfile: docker/webapi.Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
     container_name: biopilot-webapi
     profiles: ["full"]
     # 信任边界：适配层只监听容器内网（不映射宿主端口），SpringBoot 内网调用

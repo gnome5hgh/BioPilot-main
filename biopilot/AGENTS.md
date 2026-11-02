@@ -28,7 +28,7 @@
 - 承载全部运行层能力（`core/`）与它们的对外工具、终端交互；引用库、论文标题提取、文献检索（含 MCP 客户端）归 Java，不在本包实现。
 - `common/` 只放跨层纯能力；平台数据访问归 Java `bio-catalog`，不再设 Python 数据适配层。
 - 通过包门面暴露重量组件，不让外部深入组件内部结构。
-- **保留 agent 运行时 API**：对话 SSE/确认/上下文用量、知识库状态与试检索、终端、`/internal/kb/sync`、`/internal/schedule/run` 与用户数据清理。论文/文件/文档/定时任务/文献搜索的平台 CRUD 不在本包新增。
+- **保留 agent 运行时 API**：对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、终端、`/internal/kb/{sync,runtime}`、`/internal/schedule/run` 与用户数据清理。知识库状态统计与论文清单归 Java；论文/文件/文档/定时任务/文献搜索的平台 CRUD 不在本包新增。
 - **数据所有权**：`bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event` 由本包写；**`bio_paper` 全部列由 Java 写**，本包只读（状态经 `/internal/kb/{normalize,indexing,result}` 上报，文件字节经 `/internal/attachments/*` 取回）；`bio_document`、`bio_file_upload`、`bio_schedule_task` 由 Java 写，本包只经内部端点转发/触发。
 
 ## Core Logic
