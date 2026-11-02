@@ -4,8 +4,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
 
-/** biopilot_project 表实体（项目：科研课题分组；行级 user_id 由租户插件注入）。 */
-@TableName("biopilot_project")
+/** bio_project 表实体（项目：科研课题分组；行级 user_id 由租户插件注入）。 */
+@TableName("bio_project")
 public class BioProject {
 
     @TableId

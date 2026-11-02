@@ -44,12 +44,47 @@
       </dependency>
       <dependency>
         <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-web</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-mybatis</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-satoken</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-common-oss</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
         <artifactId>bio-system</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
         <groupId>com.biopilot</groupId>
         <artifactId>bio-project</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-catalog</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-schedule</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-literature</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

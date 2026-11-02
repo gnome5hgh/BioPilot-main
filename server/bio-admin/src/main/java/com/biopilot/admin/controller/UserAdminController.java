@@ -33,7 +33,7 @@ public class UserAdminController {
         this.jdbc = jdbc;
     }
 
-    /** 操作审计事件（引擎侧 audit_event 核心列；payload 不出接口——取证回放按需直查库）。 */
+    /** 操作审计事件（引擎侧 bio_security_audit_event 核心列；payload 不出接口——取证回放按需直查库）。 */
     @GetMapping("/audit-events")
     @SaCheckRole("ADMIN")
     public R<List<Map<String, Object>>> auditEvents(
@@ -41,9 +41,10 @@ public class UserAdminController {
             @org.springframework.web.bind.annotation.RequestParam(required = false) String eventType,
             @org.springframework.web.bind.annotation.RequestParam(defaultValue = "200") int limit) {
         StringBuilder sql = new StringBuilder(
-                "SELECT id, user_id, event_type, session_id, agent_type, tool_name,"
-                + " risk_level, policy_decision, result_status, started_at, trace_id"
-                + " FROM audit_event WHERE 1=1");
+                "SELECT id, CAST(user_id AS CHAR) AS user_id, event_type, session_id,"
+                + " agent_type, tool_name, risk_level, policy_decision, result_status,"
+                + " started_at, trace_id"
+                + " FROM bio_security_audit_event WHERE 1=1");
         var params = new java.util.ArrayList<Object>();
         if (userId != null && !userId.isBlank()) {
             sql.append(" AND user_id = ?");
@@ -97,9 +98,9 @@ public class UserAdminController {
     @SaCheckRole("ADMIN")
     public R<List<Map<String, Object>>> sessions() {
         return R.ok(jdbc.queryForList(
-                "SELECT a.agent_id, a.user_id, a.name, a.created_at,"
-                + " (SELECT COUNT(*) FROM messages m WHERE m.agent_id = a.agent_id) AS message_count"
-                + " FROM agent_state a ORDER BY a.created_at DESC LIMIT 200"));
+                "SELECT a.agent_id, CAST(a.user_id AS CHAR) AS user_id, a.name, a.created_at,"
+                + " (SELECT COUNT(*) FROM bio_message m WHERE m.agent_id = a.agent_id) AS message_count"
+                + " FROM bio_agent_state a ORDER BY a.created_at DESC LIMIT 200"));
     }
 
     /** 审计日志（最近 200 条，倒序）。 */

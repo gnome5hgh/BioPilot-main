@@ -3,13 +3,17 @@ package com.biopilot.system.domain;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import java.time.LocalDateTime;
 
 /** sys_user 表实体（用户账号；user_id 即全局隔离键，Python 侧同键）。 */
 @TableName("sys_user")
 public class SysUser {
 
+    /** 19 位雪花 id 超出 JS 安全整数范围；序列化成字符串，避免前端四舍五入后对不上。 */
     @TableId
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long userId;
     private String userName;
     /** BCrypt 摘要；明文永不落库；不随任何响应序列化出去。 */

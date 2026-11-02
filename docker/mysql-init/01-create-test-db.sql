@@ -22,3 +22,30 @@ CREATE TABLE IF NOT EXISTS sys_login_log (
     PRIMARY KEY (id),
     KEY idx_login_log_user (user_id, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='登录日志表';
+-- 项目表：与 server/script/sql/biopilot.sql 等价；测试库也建一份，避免项目域用例缺表
+CREATE TABLE IF NOT EXISTS bio_project (
+    project_id    VARCHAR(64)  NOT NULL COMMENT '项目ID',
+    user_id       VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
+    name          VARCHAR(50)  NOT NULL COMMENT '项目名称',
+    billing_group VARCHAR(64)  NULL COMMENT '计费组（原型字段，保留无逻辑）',
+    description   VARCHAR(100) NULL COMMENT '简介',
+    create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id),
+    KEY idx_project_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目表';
+-- 定时任务表：与 server/script/sql/biopilot.sql 等价；测试库也建一份，避免调度用例缺表
+CREATE TABLE IF NOT EXISTS bio_schedule_task (
+    id               VARCHAR(64)  NOT NULL COMMENT '任务ID',
+    user_id          VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
+    conversation_id  VARCHAR(64)  NOT NULL COMMENT '归属会话',
+    name             VARCHAR(200) NOT NULL COMMENT '任务名',
+    task             TEXT         NOT NULL COMMENT '到点执行的任务文本',
+    interval_minutes INTEGER      NOT NULL COMMENT '执行周期（分钟）',
+    paused           INTEGER      NOT NULL DEFAULT 0 COMMENT '1=暂停',
+    last_run_at      VARCHAR(40)  NULL COMMENT '上次执行时间（引擎回写）',
+    next_run_at      VARCHAR(40)  NOT NULL COMMENT '下次执行时间（引擎回写）',
+    created_at       VARCHAR(40)  NOT NULL COMMENT '创建时间',
+    PRIMARY KEY (id),
+    KEY idx_sched_user (user_id),
+    KEY idx_sched_next (next_run_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时任务表';

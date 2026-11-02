@@ -19,6 +19,34 @@
       <artifactId>bio-project</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-catalog</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-schedule</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-literature</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-mybatis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-satoken</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-oss</artifactId>
+    </dependency>
+    <dependency>
       <groupId>cn.dev33</groupId>
       <artifactId>sa-token-spring-boot3-starter</artifactId>
     </dependency>

@@ -79,7 +79,7 @@ services:
   mysql:
     container_name: biopilot-mysql
     image: mysql:8.4
-    # 记忆/会话真相源（Python 侧 blocks/block_history/messages 与 server 侧业务表同实例）。
+    # 记忆/会话真相源（Python 侧 bio_memory_block/bio_memory_block_history/bio_message 与 server 侧业务表同实例）。
     # 只绑回环；root 空密码沿用本栈「回环内默认凭证」的既有口径（minio 同）。
     environment:
       MYSQL_ALLOW_EMPTY_PASSWORD: "yes"

@@ -23,3 +23,12 @@ mybatis-plus:
 logging:
   level:
     com.biopilot: info
+# 对象存储：与 Python 侧 rag.storage.minio 同一实例/同一 bucket（键前缀区分用途）
+biopilot:
+  storage:
+    minio:
+      endpoint: ${BIOPILOT_MINIO_ENDPOINT:localhost:9000}
+      access-key: ${BIOPILOT_MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${BIOPILOT_MINIO_SECRET_KEY:minioadmin}
+      bucket: ${BIOPILOT_MINIO_BUCKET:biopilot-images}
+      secure: ${BIOPILOT_MINIO_SECURE:false}

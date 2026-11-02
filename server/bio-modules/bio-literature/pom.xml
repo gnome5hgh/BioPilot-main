@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.biopilot</groupId>
+    <artifactId>bio-modules</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>bio-literature</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-satoken</artifactId>
+    </dependency>
+    <!-- 文献导入落论文库：只依赖 bio-catalog 的公开服务，不碰它的 mapper/entity -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-catalog</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,9 +1,13 @@
-package com.biopilot.common.core.exception;
+package com.biopilot.common.web.handler;
 
 import com.biopilot.common.core.R;
+import com.biopilot.common.core.exception.ServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -11,15 +15,19 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
-/** 全局异常兜底：业务异常转 R.fail，未知异常转通用失败文案（不泄内部细节）。 */
+/** 全局异常兜底：业务异常转 R.fail，未知异常转通用失败文案（不泄内部细节）。
+
+    排在最后：更具体的 advice（如 Sa-Token 的 401/403）必须先匹配。
+*/
+@Order(Ordered.LOWEST_PRECEDENCE)
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(ServiceException.class)
-    public R<Void> handleService(ServiceException e) {
-        return R.fail(e.getMessage());
+    public ResponseEntity<R<Void>> handleService(ServiceException e) {
+        return ResponseEntity.status(e.getStatus()).body(R.fail(e.getMessage()));
     }
 
     /** 路径不存在 / 方法不支持要如实回 404/405：吞进通用 500 会让前端调错路径时无从排查。 */

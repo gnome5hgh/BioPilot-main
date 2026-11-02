@@ -1,4 +1,4 @@
-package com.biopilot.admin.config;
+package com.biopilot.common.satoken.config;
 
 import cn.dev33.satoken.context.SaHolder;
 import cn.dev33.satoken.filter.SaServletFilter;

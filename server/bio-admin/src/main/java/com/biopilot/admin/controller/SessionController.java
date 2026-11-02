@@ -20,15 +20,15 @@ public class SessionController {
         this.jdbc = jdbc;
     }
 
-    /** 会话列表（新→旧）：agent_state 行级隔离由租户插件注入（登录态 user_id）。 */
+    /** 会话列表（新→旧）：bio_agent_state 行级隔离由租户插件注入（登录态 user_id）。 */
     @GetMapping
     public R<List<Map<String, Object>>> list(
             @RequestParam(required = false) String projectId,
             @RequestParam(defaultValue = "50") int limit) {
         String userId = StpUserId();
         String sql = ("SELECT a.agent_id, a.name, a.created_at, a.project_id,"
-                + " (SELECT COUNT(*) FROM messages m WHERE m.agent_id = a.agent_id) AS message_count"
-                + " FROM agent_state a WHERE a.user_id = ?")
+                + " (SELECT COUNT(*) FROM bio_message m WHERE m.agent_id = a.agent_id) AS message_count"
+                + " FROM bio_agent_state a WHERE a.user_id = ?")
                 + (projectId != null && !projectId.isBlank() ? " AND a.project_id = ?" : "")
                 + " ORDER BY a.created_at DESC LIMIT ?";
         var params = new java.util.ArrayList<Object>();

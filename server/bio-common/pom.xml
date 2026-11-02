@@ -12,5 +12,9 @@
   <packaging>pom</packaging>
   <modules>
     <module>bio-common-core</module>
+    <module>bio-common-web</module>
+    <module>bio-common-mybatis</module>
+    <module>bio-common-satoken</module>
+    <module>bio-common-oss</module>
   </modules>
 </project>

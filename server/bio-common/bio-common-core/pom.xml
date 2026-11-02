@@ -9,10 +9,6 @@
     <version>1.0.0</version>
   </parent>
   <artifactId>bio-common-core</artifactId>
-  <dependencies>
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-web</artifactId>
-    </dependency>
-  </dependencies>
+  <!-- 最底层公共契约：R / PageResult / 异常 / 常量；不依赖 Web/MyBatis/Sa-Token/MinIO。 -->
+
 </project>

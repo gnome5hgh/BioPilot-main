@@ -3,6 +3,7 @@ package com.biopilot.admin.controller;
 import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.dev33.satoken.stp.StpUtil;
 import com.biopilot.common.core.R;
+import com.biopilot.common.web.http.SseRelay;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -20,7 +21,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 /** Agent 对话代理：把登录用户的 SSE 请求转发到内网 Python 适配层。
@@ -75,33 +75,6 @@ public class AgentProxyController {
         }
     }
 
-    /** 文档编辑器：列表/读/存（documents 表 user_id 行级隔离）。 */
-    @GetMapping("/documents")
-    public ResponseEntity<String> docsList() {
-        return proxyGet("/documents");
-    }
-
-    @org.springframework.web.bind.annotation.PostMapping("/documents")
-    public ResponseEntity<String> docsCreate(@RequestBody String body) {
-        return proxyPost("/documents", body);
-    }
-
-    @GetMapping("/documents/{docId}")
-    public ResponseEntity<String> docsGet(@PathVariable String docId) {
-        return proxyGet("/documents/" + docId);
-    }
-
-    @org.springframework.web.bind.annotation.PutMapping("/documents/{docId}")
-    public ResponseEntity<String> docsSave(@PathVariable String docId, @RequestBody String body) {
-        return proxyPut("/documents/" + docId, body);
-    }
-
-    /** 文献搜索（PubMed 直查透传）。 */
-    @GetMapping("/literature/search")
-    public ResponseEntity<String> literatureSearch(@RequestParam String q) {
-        return proxyGet("/literature/search?q=" + java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8));
-    }
-
     private ResponseEntity<String> proxyPost(String path, String body) {
         long userId = StpUtil.getLoginIdAsLong();
         HttpRequest upstream = HttpRequest.newBuilder()
@@ -109,27 +82,6 @@ public class AgentProxyController {
                 .header("Content-Type", "application/json")
                 .header("X-User-Id", String.valueOf(userId))
                 .POST(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
-    }
-
-    private ResponseEntity<String> proxyPut(String path, String body) {
-        long userId = StpUtil.getLoginIdAsLong();
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + path))
-                .header("Content-Type", "application/json")
-                .header("X-User-Id", String.valueOf(userId))
-                .PUT(HttpRequest.BodyPublishers.ofString(body == null ? "" : body))
                 .build();
         try {
             HttpResponse<String> resp = client.send(upstream,
@@ -162,7 +114,7 @@ public class AgentProxyController {
         return proxyGet("/sessions?limit=" + Math.max(1, Math.min(limit, 200)));
     }
 
-    /** 删除会话（消息行 + agent_state 行，引擎侧归属双条件）。 */
+    /** 删除会话（bio_message 行 + bio_agent_state 行，引擎侧归属双条件）。 */
     @DeleteMapping("/chat/session")
     public ResponseEntity<String> chatSessionDelete(@RequestParam String conversationId) {
         long userId = StpUtil.getLoginIdAsLong();
@@ -185,101 +137,6 @@ public class AgentProxyController {
         }
     }
 
-    /** 定时任务：列表/新建/暂停/恢复/删除透传（数据与执行都在适配层）。 */
-    @GetMapping("/schedules")
-    public ResponseEntity<String> schedulesList() {
-        return proxyGet("/schedules");
-    }
-
-    @PostMapping("/schedules")
-    public ResponseEntity<String> schedulesCreate(@RequestBody String body) {
-        return proxyPost("/schedules", body);
-    }
-
-    @PostMapping("/schedules/{taskId}/pause")
-    public ResponseEntity<String> schedulesPause(@PathVariable String taskId) {
-        return proxyPost("/schedules/" + taskId + "/pause", "{}");
-    }
-
-    @PostMapping("/schedules/{taskId}/resume")
-    public ResponseEntity<String> schedulesResume(@PathVariable String taskId) {
-        return proxyPost("/schedules/" + taskId + "/resume", "{}");
-    }
-
-    @DeleteMapping("/schedules/{taskId}")
-    public ResponseEntity<String> schedulesDelete(@PathVariable String taskId) {
-        long userId = StpUtil.getLoginIdAsLong();
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + "/schedules/" + taskId))
-                .header("X-User-Id", String.valueOf(userId))
-                .DELETE()
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
-    }
-
-    /** 对话附件：上传（multipart 入 OSS + 登记行）。 */
-    @PostMapping(value = "/files/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<String> filesUpload(@RequestParam("file") MultipartFile file) {
-        long userId = StpUtil.getLoginIdAsLong();
-        String boundary = "----biopilot" + java.util.UUID.randomUUID();
-        String original = file.getOriginalFilename() == null ? "data.bin"
-                : file.getOriginalFilename().replace("\"", "")
-                      .replace("\r", "").replace("\n", "");
-        String contentType = file.getContentType() == null
-                ? "application/octet-stream" : file.getContentType();
-        byte[] body;
-        try {
-            byte[] head = ("--" + boundary + "\r\n"
-                    + "Content-Disposition: form-data; name=\"file\"; filename=\""
-                    + original + "\"\r\n"
-                    + "Content-Type: " + contentType + "\r\n\r\n")
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            byte[] fileBytes = file.getBytes();
-            byte[] tail = ("\r\n--" + boundary + "--\r\n")
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            body = new byte[head.length + fileBytes.length + tail.length];
-            System.arraycopy(head, 0, body, 0, head.length);
-            System.arraycopy(fileBytes, 0, body, head.length, fileBytes.length);
-            System.arraycopy(tail, 0, body, head.length + fileBytes.length, tail.length);
-        } catch (java.io.IOException e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"读取上传内容失败\"}");
-        }
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + "/files/upload"))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .header("X-User-Id", String.valueOf(userId))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
-    }
-
-    @GetMapping("/files")
-    public ResponseEntity<String> filesList() {
-        return proxyGet("/files");
-    }
-
     /** 上下文用量分解：前端悬停面板数据源。 */
     @GetMapping("/chat/context-usage")
     public ResponseEntity<String> chatContextUsage(
@@ -296,15 +153,82 @@ public class AgentProxyController {
                 + java.net.URLEncoder.encode(conversationId, java.nio.charset.StandardCharsets.UTF_8));
     }
 
-    /** KB 知识库：状态快照与重建触发透传。 */
+    /** KB 知识库：状态快照、论文列表、勾选加入/移出/重试、试检索、分块。 */
     @GetMapping("/kb/status")
     public ResponseEntity<String> kbStatus() {
         return proxyGet("/kb/status");
     }
 
+    @GetMapping("/kb/papers/{paperId}/chunks")
+    public ResponseEntity<String> kbPaperChunks(@PathVariable String paperId) {
+        return proxyGet("/kb/papers/" + paperId + "/chunks");
+    }
+
     @PostMapping("/kb/reindex")
-    public ResponseEntity<String> kbReindex() {
-        return proxyPost("/kb/reindex", "{}");
+    public ResponseEntity<String> kbReindex(
+            @RequestParam(defaultValue = "false") boolean force) {
+        return proxyPost("/kb/reindex?force=" + force, "{}");
+    }
+
+    @PostMapping("/kb/search")
+    public ResponseEntity<String> kbSearch(@RequestBody String body) {
+        return proxyPost("/kb/search", body);
+    }
+
+    /** 引用库：列表、格式化、删除、导出、从论文入库（均按登录用户隔离）。 */
+    @GetMapping("/citations")
+    public ResponseEntity<String> citationsList(
+            @RequestParam(defaultValue = "") String q) {
+        return proxyGet("/citations?q="
+                + java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @PostMapping("/citations/format")
+    public ResponseEntity<String> citationsFormat(@RequestBody String body) {
+        return proxyPost("/citations/format", body);
+    }
+
+    @DeleteMapping("/citations/{key}")
+    public ResponseEntity<String> citationsDelete(@PathVariable String key) {
+        long userId = StpUtil.getLoginIdAsLong();
+        HttpRequest upstream = HttpRequest.newBuilder()
+                .uri(URI.create(adapterBase + "/citations/"
+                        + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8)))
+                .header("X-User-Id", String.valueOf(userId))
+                .DELETE()
+                .build();
+        try {
+            HttpResponse<String> resp = client.send(upstream,
+                    HttpResponse.BodyHandlers.ofString());
+            return ResponseEntity.status(resp.statusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(resp.body());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
+        }
+    }
+
+    @GetMapping("/citations/export")
+    public ResponseEntity<String> citationsExport() {
+        return proxyGet("/citations/export");
+    }
+
+    @PostMapping("/citations/from-paper")
+    public ResponseEntity<String> citationsFromPaper(@RequestBody String body) {
+        return proxyPost("/citations/from-paper", body);
+    }
+
+    /** 终端面板：部署开关与重启（WS 本体由 TerminalRelayHandler 单独转发）。 */
+    @GetMapping("/terminal/config")
+    public ResponseEntity<String> terminalConfig() {
+        return proxyGet("/terminal/config");
+    }
+
+    @PostMapping("/terminal/restart")
+    public ResponseEntity<String> terminalRestart() {
+        return proxyPost("/terminal/restart", "{}");
     }
 
     /** 设置读/写（ADMIN 专属：响应含带 key 的模型清单，学生不可见）。 */
@@ -350,107 +274,6 @@ public class AgentProxyController {
             }
         }
         return upstream;
-    }
-
-    /** 论文目录：列表（读 papers 表，user_id 行级过滤）。 */
-    @GetMapping("/papers")
-    public ResponseEntity<String> papersList() {
-        return proxyGet("/papers");
-    }
-
-    /** 论文上传（multipart 透传）：文件字节原样重组转发到适配层，归属头照传。 */
-    @PostMapping(value = "/papers/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<String> papersUpload(@RequestParam("file") MultipartFile file) {
-        long userId = StpUtil.getLoginIdAsLong();
-        String boundary = "----biopilot" + java.util.UUID.randomUUID();
-        // 文件名进 multipart 头：去引号与换行防头注入；中文等非 ASCII 原样走 UTF-8 字节
-        String original = file.getOriginalFilename() == null ? "paper.pdf"
-                : file.getOriginalFilename().replace("\"", "")
-                      .replace("\r", "").replace("\n", "");
-        String contentType = file.getContentType() == null
-                ? "application/pdf" : file.getContentType();
-        byte[] body;
-        try {
-            byte[] head = ("--" + boundary + "\r\n"
-                    + "Content-Disposition: form-data; name=\"file\"; filename=\""
-                    + original + "\"\r\n"
-                    + "Content-Type: " + contentType + "\r\n\r\n")
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            byte[] fileBytes = file.getBytes();
-            byte[] tail = ("\r\n--" + boundary + "--\r\n")
-                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            body = new byte[head.length + fileBytes.length + tail.length];
-            System.arraycopy(head, 0, body, 0, head.length);
-            System.arraycopy(fileBytes, 0, body, head.length, fileBytes.length);
-            System.arraycopy(tail, 0, body, head.length + fileBytes.length, tail.length);
-        } catch (java.io.IOException e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"读取上传内容失败\"}");
-        }
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + "/papers/upload"))
-                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .header("X-User-Id", String.valueOf(userId))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
-    }
-
-    /** 论文登记（元数据落库，原文由上传方先行落 OSS）。 */
-    @PostMapping("/papers/{paperId}")
-    public ResponseEntity<String> papersRegister(@PathVariable String paperId,
-                                                 @RequestBody String body) {
-        long userId = StpUtil.getLoginIdAsLong();
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + "/papers/" + paperId))
-                .header("Content-Type", "application/json")
-                .header("X-User-Id", String.valueOf(userId))
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
-    }
-
-    /** 论文删除（行→对象删除方向由 Python 侧返回 oss_key）。 */
-    @org.springframework.web.bind.annotation.DeleteMapping("/papers/{paperId}")
-    public ResponseEntity<String> papersDelete(@PathVariable String paperId) {
-        long userId = StpUtil.getLoginIdAsLong();
-        HttpRequest upstream = HttpRequest.newBuilder()
-                .uri(URI.create(adapterBase + "/papers/" + paperId))
-                .header("X-User-Id", String.valueOf(userId))
-                .DELETE()
-                .build();
-        try {
-            HttpResponse<String> resp = client.send(upstream,
-                    HttpResponse.BodyHandlers.ofString());
-            return ResponseEntity.status(resp.statusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(resp.body());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"code\":502,\"msg\":\"适配层不可达\"}");
-        }
     }
 
     /** 技能商店（读接口透传，Python 侧读 .biopilot/skills 真数据）。 */
@@ -561,12 +384,14 @@ public class AgentProxyController {
         java.io.InputStream upstreamBody = upstreamResp.body();
         StreamingResponseBody stream = out -> {
             try (upstreamBody) {
-                upstreamBody.transferTo(out);
-                out.flush();
+                // 逐块转发并立即 flush：SSE 的可见节奏由上游每个帧决定
+                SseRelay.pump(upstreamBody, out);
             }
         };
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_EVENT_STREAM)
+                .header("Cache-Control", "no-cache")
+                .header("X-Accel-Buffering", "no")
                 .body(stream);
     }
 }
