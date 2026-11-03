@@ -27,7 +27,7 @@ env 名约定：字段路径以 ``_`` 连接并大写，前缀 ``BIOPILOT_``。�
 ``services/loader.py``（合并与派生）；本文件只做再导出，消费方一律
 ``from biopilot.config import ...``。
 """
-from biopilot.config.services.loader import BioPilotConfig
+from biopilot.config.services.loader import BioPilotConfig, user_cache_root
 from biopilot.config.schemas.sections import (
     AgentsConfig,
     ChunkerConfig,
@@ -54,6 +54,7 @@ from biopilot.config.schemas.sections import (
 
 __all__ = [
     "BioPilotConfig",
+    "user_cache_root",
     "LLMConfig",
     "VisionLLMConfig",
     "RuntimeConfig",

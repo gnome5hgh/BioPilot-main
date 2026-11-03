@@ -1,14 +1,14 @@
 # biopilot/terminal/io/interactive.py
-"""TTY 输入适配：prompt_toolkit 的主输入框、历史落盘与两套键绑定。
+"""TTY 输入适配：prompt_toolkit 的主输入框与两套键绑定。
 
-主输入框支持多行编辑（Alt+Enter 换行、Enter 提交）、历史落盘（跨会话保留）与
-基于历史的自动建议；确认框是独立的一次性 prompt，只识别字母键（y/a/n/Enter），
-不依赖方向键（部分终端不可靠）。键绑定与 fail-safe 语义与 fallback.py 的非 TTY
-实现刻意对齐（空输入即拒绝），两个实现可互换。
+主输入框支持多行编辑（Alt+Enter 换行、Enter 提交）、进程内历史与基于历史的
+自动建议（**不落盘**，退出即忘）；确认框是独立的一次性 prompt，只识别字母键
+（y/a/n/Enter），不依赖方向键（部分终端不可靠）。键绑定与 fail-safe 语义与
+fallback.py 的非 TTY 实现刻意对齐（空输入即拒绝），两个实现可互换。
 """
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.history import FileHistory
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 
 from .base import InputIO, _confirm_lock
@@ -147,8 +147,8 @@ class PromptToolkitIO(InputIO):
 
     功能特点：
         - 多行编辑（Alt+Enter 换行，Enter 提交）。
-        - 历史记录落盘（跨会话保留）。
-        - 自动建议（根据历史记录灰色提示）。
+        - 进程内历史（上下键可回看本次会话，**不写文件**，退出即忘）。
+        - 自动建议（根据本次会话的历史灰色提示）。
         - 光标移动、搜索历史等。
 
     并发安全：confirm 和 confirm_choice 方法使用 _confirm_lock 串行化，避免多个线程同时弹出提示。
@@ -159,18 +159,18 @@ class PromptToolkitIO(InputIO):
         _session: PromptSession，主输入会话（confirm/ask 另起临时会话，避免与它共享状态）
     """
 
-    def __init__(self, history_path: str, session=None):
+    def __init__(self, session=None):
         """
         初始化主输入会话。
 
         Args:
-            history_path (str): 历史记录文件的路径，用于跨会话持久化。
             session (PromptSession, optional): 可注入的 PromptSession 实例，用于测试。
                                                 默认自动创建带有标准配置的会话。
         """
         self._session = session or PromptSession(
             multiline=True,                      # 多行编辑：Alt+Enter 换行、Enter 提交
-            history=FileHistory(history_path),   # 历史落盘，跨会话可回看/搜索
+            # 只在进程内保留历史：不写任何文件，退出即忘（避免落盘与隐私暴露）
+            history=InMemoryHistory(),
             auto_suggest=AutoSuggestFromHistory(),   # 灰色自动建议来自历史匹配
             key_bindings=_session_key_bindings(),
             enable_history_search=True,

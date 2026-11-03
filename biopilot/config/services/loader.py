@@ -11,6 +11,10 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+#: 仓库安装根（本文件位于 biopilot/config/services/，向上三级即仓库根）。
+#: 相对路径的缓存目录按它解析，避免随启动 cwd 漂移。
+_INSTALL_ROOT = Path(__file__).resolve().parents[3]
+
 from biopilot.config.schemas.sections import (
     AgentsConfig,
     CompactionSettings,
@@ -253,3 +257,25 @@ def _apply_env(node, prefix: tuple[str, ...]) -> None:
         val = os.getenv(env_name)
         if val:
             setattr(node, f.name, _coerce(cur, val))
+
+
+def user_cache_root(config) -> Path:
+    """返回按用户隔离的派生缓存根（附件副本与技能物化目录）。
+
+    内容全部可从 OSS/MySQL 重建，不属于真相源；单独提出来是为了让它能留在
+    仓库内，而运行数据根本身重定向到仓库外。
+
+    Args:
+        config: BioPilotConfig（读取 ``runtime.user_cache_dir`` 与 ``runtime.workspace``）。
+
+    Returns:
+        缓存根目录的绝对路径：配置值优先；空串回退 ``<workspace>/user-cache``；
+        相对路径按仓库安装根解析。
+    """
+    raw = str(getattr(config.runtime, "user_cache_dir", "") or "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = _INSTALL_ROOT / path
+        return path.resolve()
+    return (Path(config.runtime.workspace).expanduser() / "user-cache").resolve()

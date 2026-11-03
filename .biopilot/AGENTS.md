@@ -4,8 +4,9 @@
 
 - 覆盖 `.biopilot/`：随仓库分发的静态资产目录，同时是运行期数据根的**默认位置**。
 - 入库的只有静态资产：本 manifest、`intent/`；`infra/` 是依赖服务的数据卷，不入库。
-- 运行期数据（会话历史、按用户工作区、RAG 索引状态与语料镜像、外置工具结果）写在 `runtime.workspace` 下。它默认指向本目录，也可以重定向到仓库外（如 `~/biopilot-runtime`，或用 `BIOPILOT_RUNTIME_WORKSPACE` 覆盖）。本地启动脚本的 pid 与日志固定在 `run/`，不随 workspace 重定向。
-- 用户技能不在这里：技能包由平台管理（Java `bio-skill` + OSS `users/<uid>/skills/`），引擎在会话装配时物化到 `<workspace>/users/<uid>/skills/`。
+- 运行期数据（RAG 索引状态与语料镜像、外置工具结果）写在 `runtime.workspace` 下。它默认指向本目录，也可以重定向到仓库外（如 `~/biopilot-runtime`，或用 `BIOPILOT_RUNTIME_WORKSPACE` 覆盖）。本地启动脚本的 pid 与日志固定在 `run/`，不随 workspace 重定向；REPL 输入历史只在进程内，不落盘。
+- 按用户隔离的派生缓存（附件本地副本、技能物化）由 `runtime.user_cache_dir` 决定；空值回退 `<workspace>/user-cache`，相对路径按仓库安装根解析。它全部可从 OSS/MySQL 重建。
+- 用户技能的内容真相在平台（Java `bio-skill` + OSS `users/<uid>/skills/`），引擎只在会话装配时物化到 `<user_cache>/<uid>/skills/`。
 
 ## Module Positioning
 
@@ -19,10 +20,11 @@
 ├─ intent/         # 意图知识库（入库，随仓库发布，有 manifest）
 ├─ infra/          # 依赖服务（MySQL / Milvus / MinIO）的数据卷（不入库）
 ├─ run/            # start.sh/stop.sh 的 pid 与日志（不入库）
+├─ user-cache/     # 按用户隔离的派生缓存：附件副本、技能物化（不入库，可随时清）
 └─ AGENTS.md
 ```
 
-运行期数据根下的子目录由存储实现决定（常见 `session/`、`users/`、`rag/`、`tool-results/`、`run/`），不要在本文件里抄一份清单。
+运行期数据根下的子目录由存储实现决定（常见 `rag/`、`tool-results/`），不要在本文件里抄一份清单。`user-cache/` 在本目录只是「相对路径按安装根解析」的本地配置结果。
 
 ## Responsibilities
 

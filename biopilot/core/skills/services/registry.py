@@ -1,6 +1,6 @@
 # biopilot/core/skills/registry.py
 """
-Skill 注册表 —— 扫描用户技能缓存目录（`<workspace>/users/<uid>/skills/`）。
+Skill 注册表 —— 扫描用户技能缓存目录（`<user_cache>/<uid>/skills/`）。
 
 Skill 是「注入给现有 agent 的领域知识/流程」，无独立推理循环——与 agents/ 下的
 子 agent 定义（AGENT.md，独立 ReAct 循环）是两个概念。格式严格对齐

@@ -13,6 +13,7 @@ import logging
 import uuid
 from pathlib import Path
 
+from biopilot.config import user_cache_root
 from biopilot.core.security.services import sandbox as sb
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.tool.services.roots import semantic_roots
@@ -97,8 +98,7 @@ class RunPythonTool(Tool):
                 mounts.append((str(Path(path).resolve()), f"{_CORPUS_MOUNT}/{name}"))
         # 对话附件：只读挂进 /corpus/uploads——模型写的分析代码据此读数据文件
         if user_id and conversation_id:
-            uploads = (Path(cfg.runtime.workspace) / "users" / user_id
-                       / "uploads" / conversation_id)
+            uploads = (user_cache_root(cfg) / user_id / "uploads" / conversation_id)
             if uploads.is_dir():
                 mounts.append((str(uploads.resolve()), f"{_CORPUS_MOUNT}/uploads"))
 

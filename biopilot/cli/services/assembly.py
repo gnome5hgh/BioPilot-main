@@ -14,7 +14,7 @@ from rich.console import Console
 from biopilot.cli.services.bootstrap import _ensure_services
 
 logger = logging.getLogger(__name__)
-from biopilot.config import BioPilotConfig
+from biopilot.config import BioPilotConfig, user_cache_root
 from biopilot.core.agent import Agent
 from biopilot.core.agent import AgentRegistry
 from biopilot.core.skills import (
@@ -210,7 +210,7 @@ async def assemble_web_session(user_id: str, conversation_id: str,
     try:
         _platform = _shared_platform_client(config)
         _user_cache = await asyncio.to_thread(
-            sync_user_skills, db, _platform, config.runtime.workspace, user_id)
+            sync_user_skills, db, _platform, str(user_cache_root(config)), user_id)
     except Exception:
         logger.warning("用户技能物化失败，本次会话不加载额外技能（%s）", user_id,
                        exc_info=True)

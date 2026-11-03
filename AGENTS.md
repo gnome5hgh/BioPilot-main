@@ -48,7 +48,7 @@ BioPilot-main/
 - `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（8 个域：bio-system / bio-project / bio-file / bio-kb / bio-schedule / bio-literature / bio-citation，以及技术适配层 bio-gateway）、`bio-common`（core/web/net/mybatis/satoken/oss/pdf/mcp 八个共享模块）。
 - 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
-- `.biopilot/` 是静态资产与数据卷根：`intent/` 入库，`infra/` 是 docker 数据卷，`run/` 是本地启动脚本的 pid 与日志（不入库）；运行期数据默认也落在这里，但可用 `runtime.workspace` / `BIOPILOT_RUNTIME_WORKSPACE` 重定向到仓库外。用户技能不在这里（OSS `users/<uid>/skills/` + 本地缓存）。
+- `.biopilot/` 是静态资产与数据卷根：`intent/` 入库，`infra/` 是 docker 数据卷，`run/` 是本地启动脚本的 pid 与日志（不入库），`user-cache/` 是按用户隔离的派生缓存（附件副本、技能物化，不入库）。运行期数据默认也落在这里，但可用 `runtime.workspace` / `BIOPILOT_RUNTIME_WORKSPACE` 重定向到仓库外；用户缓存根由 `runtime.user_cache_dir` 单独控制。
 - `.agents/skills/` 是给编码代理用的技能，与 BioPilot 运行时的用户技能是**两条不相干的线**。
 - `docs/`、`scripts/`、`tests/` 不入库是既定策略；运行期目录与个人路径不得入库。
 

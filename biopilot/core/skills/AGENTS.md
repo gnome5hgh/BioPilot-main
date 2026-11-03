@@ -24,7 +24,7 @@ skills/
 
 ## Responsibilities
 
-- 扫描用户技能缓存目录（`<workspace>/users/<uid>/skills/`），校验每份 SKILL.md（name 必须等于目录名、description 必填，fail-fast）。
+- 扫描用户技能缓存目录（`<user_cache>/<uid>/skills/`，缓存根由 `runtime.user_cache_dir` 决定），校验每份 SKILL.md（name 必须等于目录名、description 必填，fail-fast）。
 - 提供三级渐进披露：L1 清单注入 head → L2 按需加载正文 → L3 读目录内资源（路径围栏）。
 - 把该用户启用的技能包从平台内部端点物化到本地缓存，按 `content_sha` 判断是否需要重拉。
 

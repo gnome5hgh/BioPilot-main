@@ -131,14 +131,19 @@ class RuntimeConfig:
     """运行时基础设施：工作区、agent 插件目录、会话免问上限档。
 
     Attributes:
-        workspace: str，运行时数据根目录（milvus/memory/audit 等）
+        workspace: str，运行时数据根目录（会话历史、RAG 索引状态与语料镜像等）
+        user_cache_dir: str，按用户隔离的派生缓存根（附件副本、技能物化）
         agents_dir: str，Agent 插件扫描目录
         confirm_above: str，会话免问上限档（风险档高于它的工具执行前需用户确认）
         allow_host_shell: bool，是否允许网页终端启动宿主 shell（拥有服务账号权限）
     """
 
-    #: 运行时数据根目录，存放 milvus、memory、audit 等（与用户级数据目录 .biopilot/ 同一处）
+    #: 运行时数据根目录，存放会话历史、RAG 索引状态与语料镜像等
     workspace: str = ".biopilot"
+    #: 按用户隔离的派生缓存根：附件本地副本与用户技能物化目录。
+    #: 空串 = <workspace>/user-cache；相对路径按仓库安装根解析（便于把缓存固定在
+    #: 仓库内，而运行数据根重定向到仓库外）。内容全部可从 OSS/MySQL 重建。
+    user_cache_dir: str = ""
     #: 记忆/会话真相源的 MySQL 连接串（Python 侧 bio_memory_block/bio_memory_block_history/bio_message；
     #: 测试经 BIOPILOT_MEMORY_MYSQL_DSN 覆盖到 biopilot_test 库）
     #: 容器实例发布在宿主 3307（3306 常被本机自装 MySQL 占用）

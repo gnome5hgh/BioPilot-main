@@ -3,7 +3,7 @@
 
 平台侧（Java）把每个用户安装的技能包存在 OSS（``users/<uid>/skills/<name>/<sha>.zip``），
 ``bio_skill`` 表是管理真相。引擎只做只读消费：会话装配时把该用户的启用技能物化到
-``<workspace>/users/<uid>/skills/``，供注册表扫描。
+``<user_cache>/<uid>/skills/``，供注册表扫描。
 
 本地目录**只是缓存**：``content_sha`` 对不上就删了重拉；平台不可达时保留旧缓存继续用，
 没有缓存则该用户暂时没有额外技能——不阻塞对话。缓存不是真相源，任何时刻都可重建。
@@ -29,13 +29,13 @@ _MAX_ENTRIES = 2000
 _MAX_BYTES = 50 * 1024 * 1024
 
 
-def sync_user_skills(db, platform_client, workspace: str, user_id: str) -> Path | None:
+def sync_user_skills(db, platform_client, cache_root: str, user_id: str) -> Path | None:
     """把该用户启用的技能物化到本地缓存目录。
 
     Args:
         db: MemoryDB 实例（只读 ``bio_skill``；表缺失/查询失败时降级为空）。
         platform_client: 平台内部客户端（``skill_package`` 取包字节）；可为 None。
-        workspace: 引擎运行时数据根。
+        cache_root: 按用户隔离的派生缓存根（``config.user_cache_root``）。
         user_id: 归属用户。
 
     Returns:
@@ -56,7 +56,7 @@ def sync_user_skills(db, platform_client, workspace: str, user_id: str) -> Path 
         if row.get("enabled", 1) and str(row.get("name", "")).strip()
     }
 
-    root = user_skills_cache_dir(workspace, user_id)
+    root = user_skills_cache_dir(cache_root, user_id)
     manifest = _read_manifest(root)
 
     # 清理：不在启用集合里的缓存目录、内容已变化的目录、残留的临时物化目录
