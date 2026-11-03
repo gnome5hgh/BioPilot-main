@@ -60,6 +60,9 @@ rag:
   #                           # 不设会落回 pymilvus 默认重试（最多 75 次），服务半死时
   #                           # 一次检索白等几十秒——要动这个值先想清楚代价
   #   write_timeout: 60.0     # 写路径截止（秒），批量入库本身耗时故比读路径宽松，默认见 config.py
+  #   minio:
+  #     endpoint: localhost:9000
+  #     bucket: biopilot      # 应用统一 bucket：论文/文件/文档/技能/图表原图/工具结果共用
 
 # 子代理超时（秒，仅 YAML）；默认值见 config.py AgentsConfig（表内每个角色都有值，撞帽即需重估）
 # agents:
@@ -92,8 +95,7 @@ compaction:
   tool_results:
     persist_threshold_chars: 50000 # 单条工具结果超过此字符数时外置
     preview_chars: 2000            # 指针里的预览长度
-    bucket: biopilot-tool-results # MinIO 桶（与图表原图分开）
-    local_dir: ""                  # 空 = <workspace>/tool-results
+    local_dir: ""                  # 空 = <workspace>/tool-results；不进对象存储时回退到此
 
 # 记忆整合（后台 debounce 队列）
 memory:

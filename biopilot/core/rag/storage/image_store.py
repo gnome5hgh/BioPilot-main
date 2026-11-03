@@ -1,8 +1,12 @@
 """图表原图的对象存储：把块的图区域存进 MinIO，按对象键取回。
 
-依赖栈里的 MinIO 本来只服务向量库，这里给它开一个**自己的 bucket** 放图表原图——
-块上只留对象键，图字节不进向量库（向量库塞 blob 会拖慢读写），也不落在工作区
-（这样换机器仍能取到图）。键用块 id，天然幂等覆盖。
+图片与应用其余对象（平台文件、工具结果）**共用一个 bucket**，靠前缀分域：本模块
+独占 ``rag/images/``，其余对象都在 ``users/<uid>/`` 下。块上只留逻辑键（块 id），
+对象名由前缀 + 逻辑键拼出，图字节不进向量库（向量库塞 blob 会拖慢读写），也不落在
+工作区（这样换机器仍能取到图）。键用块 id，天然幂等覆盖。
+
+前缀是清理逻辑的安全边界：全量收敛只列举本前缀下的对象，绝不会把同桶的
+``users/`` 对象当成孤儿图删掉。
 
 **全部方法是软依赖**：存储不可达时只记一条告警、返回失败，绝不抛——图是加分项，
 它挂了不该让文本索引或检索崩掉。要不要存由 `rag.store_images` 开关决定，关掉时
@@ -20,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 #: 图表原图的 MIME：渲染固定产 PNG。
 _CONTENT_TYPE = "image/png"
+
+#: 图表原图在共享 bucket 里的对象名前缀。与 ``users/`` 分开是硬约束：
+#: 孤儿清理按前缀列举，混放会把别的对象当孤儿图删掉。
+_IMAGE_PREFIX = "rag/images/"
 
 #: 连接失败后的冷却时间（秒）。连一次不可达的存储要好几秒（SDK 内部会重试），而索引
 #: 一篇论文可能有十几张图——不记这笔账就会按图重复等，一篇就白等一分钟。冷却期内直接
@@ -49,19 +57,6 @@ class ImageStore(Protocol):
         """
         ...
 
-    def put_file(self, key: str, data: bytes, content_type: str) -> bool:
-        """存入一个任意类型的对象（论文 PDF 等非图片产物共用这个桶）。
-
-        Args:
-            key: 对象键。
-            data: 文件字节。
-            content_type: MIME 类型。
-
-        Returns:
-            bool: 是否存入成功。
-        """
-        ...
-
     def get(self, key: str) -> bytes | None:
         """按键取回一张图。
 
@@ -82,10 +77,10 @@ class ImageStore(Protocol):
         ...
 
     def list_keys(self) -> list[str]:
-        """列出桶里全部对象键（供全量收敛找出孤儿对象）。
+        """列出图片命名空间下的全部逻辑键（供全量收敛找出孤儿对象）。
 
         Returns:
-            list[str]: 对象键列表；存储不可用时为空列表。
+            list[str]: 逻辑键列表（不含 ``rag/images/`` 前缀）；存储不可用时为空列表。
         """
         ...
 
@@ -98,10 +93,6 @@ class NullImageStore:
 
     def put(self, key: str, data: bytes) -> bool:
         """什么都不做（开关关掉 = 明确不存图，不是失败）。"""
-        return False
-
-    def put_file(self, key: str, data: bytes, content_type: str) -> bool:
-        """空实现同样不存任何对象。"""
         return False
 
     def get(self, key: str) -> bytes | None:
@@ -176,28 +167,37 @@ class MinioImageStore:
                 logger.warning("对象存储不可用（%s）：%s", self._config.endpoint, e)
                 return None
 
+    @staticmethod
+    def _object_name(key: str) -> str:
+        """把逻辑键映射成共享 bucket 里的对象名。
+
+        Args:
+            key: 逻辑键（块 id 等）。
+
+        Returns:
+            带 ``rag/images/`` 前缀的对象名。
+        """
+        return f"{_IMAGE_PREFIX}{key}"
+
     def put(self, key: str, data: bytes) -> bool:
         """把一张图存进 bucket。
 
         Args:
-            key: 对象键（用块 id）。
+            key: 逻辑键（用块 id）。
             data: PNG 字节。
 
         Returns:
             bool: 是否存入成功（失败只告警）。
         """
-        return self.put_file(key, data, _CONTENT_TYPE)
-
-    def put_file(self, key: str, data: bytes, content_type: str) -> bool:
-        """把一个对象存进 bucket（类型由调用方给定，论文上传与图片共用）。"""
         if not data:
             return False
         client = self._ensure_client()
         if client is None:
             return False
         try:
-            client.put_object(self._config.bucket, key, io.BytesIO(data),
-                              length=len(data), content_type=content_type)
+            client.put_object(self._config.bucket, self._object_name(key),
+                              io.BytesIO(data), length=len(data),
+                              content_type=_CONTENT_TYPE)
             return True
         except Exception as e:
             logger.warning("对象入库失败（%s）：%s", key, e)
@@ -207,7 +207,7 @@ class MinioImageStore:
         """按键取回一张图。
 
         Args:
-            key: 对象键。
+            key: 逻辑键。
 
         Returns:
             bytes | None: 图片字节；对象不存在或存储不可用时为 None。
@@ -217,7 +217,7 @@ class MinioImageStore:
             return None
         response = None
         try:
-            response = client.get_object(self._config.bucket, key)
+            response = client.get_object(self._config.bucket, self._object_name(key))
             return response.read()
         except Exception as e:
             # 不存在与存储故障在这里不作区分：调用方拿到 None 都按「图不可用」处理
@@ -235,29 +235,30 @@ class MinioImageStore:
         """按键删除一张图（不存在或失败都只告警）。
 
         Args:
-            key: 对象键。
+            key: 逻辑键。
         """
         client = self._ensure_client()
         if client is None:
             return
         try:
-            client.remove_object(self._config.bucket, key)
+            client.remove_object(self._config.bucket, self._object_name(key))
         except Exception as e:
             logger.warning("图表原图删除失败（%s）：%s", key, e)
 
     def list_keys(self) -> list[str]:
-        """列出桶里全部对象键。
+        """列出图片命名空间下的全部逻辑键（只扫 ``rag/images/`` 前缀）。
 
         Returns:
-            list[str]: 对象键列表；存储不可用或列举失败时为空列表（调用方据此跳过收敛，
-            不会因为拿不到清单就误删）。
+            list[str]: 逻辑键列表（已去掉前缀）；存储不可用或列举失败时为空列表
+            （调用方据此跳过收敛，不会因为拿不到清单就误删）。
         """
         client = self._ensure_client()
         if client is None:
             return []
         try:
-            return [obj.object_name for obj in
-                    client.list_objects(self._config.bucket, recursive=True)]
+            return [obj.object_name[len(_IMAGE_PREFIX):] for obj in
+                    client.list_objects(self._config.bucket, prefix=_IMAGE_PREFIX,
+                                        recursive=True)]
         except Exception as e:
             logger.warning("图表原图列举失败：%s", e)
             return []

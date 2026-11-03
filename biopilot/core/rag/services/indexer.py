@@ -474,7 +474,11 @@ class RagIndexer:
             store.remove(key)
 
     def _sweep_orphan_images(self) -> int:
-        """删掉「桶里有、库里已无对应块」的孤儿对象（全量收敛用）。
+        """删掉「图片命名空间里有、库里已无对应块」的孤儿对象（全量收敛用）。
+
+        图片与平台文件共用一个 bucket，所以这里只接受图片的逻辑键（块 id 命名、
+        不含路径分隔符）。``list_keys`` 已按图片前缀列举，这一层再兜一次底：
+        万一将来替身或新实现返回了 ``users/...`` 之类的键，也不会被当成孤儿删掉。
 
         Returns:
             int: 清掉的对象数；拿不到清单时返回 0（宁可少删，不可误删）。
@@ -482,7 +486,7 @@ class RagIndexer:
         store = self.service.image_store
         if not getattr(store, "enabled", False):
             return 0
-        keys = set(store.list_keys())
+        keys = {key for key in store.list_keys() if "/" not in key}
         if not keys:
             return 0
         try:

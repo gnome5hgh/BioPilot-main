@@ -65,25 +65,27 @@ def object_key(user_id: str, session_id: str, tool_call_id: str) -> str:
 class ToolResultStore:
     """工具结果存档：先写 MinIO，失败回退本地文件。
 
+    与图表原图共用应用统一 bucket，靠 ``users/`` 前缀与图片的 ``rag/images/``
+    前缀分域——两边的清理逻辑各扫各的前缀，不会互相误删。
+
     Attributes:
-        _minio_config: MinioConfig，连接配置
-        _bucket: str，桶名
+        _minio_config: MinioConfig，连接配置（bucket 从它取）
+        _bucket: str，应用统一 bucket 名
         _local_dir: Path，本地回退根目录
         _client: Minio | None，惰性构造的客户端
         _failed_at: float，上次失败时刻（0 = 没失败过），用于冷却
         _lock: threading.Lock，保护惰性构造
     """
 
-    def __init__(self, minio_config, bucket: str, local_dir: str | Path):
+    def __init__(self, minio_config, local_dir: str | Path):
         """绑定连接配置与本地回退目录。
 
         Args:
-            minio_config: MinioConfig，MinIO 连接配置。
-            bucket: str，桶名（与图表原图分开）。
+            minio_config: MinioConfig，MinIO 连接配置与 bucket 名。
             local_dir: str | Path，本地回退根目录。
         """
         self._minio_config = minio_config
-        self._bucket = bucket
+        self._bucket = minio_config.bucket
         self._local_dir = Path(local_dir)
         self._client = None
         self._failed_at = 0.0
@@ -224,4 +226,4 @@ def make_tool_result_store(config) -> ToolResultStore:
     settings = config.compaction.tool_results
     local_dir = settings.local_dir or str(
         Path(config.runtime.workspace) / "tool-results")
-    return ToolResultStore(config.rag.storage.minio, settings.bucket, local_dir)
+    return ToolResultStore(config.rag.storage.minio, local_dir)

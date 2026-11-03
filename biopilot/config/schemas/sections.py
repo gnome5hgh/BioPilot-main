@@ -470,25 +470,29 @@ class ChunkerConfig:
 
 @dataclass
 class MinioConfig:
-    """图表原图的对象存储连接（复用依赖栈里的 MinIO 实例）。
+    """应用统一对象的 MinIO 存储连接（复用依赖栈里的 MinIO 实例）。
+
+    所有对象共用一个 bucket，靠前缀分域：图表原图走 ``rag/images/``，平台文件
+    （论文/上传文件/分析产物/文档/技能包）与工具结果走 ``users/<uid>/``。
 
     Attributes:
         endpoint: str，``host:port``（不带 scheme）
         access_key / secret_key: str，凭证
-        bucket: str，存放图表原图的 bucket（**自有名字**，不要用向量库自己的 bucket）
+        bucket: str，应用统一 bucket（不要用向量库自己的 bucket）
         secure: bool，是否走 TLS
     """
 
     #: MinIO 地址（host:port）。默认对齐 docker-compose 里的服务：
-    #: 该实例原本只服务向量库，现在同时给 BioPilot 放图表原图。
+    #: 该实例原本只服务向量库，现在同时给 BioPilot 放应用对象。
     endpoint: str = "localhost:9000"
 
     #: 凭证默认值与 compose 里的 MinIO 一致——那只绑回环，不对外网开放。
     access_key: str = "minioadmin"
     secret_key: str = "minioadmin"
 
-    #: 存图表原图的 bucket（与向量库自己的 bucket 分开）。
-    bucket: str = "biopilot-images"
+    #: 应用统一 bucket：论文、上传文件、分析产物、文档、技能包、图表原图、
+    #: 工具结果外置共用（与向量库自己的内部 bucket 分开）。
+    bucket: str = "biopilot"
 
     #: 是否用 TLS（本机 compose 走明文）。
     secure: bool = False
@@ -606,13 +610,11 @@ class ToolResultArchiveConfig:
     Attributes:
         persist_threshold_chars: int，单条工具结果超过此字符数时外置
         preview_chars: int，指针里保留的预览字符数
-        bucket: str，MinIO 桶名（与图表原图的桶分开）
         local_dir: str，本地回退目录；空串表示 `<workspace>/tool-results`
     """
 
     persist_threshold_chars: int = 50000
     preview_chars: int = 2000
-    bucket: str = "biopilot-tool-results"
     local_dir: str = ""
 
 

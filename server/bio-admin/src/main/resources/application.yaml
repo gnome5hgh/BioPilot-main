@@ -38,5 +38,5 @@ biopilot:
       endpoint: ${BIOPILOT_MINIO_ENDPOINT:localhost:9000}
       access-key: ${BIOPILOT_MINIO_ACCESS_KEY:minioadmin}
       secret-key: ${BIOPILOT_MINIO_SECRET_KEY:minioadmin}
-      bucket: ${BIOPILOT_MINIO_BUCKET:biopilot-images}
+      bucket: ${BIOPILOT_MINIO_BUCKET:biopilot}
       secure: ${BIOPILOT_MINIO_SECURE:false}
