@@ -127,6 +127,7 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     # ── 编排与技能 ──
     "spawn_sub_agent": ("🤖 子任务", "次"),
     "load_skill": ("🧩 技能", "次"),
+    "read_reference": ("📖 资料", "次"),
     "submit_review": ("📮 提审", "次"),
 }
 _DEFAULT = ("🔧 执行", "次")

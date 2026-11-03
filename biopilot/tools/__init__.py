@@ -12,6 +12,7 @@ from biopilot.tools.file.write_file import WriteFileTool
 from biopilot.tools.file.edit_file import EditFileTool
 from biopilot.tools.file.delete_file import DeleteFileTool
 from biopilot.tools.file.read_pdf import ReadPdfTool
+from biopilot.tools.file.read_reference import ReadReferenceTool
 from biopilot.tools.review.format_check import FormatCheckTool
 from biopilot.tools.review.submit_review import SubmitReviewTool
 from biopilot.tools.search.fetch_pdf import FetchPdfTool
@@ -19,6 +20,6 @@ from biopilot.tools.search.search_literature import SearchLiteratureTool
 
 __all__ = [
     "GlobTool", "GrepTool", "ReadFileTool", "WriteFileTool", "EditFileTool",
-    "DeleteFileTool", "ReadPdfTool", "FormatCheckTool",
+    "DeleteFileTool", "ReadPdfTool", "ReadReferenceTool", "FormatCheckTool",
     "SubmitReviewTool", "FetchPdfTool", "SearchLiteratureTool",
 ]

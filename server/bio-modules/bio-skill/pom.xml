@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.biopilot</groupId>
+    <artifactId>bio-modules</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>bio-skill</artifactId>
+  <!-- 用户技能管理：agentskills.io 标准形态包的安装/启停/更新/卸载。
+       内容本体存 OSS（users/<uid>/skills/...），本模块独占 bio_skill 表；
+       引擎只读消费，不参与管理面。 -->
+  <dependencies>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-mybatis</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-satoken</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-oss</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <!-- git 来源拉取：纯 Java 实现，运行镜像无需安装 git 二进制 -->
+    <dependency>
+      <groupId>org.eclipse.jgit</groupId>
+      <artifactId>org.eclipse.jgit</artifactId>
+      <version>6.10.0.202406032230-r</version>
+    </dependency>
+    <!-- SKILL.md frontmatter 解析（版本由 Spring Boot 管理） -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

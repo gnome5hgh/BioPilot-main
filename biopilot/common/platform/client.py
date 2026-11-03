@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -120,6 +120,24 @@ class PlatformClient:
                              or "application/octet-stream"),
         }
         return response.content, meta
+
+    def skill_package(self, user_id: str, name: str) -> tuple[bytes, str]:
+        """取回本人已安装技能的 zip 包字节与内容 sha。
+
+        Args:
+            user_id: 归属用户。
+            name: 技能名。
+
+        Returns:
+            ``(zip_bytes, content_sha)``；content_sha 来自响应头，可作本地缓存键。
+
+        Raises:
+            PlatformError: 不存在、不属于该用户或平台不可用。
+        """
+        response = self._request(
+            "GET", f"/internal/skills/{quote(name, safe='')}/package",
+            user_id=user_id, timeout=self._transfer_timeout)
+        return response.content, response.headers.get("X-Content-Sha", "") or ""
 
     def upload_artifact(self, user_id: str, run_id: str, name: str, data: bytes,
                         content_type: str = "application/octet-stream") -> dict:

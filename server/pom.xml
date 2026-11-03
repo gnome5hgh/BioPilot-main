@@ -129,6 +129,11 @@
         <artifactId>bio-citation</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <dependency>
+        <groupId>com.biopilot</groupId>
+        <artifactId>bio-skill</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 </project>

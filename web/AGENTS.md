@@ -25,7 +25,7 @@ web/src/
 ├─ stores/terminal.js  # 终端面板开关（全局一块面板、一条会话）
 ├─ components/         # AppSidebar / MarkdownView / FilePreviewModal / TerminalPanel / ToastHost / ConfirmDialog
 ├─ utils/              # time（本地时间）/ toast / confirm / errors / files（原文读取、预览分类、下载）
-└─ views/              # Chat / Papers / Literature / KB / Citations / Settings / Admin / Login / MainLayout
+└─ views/              # Chat / Papers / Literature / KB / Citations / Skills / Settings / Admin / Login / MainLayout
 ```
 
 ## 硬规则

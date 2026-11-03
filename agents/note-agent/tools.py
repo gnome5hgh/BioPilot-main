@@ -10,9 +10,11 @@ delete_file：删除自己的笔记产物（笔记不进检索知识库,删除�
 spawn 工具需要构造参数(agent_timeouts),故 make_tools 传已实例化的工具实例而非类。
 """
 from biopilot.config import BioPilotConfig
+from pathlib import Path
+
 from biopilot.tools import (
     ReadFileTool, ReadPdfTool, WriteFileTool, EditFileTool,
-    DeleteFileTool, GlobTool, GrepTool,
+    DeleteFileTool, GlobTool, GrepTool, ReadReferenceTool,
 )
 from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
@@ -30,6 +32,7 @@ from biopilot.tools.vision.analyze_figures import AnalyzeFiguresTool
 TOOLS = make_tools(BioPilotConfig.from_env(), [
     ReadPdfTool,
     ReadFileTool, WriteFileTool, EditFileTool, DeleteFileTool,
+    ReadReferenceTool(Path(__file__).resolve().parent / "references"),
     SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
                    max_turns=BioPilotConfig.from_env().agents.max_turns),
     GlobTool, GrepTool,

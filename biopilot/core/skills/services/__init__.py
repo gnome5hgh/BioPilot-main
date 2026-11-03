@@ -1,25 +1,16 @@
-"""Skill 服务：注册表、准入安装与装配并入。
+"""Skill 服务：注册表、用户缓存物化与装配并入。
 
-`SkillConfig`（插件配置实体）在 `../domain/`。
+`SkillConfig`（插件配置实体）在 `../config/`。
 """
 from biopilot.core.skills.services.assembly import apply_pre_approval, merge_tools
-from biopilot.core.skills.services.install import (
-    enable_skill,
-    install_skill,
-    list_skills_command,
-    load_lock,
-    uninstall_skill,
-    update_skill,
-)
+from biopilot.core.skills.services.layout import user_skills_cache_dir
 from biopilot.core.skills.services.registry import SkillRegistry
+from biopilot.core.skills.services.user_skills import sync_user_skills
 
 __all__ = [
     "SkillRegistry",
+    "apply_pre_approval",
     "merge_tools",
-    "install_skill",
-    "update_skill",
-    "uninstall_skill",
-    "enable_skill",
-    "list_skills_command",
-    "load_lock",
+    "sync_user_skills",
+    "user_skills_cache_dir",
 ]

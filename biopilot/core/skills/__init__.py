@@ -1,35 +1,25 @@
 # biopilot/core/skills/__init__.py
-"""Skill 域包 —— 可安装能力包的注册表、装配并入与准入安装。
+"""Skill 域包 —— 技能发现、运行时消费与用户技能缓存。
 
 公共出口（下游一律 `from biopilot.core.skills import ...`）：
-- ``SkillRegistry`` / ``SkillConfig`` ← registry（运行时发现/校验/可见性/渐进披露）
-- ``install_skill`` / ``update_skill`` / ``uninstall_skill`` / ``enable_skill``
-  / ``list_skills_command`` / ``load_lock`` ← install（准入/更新/停用与 lock 治理）
-- ``merge_tools`` ← assembly（装配期工具并入 + 命名空间唯一性）
-依赖方向：本包依赖 core.tool / core.common.services.frontmatter；core.agent 经本包做 L1 注入与工具并入。
+- ``SkillRegistry`` / ``SkillConfig`` ← registry（发现/校验/渐进披露）
+- ``merge_tools`` / ``apply_pre_approval`` ← assembly（工具命名空间唯一性）
+- ``sync_user_skills`` ← user_skills（把用户安装的技能物化成本地缓存）
+
+管理面（安装/启停/更新/卸载）在 Java 的 bio-skill 模块；引擎只做只读消费。
 """
 
 from biopilot.core.skills.services.assembly import apply_pre_approval, merge_tools
-from biopilot.core.skills.services.install import (
-    enable_skill,
-    install_skill,
-    list_skills_command,
-    load_lock,
-    uninstall_skill,
-    update_skill,
-)
-from biopilot.core.skills.config import SkillConfig
+from biopilot.core.skills.services.layout import user_skills_cache_dir
 from biopilot.core.skills.services.registry import SkillRegistry
+from biopilot.core.skills.services.user_skills import sync_user_skills
+from biopilot.core.skills.config import SkillConfig
 
 __all__ = [
     "SkillConfig",
     "SkillRegistry",
-    "enable_skill",
-    "install_skill",
-    "list_skills_command",
-    "load_lock",
-    "merge_tools",
     "apply_pre_approval",
-    "uninstall_skill",
-    "update_skill",
+    "merge_tools",
+    "sync_user_skills",
+    "user_skills_cache_dir",
 ]

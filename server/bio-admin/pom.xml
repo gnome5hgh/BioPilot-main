@@ -44,6 +44,10 @@
     </dependency>
     <dependency>
       <groupId>com.biopilot</groupId>
+      <artifactId>bio-skill</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.biopilot</groupId>
       <artifactId>bio-common-web</artifactId>
     </dependency>
     <dependency>

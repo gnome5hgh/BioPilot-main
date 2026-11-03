@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 from biopilot.config import BioPilotConfig
 from biopilot.core.agent import Agent
 from biopilot.core.agent import AgentRegistry
-from biopilot.core.skills import apply_pre_approval, merge_tools
-from biopilot.core.skills import SkillRegistry, load_lock
+from biopilot.core.skills import (
+    SkillRegistry,
+    apply_pre_approval,
+    merge_tools,
+    sync_user_skills,
+)
 from biopilot.tools.skills.load_skill import LoadSkillTool
 from biopilot.core.tool.services.roots import declared_roots
 from biopilot.core.llm import LLMClient
@@ -46,6 +50,27 @@ from biopilot.terminal.io import make_input_io
 from biopilot.terminal.render import make_renderer
 from biopilot.terminal.repl import _repl, _make_print_fn
 from biopilot.terminal.repl import build_resume_replay
+
+
+#: 平台内部客户端单例：技能物化每次会话都要取包，复用同一个 httpx 客户端，
+#: 避免每个会话都新建连接池；部署地址在进程生命周期内不变。
+_PLATFORM_CLIENT: object | None = None
+
+
+def _shared_platform_client(config: BioPilotConfig):
+    """返回进程级共享的平台内部客户端（懒建单例）。
+
+    Args:
+        config: 引擎配置（决定平台地址与内部 token）。
+
+    Returns:
+        PlatformClient 单例。
+    """
+    global _PLATFORM_CLIENT
+    if _PLATFORM_CLIENT is None:
+        from biopilot.common.platform import make_platform_client
+        _PLATFORM_CLIENT = make_platform_client(config)
+    return _PLATFORM_CLIENT
 
 
 def _approved_tools(config: BioPilotConfig) -> set[str]:
@@ -179,17 +204,22 @@ async def assemble_web_session(user_id: str, conversation_id: str,
                   else str(Path(__file__).resolve().parents[3] / "agents"))
     registry = AgentRegistry(agents_dir)
 
-    _pf_dir = Path.cwd() / ".biopilot"
-    _skills_dir = _pf_dir / "skills"
-    _disabled = {n for n, e in load_lock(_pf_dir).items() if not e.get("enabled", True)}
-    skill_registry = SkillRegistry(
-        str(_skills_dir) if _skills_dir.is_dir() else None, disabled=_disabled)
+    # Skill 体系装配：只物化当前用户的技能缓存（平台 OSS 是内容真相，本地只是副本）。
+    # 平台不可达时保留旧缓存继续用；没有缓存则该用户暂时没有额外技能，不阻塞对话。
+    _user_cache = None
+    try:
+        _platform = _shared_platform_client(config)
+        _user_cache = await asyncio.to_thread(
+            sync_user_skills, db, _platform, config.runtime.workspace, user_id)
+    except Exception:
+        logger.warning("用户技能物化失败，本次会话不加载额外技能（%s）", user_id,
+                       exc_info=True)
+    skill_registry = SkillRegistry(str(_user_cache) if _user_cache is not None else None)
     _load_skill_tool = LoadSkillTool(skill_registry)
     for _agent_type in registry.list_agents():
         _cfg = registry.get_config(_agent_type)
         _cfg.tools = merge_tools(
             ("agent", _cfg.tools),
-            ("skill", skill_registry.get_tools_for(_agent_type)),
             ("framework", [_load_skill_tool]),
         )
         apply_pre_approval(_cfg.tools, _approved_tools(config))
@@ -375,18 +405,8 @@ def main(argv: list[str] | None = None) -> int | None:
                   else str(Path(__file__).resolve().parents[3] / "agents"))
     registry = AgentRegistry(agents_dir)
 
-    # Skill 体系装配：单级扫描（<cwd>/.biopilot/skills/），skill 工具
-    # 并入各 agent 工具表、load_skill 注入全部 agent（AgentConfig 为共享
-    # 对象，此处就地修改即对后续所有 Agent 构造生效）。supervisor 的 skill 工具
-    # 并入被 SkillRegistry.get_tools_for 代码级拒绝（权限最小化红线）。
-    # lock 中 enabled=false 的 skill 扫描期跳过（enabledPlugins 语义）；lock
-    # schema 版本不符时 load_lock 抛 ValueError——启动 fail-fast，与 SkillRegistry
-    # 校验同哲学（不安全状态不进系统）。
-    _pf_dir = Path.cwd() / ".biopilot"
-    _skills_dir = _pf_dir / "skills"
-    _disabled = {n for n, e in load_lock(_pf_dir).items() if not e.get("enabled", True)}
-    skill_registry = SkillRegistry(
-        str(_skills_dir) if _skills_dir.is_dir() else None, disabled=_disabled)
+    # Skill 体系装配：REPL 是开发工具，不接平台用户技能（空注册表，load_skill 仍存在）。
+    skill_registry = SkillRegistry(None)
     # load_skill 无可见性门控（skill 对所有 agent 可见），也不持有父 Agent 引用，
     # 因此全进程共享一个实例即可被所有 agent 安全复用。
     _load_skill_tool = LoadSkillTool(skill_registry)
@@ -394,8 +414,6 @@ def main(argv: list[str] | None = None) -> int | None:
         _cfg = registry.get_config(_agent_type)
         _cfg.tools = merge_tools(
             ("agent", _cfg.tools),
-            # supervisor 的 skill 捆绑工具并入被 get_tools_for 代码级拒绝（权限最小化红线）
-            ("skill", skill_registry.get_tools_for(_agent_type)),
             ("framework", [_load_skill_tool]),
         )
         apply_pre_approval(_cfg.tools, _approved_tools(config))

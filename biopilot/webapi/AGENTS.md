@@ -24,6 +24,7 @@
 - 定时任务定义 CRUD：`/schedules/*`（Java `bio-schedule`）。
 - 文献搜索与导入：`/literature/*`（Java `bio-literature`）。agent 需要检索时只调 Java 的 `/internal/literature/search`，不在本层实现检索。
 - 用户/角色/项目管理与鉴权：归 Java。
+- 技能管理：安装/启停/更新/卸载与 `bio_skill` 表归 Java `bio-skill`；本层不暴露 `/store/skills` 之类端点，只在会话装配时只读表并用 Java 的 `/internal/skills/{name}/package` 取包物化。
 
 ## 硬规则
 

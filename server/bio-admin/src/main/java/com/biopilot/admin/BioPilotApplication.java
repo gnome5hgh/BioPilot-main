@@ -10,7 +10,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication(scanBasePackages = "com.biopilot")
 @MapperScan({"com.biopilot.system.mapper", "com.biopilot.project.mapper",
         "com.biopilot.file.mapper", "com.biopilot.schedule.mapper",
-        "com.biopilot.citation.mapper", "com.biopilot.literature.mapper"})
+        "com.biopilot.citation.mapper", "com.biopilot.literature.mapper",
+        "com.biopilot.skill.mapper"})
 public class BioPilotApplication {
 
     public static void main(String[] args) {

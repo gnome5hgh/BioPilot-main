@@ -88,17 +88,5 @@ public class EngineProxyController {
         return relay.post("/settings", body);
     }
 
-    /** 技能商店（读接口透传，Python 侧读 .biopilot/skills 真数据）。 */
-    @GetMapping("/admin/skills")
-    public ResponseEntity<String> storeSkills() {
-        return relay.get("/store/skills");
-    }
-
-    /** 技能启停（管理动作）：透传切换请求。 */
-    @SaCheckRole("ADMIN")
-    @PostMapping("/admin/skills/{name}/toggle")
-    public ResponseEntity<String> skillToggle(@PathVariable String name,
-                                              @RequestBody String body) {
-        return relay.post("/store/skills/" + name + "/toggle", body);
-    }
+    /** 技能管理已迁至 bio-skill（Java 直管 bio_skill 表与 OSS），适配层不再暴露技能端点。 */
 }

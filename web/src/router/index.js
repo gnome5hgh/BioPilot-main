@@ -21,6 +21,7 @@ const routes = [
       { path: 'settings', component: () => import('../views/SettingsView.vue'),
         meta: { roles: ['ADMIN'] } },
       { path: 'kb', component: () => import('../views/KBView.vue') },
+      { path: 'skills', component: () => import('../views/SkillsView.vue') },
     ],
   },
 ]

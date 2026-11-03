@@ -7,9 +7,11 @@
 """
 from biopilot.config import BioPilotConfig
 from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from pathlib import Path
+
 from biopilot.tools import (
     ReadFileTool, ReadPdfTool, WriteFileTool, EditFileTool,
-    DeleteFileTool, GlobTool, GrepTool,
+    DeleteFileTool, GlobTool, GrepTool, ReadReferenceTool,
 )
 from biopilot.cli.services.tool_assembly import make_tools
 from biopilot.tools.docs import SaveDocumentTool
@@ -19,6 +21,7 @@ from biopilot.tools.recall import get_recall_tools
 TOOLS = make_tools(BioPilotConfig.from_env(), [
     ReadPdfTool,
     ReadFileTool, WriteFileTool, EditFileTool, DeleteFileTool,
+    ReadReferenceTool(Path(__file__).resolve().parent / "references"),
     GlobTool, GrepTool,
     SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
                    max_turns=BioPilotConfig.from_env().agents.max_turns),

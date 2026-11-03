@@ -18,7 +18,7 @@
 - **引用库**：平台侧的文献条目集合（从文件管理勾选论文/手工维护），支持 author-year / GB/T 7714 复制与 `.bib` 导出；不参与 agent 溯源
 - **视觉分析**：PDF 图表区域检测与提取，原图入 MinIO 对象存储，多模态模型看图解读
 - **记忆系统**：对话持久化 + 分层记忆块 + 后台 debounce 记忆整合 + 会话回放（`--resume`）
-- **Skills 机制**：`.biopilot/skills/` 单级目录 + 集中 lock 文件
+- **Skills 机制**：用户技能按 `user_id` 隔离（`bio_skill` 表 + OSS `users/<uid>/skills/`）；内置流程已并入各 agent 的 `AGENT.md`
 - **文献检索**：平台内置 Europe PMC + 管理员在设置页配置的 MCP 检索源；前端文献页与 agent 共用 Java 侧聚合结果
 
 ## 环境要求

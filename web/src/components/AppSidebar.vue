@@ -147,6 +147,7 @@ const navItems = computed(() => {
     { path: '/literature', label: '文献搜索', icon: '⌕' },
     { path: '/kb', label: '知识库', icon: '◈' },
     { path: '/citations', label: '引用库', icon: '❝' },
+    { path: '/skills', label: '技能', icon: '✦' },
   ]
   if (auth.role === 'ADMIN') {
     items.push({ path: '/admin', label: '管理端', icon: '☰' })

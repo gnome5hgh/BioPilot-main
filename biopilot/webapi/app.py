@@ -271,60 +271,6 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         fut.set_result(approved)
         return {"status": "ok"}
 
-    @app.post("/store/skills/{name}/toggle")
-    async def skill_toggle(
-        name: str, body: dict, x_user_id: str | None = Header(default=None),
-    ) -> dict:
-        """技能启用/禁用：写 skills.lock.json（原子写+文件锁，fail-closed 校验）。
-
-        ADMIN 专属（管理动作）；enabled=false 时 registry 扫描期跳过该技能。
-        """
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        enabled = bool((body or {}).get("enabled", True))
-
-        # 读写走 skills 体系自己的 lock 助手：信封带 schema 版本、原子替换、
-        # 排序稳定——裸 JSON 读写会把信封抹掉，下一次任何 lock 消费方直接 fail-closed
-        import fcntl
-        from biopilot.core.skills.services.install import (
-            _save_lock, lock_path as _lock_path)
-        from biopilot.core.skills import load_lock
-        pf_dir = Path.cwd() / ".biopilot"
-        lock_fp = open(_lock_path(pf_dir), "a+")
-        try:
-            fcntl.flock(lock_fp, fcntl.LOCK_EX)
-            skills = (load_lock(pf_dir)
-                      if _lock_path(pf_dir).stat().st_size > 0 else {})
-            entry = skills.get(name, {})
-            entry["enabled"] = enabled
-            skills[name] = entry
-            _save_lock(pf_dir, skills)
-        finally:
-            fcntl.flock(lock_fp, fcntl.LOCK_UN)
-            lock_fp.close()
-        return {"status": "ok", "name": name, "enabled": enabled}
-
-    @app.get("/store/skills")
-    async def store_skills(x_user_id: str | None = Header(default=None)) -> dict:
-        """技能列表：.biopilot/skills 真数据（名称/版本/描述/启用态）。"""
-        if not x_user_id:
-            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.core.skills import SkillRegistry, load_lock
-        pf_dir = Path.cwd() / ".biopilot"
-        lock = load_lock(pf_dir) if (pf_dir / "skills.lock.json").exists() else {}
-        reg = SkillRegistry(str(pf_dir / "skills") if (pf_dir / "skills").is_dir() else None,
-                            disabled={n for n, e in lock.items() if not e.get("enabled", True)})
-        skills = [{"name": n,
-                   "version": ((reg.get_skill(n).metadata or {}).get("version", "")
-                               if reg.get_skill(n) else ""),
-                   # 描述给到前端后由卡片自行折叠；在服务端截断会让用户
-                   # 永远看不到「触发/边界」这些关键约定。
-                   "description": (reg.get_skill(n).description[:2000]
-                                   if reg.get_skill(n) else ""),
-                   "enabled": lock.get(n, {}).get("enabled", True)}
-                  for n in reg.list_skills()]
-        return {"skills": skills}
-
     def _resolve_attachments(x_user_id: str, attachments: list[dict],
                              conversation_id: str) -> list[dict]:
         """把消息引用的附件落成本地文件并返回清单（发给模型的元数据行）。
