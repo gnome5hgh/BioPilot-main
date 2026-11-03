@@ -103,8 +103,12 @@ memory:
   debounce_seconds: 30             # 静默窗口：连续多轮合并成一次整合
   max_delay_seconds: 300           # 连续活跃会话的强制整合上限
 
-# 运行时（安全档位与网页终端）
+# 运行时（数据根、安全档位与网页终端）
 runtime:
+  # 运行期数据根：会话历史、按用户工作区（附件/技能缓存）、RAG 索引状态与语料镜像、
+  # 外置工具结果都写在它下面。默认 .biopilot；想彻底不落仓库时指向仓库外
+  # （如 ~/biopilot-runtime），也可用 BIOPILOT_RUNTIME_WORKSPACE 覆盖。
+  # workspace: ~/biopilot-runtime
   confirm_above: medium          # low=严格 / medium=标准 / high=宽松
   # 网页终端是否允许启动宿主 shell（拥有服务账号的文件与环境访问权）。
   # 只在本人本机使用时开启；共享部署保持 false。

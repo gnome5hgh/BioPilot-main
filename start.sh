@@ -17,7 +17,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUN_DIR="$ROOT/.biopilot/run"
+# 运行期日志与 pid 不进仓库：默认放在运行数据根下（与 runtime.workspace 同处），
+# 可用 BIOPILOT_RUN_DIR 单独覆盖；stop.sh 用同一规则定位 pid。
+RUN_DIR="${BIOPILOT_RUN_DIR:-$HOME/biopilot-runtime/run}"
 mkdir -p "$RUN_DIR"
 
 PY_BIN="$(command -v biopilot || echo /opt/miniconda3/envs/biopilot/bin/biopilot)"

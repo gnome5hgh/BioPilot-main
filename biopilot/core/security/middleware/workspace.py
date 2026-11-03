@@ -38,6 +38,10 @@ from biopilot.core.security.middleware.base import SecurityMiddleware, SecurityB
 from biopilot.core.security.domain import ToolContext
 from biopilot.core.tool import is_writer
 
+#: 仓库安装根（本文件位于 biopilot/core/security/middleware/，向上四级即仓库根）。
+#: 运行数据根可被重定向到仓库外，但 `infra/` 数据卷恒在安装根下，保护不能跟着漂。
+_INSTALL_ROOT = Path(__file__).resolve().parents[4]
+
 
 def _is_relative_to_ci(resolved: Path, prefix: Path) -> bool:
     """大小写不敏感的前缀归属判断：双侧路径部件小写后按部件边界比较。
@@ -68,7 +72,8 @@ def is_denied_path(resolved: Path, workspace: str) -> bool:
        （Milvus 依赖服务数据卷防绕过/防写坏）——按工作区根下的模块前缀
        精确匹配，工作区里同名文件夹（如笔记 "security"）不误伤。约定审计目录
        = workspace/security/audit、服务卷 = workspace/infra/*；若将来改为
-       自定义目录，此派生需同步。
+       自定义目录，此派生需同步。另按安装根额外保护 `<仓库>/.biopilot/infra`：
+       运行数据根重定向到仓库外后，compose 数据卷仍在仓库里。
     ② 仓库内部段（任何位置）：.git / .claude / .zcode（settings 可能含
        API key）。
     ③ 密钥文件名（任何位置）：config.yaml / .env / .env.local。
@@ -94,13 +99,17 @@ def is_denied_path(resolved: Path, workspace: str) -> bool:
     resolved = Path(resolved).resolve() # 用户请求的文件路径
     ws = Path(workspace).resolve()      # 允许访问的工作空间根目录
 
-    # ----- 第一段：工作区内的系统运行时数据目录（前缀匹配，大小写不敏感） -----
+    # ----- 第一段：系统运行时数据目录（前缀匹配，大小写不敏感） -----
     # 前缀判断 resolved 是否落在 ws/security 或 ws/infra 之下：审计目录与依赖
     # 服务数据卷按模块归位到这两个前缀。
     # 大小写不敏感：APFS 上 workspace/SECURITY 与 workspace/security 同目录（防绕过）。
     if _is_relative_to_ci(resolved, ws / "security"):
         return True
     if _is_relative_to_ci(resolved, ws / "infra"):
+        return True
+    # 运行数据根可被重定向到仓库外，但 compose 数据卷仍在安装根下：那条保护
+    # 不能随 workspace 一起漂走，否则重定向一次就把 infra 的写围栏打开了。
+    if _is_relative_to_ci(resolved, _INSTALL_ROOT / ".biopilot" / "infra"):
         return True
 
     # ----- 第二段：版本控制/配置目录（任何路径位置） -----

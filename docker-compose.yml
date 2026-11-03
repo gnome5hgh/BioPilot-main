@@ -144,9 +144,12 @@ services:
       # agent 调平台的内部端点（文献检索等）；与 Java 侧入站校验共用 token
       BIOPILOT_PLATFORM_BASE_URL: http://server:8080
       BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}
+      # 容器内统一用挂载点；宿主侧的 workspace 可另行重定向（见 volumes 第一行）
+      BIOPILOT_RUNTIME_WORKSPACE: /app/.biopilot
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - ./.biopilot:/app/.biopilot
+      # 运行期数据默认取仓库内 .biopilot；宿主可用 BIOPILOT_RUNTIME_WORKSPACE 指到仓库外
+      - ${BIOPILOT_RUNTIME_WORKSPACE:-./.biopilot}:/app/.biopilot
       - ./agents:/app/agents:ro
     depends_on:
       mysql:
