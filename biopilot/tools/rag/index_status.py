@@ -1,8 +1,8 @@
-"""IndexStatusTool：索引体检——对照状态文件、向量库、关键词索引与语料根。
+"""IndexStatusTool：索引体检——对照索引状态、向量库、关键词索引与语料根。
 
 索引器（rag-agent）的**只读**诊断工具。回答「库里现在到底有什么、和语料是否一致」：
 已索引多少篇、多少块、有没有删除未收敛的残留（幽灵）、有没有新增未入库的文件、
-状态文件与当前切块配方是否一致。
+索引状态与当前切块配方是否一致。
 
 不写任何东西、不触发重扫。查出不一致时由调用方决定是否跑一次 reindex_all 收敛。
 """
@@ -22,12 +22,12 @@ class IndexStatusTool(Tool):
         description: str，工具描述
         parameters: dict，JSON Schema（无参数）
         risk_level: str，"low"（只读）
-        side_effects: list[str]，["read_file"]（读状态文件与语料目录元数据）
+        side_effects: list[str]，["read_file"]（读索引状态与语料目录元数据）
     """
 
     name = "index_status"
     description = (
-        "体检语料索引：报告已索引文档数与块数、状态文件与当前切块配方是否一致、"
+        "体检语料索引：报告已索引文档数与块数、索引状态与当前切块配方是否一致、"
         "删除后未收敛的残留（幽灵块）、新增未入库的文件。"
         "只读、不触发重建。用户问「索引里有什么 / 索引好像不对 / 是不是漏了几篇」时先用它，"
         "再据结论决定是否调 reindex_all 收敛。")
@@ -55,14 +55,14 @@ class IndexStatusTool(Tool):
         ]
         if not st.state_present:
             lines.append(
-                f"状态文件：不存在或不可解析（语料根下现见 {st.corpus_docs} 篇，"
+                f"索引状态：不存在或不可解析（语料根下现见 {st.corpus_docs} 篇，"
                 "从未建过索引或状态损坏）→ 跑一次 reindex_all 会全量重扫")
         else:
-            lines.append(f"状态文件：记录 {st.indexed_docs} 篇；语料根下现见 {st.corpus_docs} 篇")
+            lines.append(f"索引状态：记录 {st.indexed_docs} 篇；语料根下现见 {st.corpus_docs} 篇")
             lines.append(
                 "切块配方：与当前配置一致" if st.recipe_in_sync
                 else "切块配方：**与当前配置不一致**（切块参数或解析逻辑改过）"
-                     "→ 下次 reindex_all 会全量重扫重嵌")
+                     "→ 下次全量扫描会重扫重嵌")
 
         if st.ghost:
             lines.append(f"⚠ 幽灵块 {len(st.ghost)} 篇（已删除但索引残留）：{_fmt(st.ghost)}"

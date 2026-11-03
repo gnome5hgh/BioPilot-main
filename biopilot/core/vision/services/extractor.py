@@ -50,6 +50,23 @@ def _parse_number(name: str) -> int:
         return 0
 
 
+def _open_pdf(source: str | bytes):
+    """打开 PDF：本地路径直接开，内存字节走流式打开。
+
+    平台论文不落盘，索引侧只有字节；统一在入口判断来源，后续各步都拿到同一个
+    ``fitz.Document``。调用方负责关闭。
+
+    Args:
+        source: PDF 文件路径或 PDF 字节。
+
+    Returns:
+        fitz.Document: 已打开的文档对象。
+    """
+    if isinstance(source, (bytes, bytearray)):
+        return fitz.open(stream=bytes(source), filetype="pdf")
+    return fitz.open(source)
+
+
 class FigureExtractor:
     """用 pdffigures2 8 步管线从 PDF 提取图表，产出 schemas.Figure 列表。
 
@@ -57,11 +74,11 @@ class FigureExtractor:
     文本分类、图区域检测、渲染等步骤串联起来，最终返回视觉分析可用的 Figure 对象列表。
     """
 
-    def extract(self, path: str, render_images: bool = True) -> list[Figure]:
+    def extract(self, source: str | bytes, render_images: bool = True) -> list[Figure]:
         """提取 PDF 中所有图表对象（图与表都产出）。
 
         Args:
-            path: PDF 文件绝对路径。
+            source: PDF 文件绝对路径，或 PDF 字节（平台论文不落盘）。
             render_images: 是否把区域栅格化成 PNG。只要区域定位与区域文本的调用方
                 （如索引侧造媒体块，不落图）传 False，省掉整篇的渲染开销——区域、
                 注文与图内文本照常给出。
@@ -80,7 +97,7 @@ class FigureExtractor:
         # 后续逐页取图形区 / 渲染图区域仍靠这份 doc。两套「页」并存——
         # fitz 页（doc 按索引取）供渲染与光栅图，我们自己的 Page（pages 列表）
         # 供图注/图形/分类/图检测；两套按页码一一对应。
-        doc = fitz.open(path)
+        doc = _open_pdf(source)
         try:
             # 步骤1-2：抽取文本并清除页眉/页脚/页码
             pages = strip_formatting(extract_text(doc))
@@ -96,7 +113,7 @@ class FigureExtractor:
         finally:
             doc.close()
 
-    def render(self, path: str, figures: list[Figure]) -> None:
+    def render(self, source: str | bytes, figures: list[Figure]) -> None:
         """只渲染给定的这批区域：就地把 PNG 字节与 MIME 填进这些 Figure。
 
         索引侧先用 `render_images=False` 定位（那一步很便宜），再只对**最终会入库**的
@@ -104,12 +121,12 @@ class FigureExtractor:
         跳过（该图保持无图像，调用方按无图处理）。
 
         Args:
-            path: PDF 文件绝对路径。
+            source: PDF 文件绝对路径，或 PDF 字节（平台论文不落盘）。
             figures: 要渲染的 Figure 列表（就地修改）。
         """
         if not figures:
             return
-        doc = fitz.open(path)
+        doc = _open_pdf(source)
         try:
             for figure in figures:
                 region = getattr(figure, "region_boundary", None)

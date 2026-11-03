@@ -1,7 +1,8 @@
 """本地 PDF 文本抽取（PyMuPDF）：把一个 PDF 读成 markdown 文本，不依赖任何外部服务。
 
 是本项目「读 PDF」的唯一实现，服务两个消费方：`read_pdf` 工具要 markdown 全文、
-RAG 索引要带版面坐标的渲染块。
+RAG 索引要带版面坐标的渲染块。两个入口对应两种来源：``extract_pdf`` 读本地文件，
+``extract_pdf_bytes`` 读内存字节（平台论文不落盘）。
 
 **标题不再由本模块推导**：调用方从 `bio_paper.title`（平台论文）或任务上下文取标题，
 经 `extract_pdf(..., title=...)` 传入；本模块只把它用于章节识别时剔除标题行。
@@ -50,8 +51,40 @@ _KNOWN_HEADINGS = (
 _NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+)*)[.)]?\s+\S")
 _KNOWN_HEADING = re.compile(r"^(?:" + "|".join(_KNOWN_HEADINGS) + r")\b", re.IGNORECASE)
 
-_cache: OrderedDict[tuple[str, int, int], "PdfText"] = OrderedDict()
+#: 进程内解析缓存：本地文件用「路径 + 修改时间 + 大小 + 标题」作键，字节源用
+#: 「内容摘要 + 大小 + 标题」，避免两种来源互相覆盖。
+_cache: OrderedDict[tuple, "PdfText"] = OrderedDict()
 _cache_lock = threading.Lock()
+
+
+def _cache_get(key: tuple):
+    """取缓存命中项并刷成最近使用。
+
+    Args:
+        key: 缓存键。
+
+    Returns:
+        PdfText | None: 命中结果；未命中为 None。
+    """
+    with _cache_lock:
+        cached = _cache.get(key)
+        if cached is not None:
+            _cache.move_to_end(key)
+        return cached
+
+
+def _cache_put(key: tuple, result: "PdfText") -> None:
+    """写入缓存并按容量淘汰最久未用的条目。
+
+    Args:
+        key: 缓存键。
+        result: 解析结果。
+    """
+    with _cache_lock:
+        _cache[key] = result
+        _cache.move_to_end(key)
+        while len(_cache) > _CACHE_MAX_ENTRIES:
+            _cache.popitem(last=False)
 
 
 @dataclass
@@ -301,8 +334,29 @@ def _render(lines: list[_Line], body_size: float, rank: dict[float, int],
     return blocks
 
 
+def _extract_doc(doc, title: str) -> PdfText:
+    """把已打开的 PDF 文档抽成带版面位置的块。
+
+    Args:
+        doc: PyMuPDF 的文档对象（路径或字节流打开都行）。
+        title: 论文标题（可为空）。
+
+    Returns:
+        PdfText: 抽取结果。
+    """
+    pages = [_page_lines(page, i + 1) for i, page in enumerate(doc)]
+
+    # 正文字号与级别映射跨页统一：同一篇论文里同级标题字号一致，
+    # 逐页各算一套会把同一级标题在不同页排出不同级别。
+    all_lines = [line for page in pages for line in page]
+    body_size = _dominant_size(all_lines)
+    rank = _rank_levels(all_lines, body_size, title)
+    blocks = [blk for page in pages for blk in _render(page, body_size, rank, title)]
+    return PdfText(title=title, pages=doc.page_count, blocks=tuple(blocks))
+
+
 def _extract(path: str, title: str = "") -> PdfText:
-    """打开并抽取一个 PDF（不走缓存）。
+    """打开并抽取一个本地 PDF（不走缓存）。
 
     标题由调用方提供：平台论文从 `bio_paper.title` 取，语料文件为空——本模块
     不再从版面推导标题。传入的标题只用于章节识别时剔除正文里的标题行。
@@ -323,19 +377,31 @@ def _extract(path: str, title: str = "") -> PdfText:
     # C 层遇到畸形字体/编码会往 stderr 刷告警，糊住终端输出；这里只静音 C 层。
     fitz.TOOLS.mupdf_display_errors(False)
     with fitz.open(path) as doc:
-        pages = [_page_lines(page, i + 1) for i, page in enumerate(doc)]
+        return _extract_doc(doc, title)
 
-        # 正文字号与级别映射跨页统一：同一篇论文里同级标题字号一致，
-        # 逐页各算一套会把同一级标题在不同页排出不同级别。
-        all_lines = [line for page in pages for line in page]
-        body_size = _dominant_size(all_lines)
-        rank = _rank_levels(all_lines, body_size, title)
-        blocks = [blk for page in pages for blk in _render(page, body_size, rank, title)]
-        return PdfText(title=title, pages=doc.page_count, blocks=tuple(blocks))
+
+def _extract_stream(data: bytes, title: str = "") -> PdfText:
+    """从内存字节抽取一个 PDF（平台论文不落盘）。
+
+    Args:
+        data: PDF 字节。
+        title: 论文标题（可为空）。
+
+    Returns:
+        PdfText: 抽取结果。
+
+    Raises:
+        Exception: 字节不是 PDF、文件损坏或加密时按原样上抛。
+    """
+    import fitz
+
+    fitz.TOOLS.mupdf_display_errors(False)
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        return _extract_doc(doc, title)
 
 
 def extract_pdf(path: str, title: str = "") -> PdfText:
-    """抽取 PDF 文本，按 (绝对路径, 修改时间, 文件大小, 标题) 做进程内缓存。
+    """抽取本地 PDF 文本，按 (绝对路径, 修改时间, 文件大小, 标题) 做进程内缓存。
 
     缓存键带上修改时间、文件大小与传入标题，文件或标题变化后自动失效。与 RAG
     服务的解析缓存刻意分开：那把缓存由索引与检索共用、且解析全程持全局锁（并发读
@@ -356,17 +422,42 @@ def extract_pdf(path: str, title: str = "") -> PdfText:
     stat = resolved.stat()              # 不存在即抛 FileNotFoundError，调用方据此走容错分支
     key = (str(resolved), stat.st_mtime_ns, stat.st_size, title or "")
 
-    with _cache_lock:
-        cached = _cache.get(key)
-        if cached is not None:
-            _cache.move_to_end(key)     # 命中即刷新为最近使用，配合下面的容量淘汰
-            return cached
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
 
     result = _extract(str(resolved), title)
+    _cache_put(key, result)
+    return result
 
-    with _cache_lock:
-        _cache[key] = result
-        _cache.move_to_end(key)
-        while len(_cache) > _CACHE_MAX_ENTRIES:
-            _cache.popitem(last=False)
+
+def extract_pdf_bytes(data: bytes, title: str = "", *, digest: str = "") -> PdfText:
+    """从内存字节抽取 PDF 文本（平台论文不落盘）。
+
+    缓存键用内容摘要而非文件元数据：字节来源没有稳定的「修改时间」，同一篇论文
+    每次从对象存储取回的字节可能只是重新编码过。``digest`` 由调用方算好（它同时
+    用作索引状态里的文档指纹），缺省时现算 sha256。
+
+    Args:
+        data: PDF 字节。
+        title: 论文标题（可为空；只用于章节识别剔除标题行）。
+        digest: 内容 sha256（十六进制）；空串表示由本函数现算。
+
+    Returns:
+        PdfText: 抽取结果；内容未变时命中缓存。
+
+    Raises:
+        Exception: 字节不是 PDF、文件损坏或加密时按原样上抛。
+    """
+    import hashlib
+
+    content_digest = digest or hashlib.sha256(data).hexdigest()
+    key = ("<bytes>", content_digest, len(data), title or "")
+
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    result = _extract_stream(data, title)
+    _cache_put(key, result)
     return result

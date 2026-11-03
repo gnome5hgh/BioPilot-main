@@ -401,7 +401,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
         启动时先补跑一次知识库对账：上一进程崩溃留下的 indexing/queued 行、
         跨栈写入留下的半截状态，都会在这里被拉回一致。所有知识库用户都要审计一次
-        ——崩溃可能留下「只剩向量、没有镜像/行」的孤儿，只靠数据库与镜像判据发现不了；
+        ——崩溃可能留下「只剩向量、平台行已删」的孤儿，只靠数据库判据发现不了；
         索引任务幂等，已一致时只做只读对账，不会重复嵌入。
         """
         app.state.shell_reaper = asyncio.create_task(shell_manager.reaper())
@@ -1065,28 +1065,59 @@ _KB_LOCK_RETRIES = 15
 _KB_SWEEP_SECONDS = 300
 
 
-def _drop_paper_index(svc, target: pathlib.Path) -> None:
-    """撤销一篇论文的索引与镜像（并发移出后的补偿；失败只留日志）。
+def _drop_paper_index(svc, paper_id: str) -> None:
+    """撤销一篇论文的索引（并发移出后的补偿；失败只留日志）。
 
     Args:
         svc: RAGService，当前用户域实例。
-        target: 镜像 PDF 路径。
+        paper_id: 平台论文 id。
     """
+    from biopilot.core.rag.constants import paper_doc_key
     try:
-        svc.remove_document(str(target))
+        svc.remove_document(paper_doc_key(paper_id))
     except Exception:
-        logger.warning("撤回已移出论文的索引失败（%s）", target, exc_info=True)
-    try:
-        target.unlink(missing_ok=True)
-    except Exception:
-        logger.warning("撤回已移出论文的镜像失败（%s）", target, exc_info=True)
+        logger.warning("撤回已移出论文的索引失败（%s）", paper_id, exc_info=True)
+
+
+def _sweep_orphan_vectors(svc, counts: dict[str, int],
+                          enabled_ids: set[str]) -> tuple[int, dict[str, int]]:
+    """删掉向量库里不属于任何「已加入」论文的块。
+
+    文档标识取不出论文 id 的（旧版本按镜像绝对路径建的块）一律当孤儿：它们已经
+    没有平台行与之对应，留在检索面里只会召回已移出的内容。
+
+    Args:
+        svc: RAGService，当前用户域实例。
+        counts: 文档标识 → 块数（`document_chunk_counts()` 的结果）。
+        enabled_ids: 仍在知识库的论文 id 集合。
+
+    Returns:
+        tuple[int, dict[str, int]]: (删掉的文档数, 剩余「文档标识 → 块数」)。
+    """
+    from biopilot.core.rag.constants import paper_id_of
+
+    remaining = dict(counts)
+    removed = 0
+    for path in list(remaining):
+        paper_id = paper_id_of(path)
+        if paper_id is not None and paper_id in enabled_ids:
+            continue
+        try:
+            if svc.remove_document(path):
+                removed += 1
+                logger.warning("清理孤儿向量：%s（%s）", path, svc.user_domain)
+            remaining.pop(path, None)
+        except Exception:
+            logger.warning("清理孤儿向量失败（%s）", path, exc_info=True)
+    return removed, remaining
 
 
 def _index_user_kb_sync(user_id: str) -> dict:
     """把该用户「已加入知识库」的论文逐篇索引，并清理已移出的论文。
 
-    逐篇索引用 ``index_document``：它内部先删后建，能给出单篇的分块数与失败原因。
-    已移出的论文走 ``remove_document`` 只删索引，不动 papers 行和 OSS 原文。
+    论文原文经平台内部接口取回字节、直接解析索引——不落任何本地 PDF 文件。逐篇
+    索引用 ``index_document_bytes``：它内部先删后建，能给出单篇的分块数与失败原因。
+    已移出的论文走 ``remove_document`` 只删索引，不动平台行和 OSS 原文。
 
     并发防护（跨栈写入的收敛点）：
       - 同一用户同一时刻只允许一个索引者，用 MySQL 命名锁 ``kb-index:<uid>``
@@ -1133,12 +1164,16 @@ def _index_user_kb_sync(user_id: str) -> dict:
 def _index_user_kb_locked(user_id: str, cfg) -> dict:
     """持有该用户索引锁后执行一轮完整索引（对账 → 逐篇索引 → 清理）。
 
+    论文原文经平台内部接口取回字节，直接解析索引，**不落任何本地 PDF 文件**。
+    文档标识统一为 ``paper:<paper_id>``（见 ``paper_doc_key``）。
+
     状态写者只有 Java：本函数通过 ``/internal/kb/normalize``、``/indexing``、
     ``/requeue-all``、``/result`` 驱动状态迁移；Java 返回的 ``applied`` 决定是否
-    撤回刚建好的向量与镜像。
+    撤回刚建好的向量。
 
     一致性对账以 MySQL 的 ``bio_paper`` 为唯一真相：
-      - 向量库里有、但对应论文不在知识库的块 → 删除（覆盖「镜像已丢、只剩向量」）；
+      - 向量库里不属于任何「已加入」论文的块 → 删除（含旧版本按镜像绝对路径建的
+        遗留块，它们取不出论文 id，一并当孤儿收敛）；
       - 已就绪论文的向量块数与 ``chunk_count`` 不一致（缺失/偏多/偏少）→ 强制重建；
       - ``failed`` 不参与自动重试（用户点重试时 Java 先置 ``queued``），避免对账反复
         消耗解析与嵌入资源。
@@ -1151,15 +1186,12 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         dict: indexed/failed/removed/orphans/drifted 计数与 finished_at。
     """
     from datetime import datetime, timezone
-    from biopilot.core.rag.constants import IndexOutcomeStatus
+    from biopilot.core.rag.constants import IndexOutcomeStatus, paper_doc_key
     from biopilot.core.rag.services.rag_service import get_rag_service
 
-    svc = get_rag_service(cfg, user_domain=user_id)
     db = _shared_db()
+    svc = get_rag_service(cfg, user_domain=user_id, db=db)
     platform = _platform_client()
-    mirror = pathlib.Path(svc.config.corpus.pdf_dir)
-    mirror.mkdir(parents=True, exist_ok=True)
-    mirror_root = mirror.resolve()
 
     # ---- 向量库 ↔ 平台表对账（MySQL 是唯一真相） ----
     # 只在能读到向量库时做：读失败不等于库是空的，不能把所有「已就绪」论文误判成漂移。
@@ -1175,33 +1207,18 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         rows = db.execute(
             "SELECT id, kb_enabled, index_status, chunk_count FROM bio_paper"
             " WHERE user_id=?", (user_id,)).fetchall()
-        enabled_ids = {row["id"] for row in rows if row["kb_enabled"]}
-        # 1) 向量库里不属于任何「已加入」论文的块：删掉。镜像文件由后面的清理统一删，
-        #    这里覆盖「镜像已经不在、只剩向量」的孤儿——只靠文件扫描发现不了。
-        for path in list(vector_counts):
-            try:
-                resolved = pathlib.Path(path).resolve()
-                resolved.relative_to(mirror_root)
-            except (OSError, ValueError):
-                # 不是本用户镜像目录下的路径：不认识的域，宁可不删
-                continue
-            if resolved.stem in enabled_ids:
-                continue
-            try:
-                if svc.remove_document(path):
-                    orphans += 1
-                    logger.warning("清理孤儿向量：%s（%s）", path, user_id)
-                vector_counts.pop(path, None)
-            except Exception:
-                logger.warning("清理孤儿向量失败（%s）", path, exc_info=True)
+        enabled_ids = {str(row["id"]) for row in rows if row["kb_enabled"]}
+        # 1) 向量库里不属于任何「已加入」论文的块：删掉。非 paper: 键是旧版本按
+        #    镜像绝对路径建的遗留块，检索面里还留着就会召回已移出的内容。
+        swept, vector_counts = _sweep_orphan_vectors(svc, vector_counts, enabled_ids)
+        orphans += swept
         # 2) 已就绪论文的向量块数必须与平台 chunk_count 一致；缺失、偏多、偏少都重建
         for row in rows:
             if not row["kb_enabled"] or row["index_status"] != "indexed":
                 continue
             paper_id = str(row["id"])
             expected = int(row.get("chunk_count") or 0)
-            actual = vector_counts.get(
-                str((mirror / f"{paper_id}.pdf").resolve()), 0)
+            actual = vector_counts.get(paper_doc_key(paper_id), 0)
             if actual == 0 or actual != expected:
                 drift.add(paper_id)
                 logger.warning(
@@ -1221,24 +1238,22 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
             "SELECT id, oss_key, kb_enabled, index_status, title FROM bio_paper"
             " WHERE user_id=?",
             (user_id,)).fetchall()
-        enabled = {row["id"]: row for row in rows if row["kb_enabled"]}
+        enabled = {str(row["id"]): row for row in rows if row["kb_enabled"]}
         todo = []
         for paper_id, row in enabled.items():
             if paper_id in seen:
                 continue
-            target = mirror / f"{paper_id}.pdf"
             # 失败等用户显式重试（Java 会先置 queued）；周期/启动对账不能反复烧嵌入
             if row["index_status"] == "failed":
                 continue
-            if (row["index_status"] == "indexed" and target.exists()
-                    and paper_id not in drift):
+            if row["index_status"] == "indexed" and paper_id not in drift:
                 continue
-            todo.append((paper_id, row, target))
+            todo.append((paper_id, row))
         if not todo:
             break
         try:
             accepted = set(platform.kb_indexing(
-                user_id, [paper_id for paper_id, _row, _target in todo]))
+                user_id, [paper_id for paper_id, _row in todo]))
         except Exception:
             logger.warning("索引状态置位失败（%s），本轮跳过", user_id, exc_info=True)
             break
@@ -1247,17 +1262,16 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         seen.update(accepted)
 
         results: list[dict] = []
-        for paper_id, row, target in todo:
+        for paper_id, row in todo:
             if paper_id not in accepted:
                 continue
             try:
-                if not target.exists():
-                    data, _meta = platform.attachment(user_id, "paper", paper_id)
-                    if not data:
-                        raise RuntimeError("论文原文取回失败")
-                    target.write_bytes(data)
+                data, _meta = platform.attachment(user_id, "paper", paper_id)
+                if not data:
+                    raise RuntimeError("论文原文取回失败")
                 # 标题只从数据库取（Java 提取并落库），索引不再自己解析标题
-                outcome = svc.index_document(str(target), title=row.get("title") or None)
+                outcome = svc.index_document_bytes(
+                    data, paper_doc_key(paper_id), title=row.get("title") or None)
                 status = getattr(outcome, "status", None)
                 if status == IndexOutcomeStatus.INDEXED:
                     results.append({"paper_id": paper_id, "ok": True,
@@ -1292,22 +1306,22 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
             if applied.get(paper_id):
                 indexed += 1
             else:
-                # 索引期间被移出：撤回刚建好的向量与镜像，两边都不留残留
-                _drop_paper_index(svc, mirror / f"{paper_id}.pdf")
+                # 索引期间被移出：撤回刚建好的向量，不留残留
+                _drop_paper_index(svc, paper_id)
 
-    # 已移出知识库（或已删除）的论文：删镜像与索引块；文件本身在 OSS 里不动
+    # 已移出知识库（或已删除）的论文：按向量库实际持有的文档标识清理。
+    # 文件本身在 OSS 里不动，平台行由 Java 负责。
     rows = db.execute(
         "SELECT id, kb_enabled FROM bio_paper WHERE user_id=?", (user_id,)).fetchall()
-    enabled = {row["id"] for row in rows if row["kb_enabled"]}
-    for path in mirror.glob("*.pdf"):
-        if path.stem in enabled:
-            continue
-        try:
-            svc.remove_document(str(path))
-            path.unlink(missing_ok=True)
-            removed += 1
-        except Exception:
-            logger.warning("清理已移出论文的索引失败（%s）", path, exc_info=True)
+    enabled = {str(row["id"]) for row in rows if row["kb_enabled"]}
+    try:
+        counts = svc.document_chunk_counts()
+    except Exception:
+        counts = {}
+        logger.warning("清理已移出论文时读不到向量库（%s），留待下一轮",
+                       user_id, exc_info=True)
+    swept, _remaining = _sweep_orphan_vectors(svc, counts, enabled)
+    removed += swept
 
     # 收尾再收敛一次（不重排本轮刚置 indexing 的行）：不留「已就绪但不在知识库」
     try:
@@ -1330,8 +1344,8 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
 def _users_with_kb() -> list[str]:
     """列出知识库里还有勾选论文的用户（启动对账用）。
 
-    启动时给每个用户域做一次向量库审计，覆盖「崩溃后只剩向量、数据库行和镜像
-    都已不在」的孤儿——这类残留用数据库与镜像判据都发现不了。
+    启动时给每个用户域做一次向量库审计，覆盖「崩溃后只剩向量、平台行已不在」
+    的孤儿——这类残留用数据库判据发现不了。
 
     Returns:
         list[str]: 用户 id（去重排序）。
@@ -1349,9 +1363,9 @@ def _users_needing_reconcile() -> list[str]:
     - 行内不自洽：勾选了但还没进入可检索状态，或者没勾选却留着索引痕迹。
       失败（failed）不算——它等用户点重试，周期对账不自动重跑，避免反复
       消耗解析与嵌入资源。
-    - 行外不自洽：镜像目录里还有 PDF，但对应行已经删除、或已不在知识库。
-      论文删除后的索引清理是异步通知，通知丢失时向量会留在检索面里；按
-      镜像目录反查能把这些孤儿收回来。
+    - 行外不自洽：索引状态里还记着某篇论文，但平台行已删除、或已移出知识库。
+      论文删除后的索引清理是异步通知，通知丢失时向量会留在检索面里；按状态
+      清单反查能把这些孤儿收回来（论文已不落本地文件，没有目录可扫）。
 
     Returns:
         list[str]: 需要跑一轮索引/清理的用户 id。
@@ -1374,49 +1388,35 @@ def _users_needing_reconcile() -> list[str]:
                 or row.get("indexed_at") is not None))
         )
     }
-    return sorted(stale | _users_with_orphan_mirrors(rows))
+    return sorted(stale | _users_with_orphan_index(rows))
 
 
-def _users_with_orphan_mirrors(rows: list[dict],
-                               workspace: str | None = None) -> set[str]:
-    """按镜像目录反查「有 PDF 但对应行已删除/未加入」的用户。
+def _users_with_orphan_index(rows: list[dict]) -> set[str]:
+    """按索引状态反查「状态里还记着、平台已不在知识库」的论文归属用户。
+
+    用户域的索引状态记着 ``paper:<id>``；平台行删除或移出知识库时，这些键要
+    等一次对账才会清掉。状态清单是最便宜的判据——不用扫向量库，也不用扫目录。
 
     Args:
         rows: 全量 bio_paper 行（含 user_id/id/kb_enabled，避免二次查询）。
-        workspace: 工作区根（测试注入口）；缺省取当前配置。
 
     Returns:
-        set[str]: 存在孤儿镜像的用户 id。
+        set[str]: 索引里存在已移出论文的用户 id。
     """
-    import re as _re
+    from biopilot.core.rag.constants import paper_id_of
+    from biopilot.core.rag.storage.index_state_store import list_domain_states
 
-    from biopilot.config import BioPilotConfig
-
-    root = (pathlib.Path(workspace) if workspace
-            else pathlib.Path(BioPilotConfig.from_env().runtime.workspace))
     enabled: dict[str, set[str]] = {}
-    safe_to_user: dict[str, str] = {}
     for row in rows:
         user_id = str(row.get("user_id") or "")
-        if not user_id:
-            continue
-        safe_to_user[_re.sub(r"[^A-Za-z0-9_-]", "_", user_id)] = user_id
-        if int(row.get("kb_enabled") or 0):
+        if user_id and int(row.get("kb_enabled") or 0):
             enabled.setdefault(user_id, set()).add(str(row["id"]))
-    base = root / "rag" / "users"
-    if not base.is_dir():
-        return set()
     stale: set[str] = set()
-    for directory in base.iterdir():
-        user_id = safe_to_user.get(directory.name)
-        if user_id is None or not directory.is_dir():
-            continue
-        papers = directory / "papers"
-        if not papers.is_dir():
-            continue
-        keep = enabled.get(user_id, set())
-        if any(path.stem not in keep for path in papers.glob("*.pdf")):
-            stale.add(user_id)
+    for domain, docs in list_domain_states(_shared_db()).items():
+        known = {paper_id_of(key) for key in docs}
+        known.discard(None)
+        if known - enabled.get(domain, set()):
+            stale.add(domain)
     return stale
 
 
@@ -1597,7 +1597,7 @@ def _kb_endpoints(app: FastAPI) -> None:
         for chunk, score in hits:
             item = _chunk_view(chunk, score=round(float(score or 0), 4))
             # 只回 paper_id；文件展示字段由 Java 的论文清单在前端 join
-            item["paper_id"] = Path(chunk.path).stem
+            item["paper_id"] = _paper_id_of(chunk.path)
             results.append(item)
         return {"results": results, "elapsed_ms": elapsed, "query": query}
 
@@ -1607,15 +1607,34 @@ def _kb_endpoints(app: FastAPI) -> None:
     ) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.core.rag.constants import paper_doc_key
+
         cfg = BioPilotConfig.from_env()
-        svc = get_rag_service(cfg, user_domain=x_user_id)
-        path = str(Path(svc.config.corpus.pdf_dir) / f"{paper_id}.pdf")
+        svc = get_rag_service(cfg, user_domain=x_user_id, db=_shared_db())
+        doc_key = paper_doc_key(paper_id)
         try:
             # 分块读取要遍历整库向量，索引写库期间必须让出事件循环，
             # 锁被占用超限就明确告知「正在索引」，不让页面无限转圈。
             chunks = await asyncio.to_thread(
-                _kb_read_locked, svc, svc.list_document_chunks, path)
+                _kb_read_locked, svc, svc.list_document_chunks, doc_key)
         except _KbBusyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         chunks.sort(key=lambda chunk: chunk.chunk_index)
         return {"chunks": [_chunk_view(chunk) for chunk in chunks]}
+
+
+def _paper_id_of(doc_key: str) -> str:
+    """从文档标识取平台论文 id（检索结果回填用）。
+
+    本地语料文档的标识是绝对路径，此时退回文件名（去扩展名）——该值只用于前端
+    展示与关联，不参与任何归属判断。
+
+    Args:
+        doc_key: ``Chunk.path``。
+
+    Returns:
+        str: 平台论文 id，或本地文件名（去扩展名）。
+    """
+    from biopilot.core.rag.constants import paper_id_of
+
+    return paper_id_of(doc_key) or Path(doc_key).stem

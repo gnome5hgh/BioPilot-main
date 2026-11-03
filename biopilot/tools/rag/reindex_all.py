@@ -1,9 +1,12 @@
-"""ReindexAllTool：全量增量扫描——补缺、清陈旧、重建 BM25。
+"""ReindexAllTool：本地语料的全量增量扫描——补缺、清陈旧、重建 BM25。
 
 索引器（rag-agent）的冷路径工具，覆盖三类「定点入库管不到」的场景：
-删除后的收敛（删除只能靠状态文件比对发现，已不存在的文件无法逐条入库）、
+删除后的收敛（删除只能靠索引状态比对发现，已不存在的文件无法逐条入库）、
 手动拷进语料根的文件回填、切块配方变更后的整体重建。幂等：重复调用只在
 确有变更时产生写入。
+
+只适用于本地语料域（``local``）。平台用户的知识库成员与状态由 ``bio_paper``
+驱动，重建入口在知识库页，这里会如实返回「不支持」而不是扫错目录。
 """
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.services.rag_service import get_rag_service
@@ -23,9 +26,10 @@ class ReindexAllTool(Tool):
 
     name = "reindex_all"
     description = (
-        "对整个语料库做一次增量收敛：重新索引新增或有改动的 PDF，"
+        "对本地语料目录做一次增量收敛：重新索引新增或有改动的 PDF，"
         "清理已删除文件残留的索引块，并重建关键词索引。"
-        "用于删除文件之后、手动往语料目录里拷了论文之后、或怀疑索引与语料不一致时。")
+        "用于删除文件之后、手动往语料目录里拷了论文之后、或怀疑索引与语料不一致时。"
+        "平台用户的知识库不支持目录扫描，重建请在知识库页操作。")
     parameters = {"type": "object", "properties": {}, "required": []}
     risk_level = "medium"
     side_effects = ["network"]

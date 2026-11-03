@@ -9,6 +9,9 @@ from biopilot.core.rag.constants.constants import (
     CHUNK_TYPE_FIGURE,
     CHUNK_TYPE_TABLE,
     CHUNK_TYPE_TEXT,
+    PAPER_DOC_PREFIX,
+    paper_doc_key,
+    paper_id_of,
 )
 from biopilot.core.rag.constants.enums import IndexOutcomeStatus
 
@@ -17,5 +20,8 @@ __all__ = [
     "CHUNK_TYPE_FIGURE",
     "CHUNK_TYPE_TABLE",
     "CHUNK_TYPE_TEXT",
+    "PAPER_DOC_PREFIX",
+    "paper_doc_key",
+    "paper_id_of",
     "IndexOutcomeStatus",
 ]

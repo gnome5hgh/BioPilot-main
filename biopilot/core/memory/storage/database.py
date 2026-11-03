@@ -103,6 +103,16 @@ CREATE TABLE IF NOT EXISTS bio_security_audit_event (
     KEY idx_audit_session (session_id, created_at),
     KEY idx_audit_user (user_id, created_at)
 );
+-- bio_rag_index_state 表：RAG 增量索引状态（每用户域一行，Python 独占读写）
+-- state_json 是「文档标识 → 指纹」的映射：本地文档存修改时间，平台论文存内容摘要
+-- 派生的数值。放数据库而不是工作区文件，让运行数据根不再承载任何真相。
+CREATE TABLE IF NOT EXISTS bio_rag_index_state (
+    user_domain VARCHAR(191) NOT NULL,  -- 用户隔离域（local 或登录用户 id）
+    recipe VARCHAR(64) NOT NULL,        -- 产出块集合的配方指纹（切块/嵌入/视觉参数）
+    state_json MEDIUMTEXT NOT NULL,     -- 文档标识 → 指纹 的 JSON 映射
+    updated_at VARCHAR(40) NOT NULL,    -- 最近写入时间（ISO 字符串）
+    PRIMARY KEY (user_domain)
+);
 -- bio_message 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS bio_message (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识

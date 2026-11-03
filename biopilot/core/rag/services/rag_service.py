@@ -5,7 +5,7 @@
 内容检索不到。整个检索与索引过程共用同一把可重入锁（含模型推理），
 整段串行执行是最简单且正确的并发模型。
 """
-from pathlib import Path
+import logging
 import threading
 import time
 
@@ -13,6 +13,8 @@ from biopilot.config import BioPilotConfig
 from biopilot.core.rag.domain import IndexOutcome, IndexRunOutcome, IndexStatus
 from biopilot.core.rag.parsers.chunker import AcademicChunker
 from biopilot.core.rag.services.breaker import RetrievalBreaker
+
+logger = logging.getLogger(__name__)
 
 #: Milvus 可连性探测结果的缓存秒数。带时限才跟得上外部服务的崩溃与恢复；
 #: 探测本身要构造客户端并发 RPC，也不便宜，故不每次调用都探。
@@ -34,7 +36,7 @@ class RAGService:
         _embedder/_reranker/_vector_store/_milvus_available/_bm25/_indexer/_retriever/_rewriter: 惰性组件槽位（None 表示未构造，首次访问经双重检查加锁构造）
     """
 
-    def __init__(self, config: BioPilotConfig, user_domain: str = "local"):
+    def __init__(self, config: BioPilotConfig, user_domain: str = "local", db=None):
         """初始化门面：先把所有组件槽位置空，首次访问才惰性构造。
 
         除 chunker（纯逻辑、构造无副作用）外，编码器/重排器/向量库/BM25 都走
@@ -42,21 +44,15 @@ class RAGService:
 
         Args:
             config: 全局配置对象，包含工作区路径、模型名等。
-            user_domain: 用户隔离域。local=本机单用户（共享语料根与状态文件）；
-                其余值（登录用户 id）派生独立语料根 <workspace>/rag/users/<域>/papers
-                与独立索引状态文件——平台论文从 OSS 同步到该镜像目录后走同一条
-                解析→切块→入库管线，collection 与检索面随之按用户隔离。
+            user_domain: 用户隔离域。local=本机单用户（共享语料根与索引状态）；
+                其余值（登录用户 id）派生独立 collection，论文不落本地文件——
+                索引时由平台适配层取回字节、以 ``paper:<id>`` 作文档标识。
+            db: MemoryDB 实例（索引状态落库）；None 时首次用状态才按
+                ``runtime.memory_dsn`` 懒建共享连接池。
         """
         self.user_domain = user_domain or "local"
-        if self.user_domain != "local":
-            import re as _re
-            safe = _re.sub(r"[^A-Za-z0-9_-]", "_", self.user_domain)
-            from dataclasses import replace as _dc_replace
-            mirror = (Path(config.runtime.workspace) / "rag" / "users"
-                      / safe / "papers")
-            config = _dc_replace(
-                config, corpus=_dc_replace(config.corpus, pdf_dir=str(mirror)))
         self.config = config
+        self._db = db
         # 可重入锁，保护整个索引/检索流程，确保并发下状态一致
         self.lock = threading.RLock()
 
@@ -71,6 +67,7 @@ class RAGService:
         self._retriever = None         # 检索器视图 (Retriever)
         self._rewriter = None          # 改写器 (QueryRewriter)
         self._image_store = None       # 图表原图存取器 (ImageStore)
+        self._state_store = None       # 索引状态存取器（MySQL / 进程内）
 
         # 纯逻辑组件，无副作用，直接构造。切块参数读配置（rag.chunker.*），
         # 配方哈希据此失效——改 YAML 即触发全量重索引。
@@ -200,7 +197,7 @@ class RAGService:
                     self._bm25 = Bm25Index()
         return self._bm25
 
-    def extract_figures(self, path: str):
+    def extract_figures(self, source: str | bytes):
         """定位一篇 PDF 里的图与表区域（媒体块构造用），不渲染图像。
 
         这是 `rag → vision` 的唯一一条边，且**惰性 import**：vision 有自己的
@@ -208,26 +205,26 @@ class RAGService:
         每一次 import biopilot.core.rag 的调用方。
 
         Args:
-            path: PDF 文件绝对路径。
+            source: PDF 文件绝对路径，或 PDF 字节（平台论文不落盘）。
 
         Returns:
             list[Figure]: 检测到的图与表区域；检测不出（扫描件/纯图）为空列表。
         """
         from biopilot.core.vision import FigureExtractor
-        return FigureExtractor().extract(path, render_images=False)
+        return FigureExtractor().extract(source, render_images=False)
 
-    def render_figures(self, path: str, figures) -> None:
+    def render_figures(self, source: str | bytes, figures) -> None:
         """只渲染给定的这批图表区域（就地把图像字节填进这些对象）。
 
         索引侧先 `extract_figures` 定位，再只渲染最终会入库的那批——整篇渲染会为
         一堆不产块的区域白栅格化。
 
         Args:
-            path: PDF 文件绝对路径。
+            source: PDF 文件绝对路径，或 PDF 字节（平台论文不落盘）。
             figures: 要渲染的 Figure 列表（就地修改）。
         """
         from biopilot.core.vision import FigureExtractor
-        FigureExtractor().render(path, figures)
+        FigureExtractor().render(source, figures)
 
     @property
     def image_store(self):
@@ -240,6 +237,55 @@ class RAGService:
             from biopilot.core.rag.storage import make_image_store
             self._image_store = make_image_store(self.config)
         return self._image_store
+
+    @property
+    def state_store(self):
+        """索引状态存取器（惰性单例）。
+
+        状态落在 MySQL：每个用户域一行。连接池优先用构造时注入的，未注入时按
+        ``runtime.memory_dsn`` 懒建共享池。库不可达时退回进程内实现并告警：状态
+        只是增量优化的依据（不是真相源），索引本身仍可完成，代价是重启后全量重扫；
+        真相链路（消息、记忆）有自己的启动预检，不靠这里兜底。
+
+        Returns:
+            索引状态存取器（``IndexStateStore`` 或 ``MemoryIndexStateStore``）。
+        """
+        if self._state_store is None:
+            with self.lock:
+                if self._state_store is None:
+                    from biopilot.core.rag.storage.index_state_store import (
+                        IndexStateStore, MemoryIndexStateStore,
+                    )
+                    try:
+                        db = self._db or _default_db(self.config)
+                    except Exception as e:
+                        logger.warning(
+                            "索引状态库不可用，本次运行使用进程内状态"
+                            "（重启后会全量重扫）：%s", e)
+                        self._state_store = MemoryIndexStateStore()
+                    else:
+                        self._state_store = IndexStateStore(db, self.user_domain)
+        return self._state_store
+
+    def bind_db(self, db) -> None:
+        """补挂索引状态连接池（首次构造没传、之后的调用方有现成池时）。
+
+        进程内实现会就地换成 MySQL 实现；已经是 MySQL 实现就不动——它连着同一个
+        库，换池没有收益，反而会丢掉正在使用的对象。
+
+        Args:
+            db: MemoryDB 实例；None 表示不做任何事。
+        """
+        if db is None:
+            return
+        self._db = db
+        if self._state_store is None:
+            return
+        from biopilot.core.rag.storage.index_state_store import (
+            IndexStateStore, MemoryIndexStateStore,
+        )
+        if isinstance(self._state_store, MemoryIndexStateStore):
+            self._state_store = IndexStateStore(db, self.user_domain)
 
     # ---------- 索引器/检索器视图（延迟创建） ----------
     def get_indexer(self):
@@ -317,6 +363,26 @@ class RAGService:
         with self.lock:
             return self.get_indexer().index_document(path, title=title)
 
+    def index_document_bytes(self, data: bytes, doc_key: str,
+                             title: str | None = None) -> IndexOutcome:
+        """把一篇平台论文（内存字节）索引进向量库（持锁）。
+
+        论文原文来自平台内部接口，不落本地文件；文档身份用 ``paper:<paper_id>``
+        （见 ``paper_doc_key``）。块 id 由文档标识派生，同一篇论文重复索引仍是
+        「先删后建」的幂等覆盖。
+
+        Args:
+            data: PDF 字节。
+            doc_key: 文档标识（``paper:<paper_id>``）。
+            title: 论文标题（来自平台表）。
+
+        Returns:
+            IndexOutcome，本次入库的状态、块数与原因。
+        """
+        with self.lock:
+            return self.get_indexer().index_document_bytes(
+                data, doc_key, title=title)
+
     def index_all(self) -> IndexRunOutcome:
         """全量增量扫描：重索引新增/变更文档、清理已删除文档（持锁）。
 
@@ -374,11 +440,11 @@ class RAGService:
         with self.lock:
             return self.get_retriever().retrieve_scored(query, top_k)
 
-    def list_document_chunks(self, path: str):
+    def list_document_chunks(self, doc_key: str):
         """列出某篇文档当前索引里的全部块（持锁，只读）。
 
         Args:
-            path: 文档的绝对路径（与 Chunk.path 同口径）。
+            doc_key: 文档标识：本地语料是绝对路径，平台论文是 ``paper:<id>``。
 
         Returns:
             list[Chunk]: 该文档的块列表；文档不在索引里时为空列表。
@@ -386,7 +452,7 @@ class RAGService:
         with self.lock:
             store = self._ensure_vector_store()
             return [chunk for chunk, _mtime in store.all_documents()
-                    if chunk.path == str(path)]
+                    if chunk.path == str(doc_key)]
 
     def document_chunk_counts(self) -> dict[str, int]:
         """按文档路径统计向量库块数（持锁，只读）。
@@ -400,38 +466,69 @@ class RAGService:
         with self.lock:
             return self._ensure_vector_store().document_chunk_counts()
 
-    def remove_document(self, path: str) -> bool:
+    def remove_document(self, doc_key: str) -> bool:
         """把一篇文档从索引里整体移除（持锁）。
 
-        用于「移出知识库但保留文件」：只删该路径的块、BM25 行与图表对象，
-        不动 papers 行与 OSS 原文。
+        用于「移出知识库但保留文件」：只删该文档的块、BM25 行与图表对象，
+        不动平台论文行与 OSS 原文。
 
         Args:
-            path: 文档的绝对路径。
+            doc_key: 文档标识：本地绝对路径或 ``paper:<paper_id>``。
 
         Returns:
-            bool: 属于本语料并执行了移除时为 True。
+            bool: 执行了移除时为 True。
         """
         with self.lock:
-            return self.get_indexer().remove_document(path)
+            return self.get_indexer().remove_document(doc_key)
 
 
 # ---------- 模块级服务缓存（按用户域一域一例） ----------
 _rag_services: dict[str, RAGService] = {}
 _rag_singleton_lock = threading.RLock()
 
+#: 索引状态默认连接池（按首个调用方的 DSN 懒建；生产只有一个库）
+_default_db_instance = None
+_default_db_lock = threading.Lock()
+
+
+def _default_db(config: BioPilotConfig):
+    """按配置懒建共享的 MemoryDB（调用方未注入连接池时用）。
+
+    DSN 优先级：环境变量 ``BIOPILOT_MEMORY_MYSQL_DSN``（启动脚本与容器都会设置，
+    也是适配层其他 SQL 用的那一条）→ ``runtime.memory_dsn``。优先环境变量是为了
+    让「同一进程里的库」只有一个口径，避免配置默认值把状态写进另一个库。
+
+    Args:
+        config: 全局配置（取 ``runtime.memory_dsn``）。
+
+    Returns:
+        MemoryDB: 进程内共享的连接池。
+    """
+    global _default_db_instance
+    if _default_db_instance is None:
+        with _default_db_lock:
+            if _default_db_instance is None:
+                import os
+
+                from biopilot.core.memory.storage.database import MemoryDB
+                dsn = (os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")
+                       or config.runtime.memory_dsn)
+                _default_db_instance = MemoryDB(dsn)
+    return _default_db_instance
+
 
 def get_rag_service(config: BioPilotConfig | None = None,
-                    user_domain: str = "local") -> RAGService:
+                    user_domain: str = "local", db=None) -> RAGService:
     """按用户域缓存的检索服务实例（增量更新与索引状态的前提）。
 
     local 域沿用历史单例语义（共享语料根）；其余域每域一个实例——collection
-    加 `_{域}` 后缀、语料根与状态文件各自独立，检索与索引天然按用户隔离。
-    双重检查加锁，保证并发下每域只创建一次。
+    加 `_{域}` 后缀、检索与索引天然按用户隔离。双重检查加锁，保证并发下每域
+    只创建一次。
 
     Args:
         config: 可选配置对象，不传则使用 BioPilotConfig.from_env()。
         user_domain: 用户隔离域（工具侧经运行时上下文取当前 run 的域）。
+        db: 可选 MemoryDB；不传时首次读写索引状态才按配置懒建共享池。
 
     Returns:
         RAGService: 该域唯一的检索服务实例。
@@ -440,6 +537,9 @@ def get_rag_service(config: BioPilotConfig | None = None,
     with _rag_singleton_lock:
         svc = _rag_services.get(key)
         if svc is None:
-            svc = RAGService(config or BioPilotConfig.from_env(), user_domain=key)
+            svc = RAGService(config or BioPilotConfig.from_env(),
+                             user_domain=key, db=db)
             _rag_services[key] = svc
+        else:
+            svc.bind_db(db)
     return svc

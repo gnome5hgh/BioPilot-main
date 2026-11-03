@@ -89,6 +89,7 @@ BioPilot-main/
 - **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_paper` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
 - **单写者规则（按表/列）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
+  - `bio_rag_index_state`：Python 独占（RAG 增量索引状态）。隔离键是 `user_domain`（`local` 或登录用户 id），不是 `user_id`——本地语料域没有用户归属，这是该表不带 `user_id` 列的唯一理由。
   - `bio_paper`：Java 独占（身份/文件列、`kb_enabled`、书目字段、`citation_id`，以及 `indexed/index_status/index_error/indexed_at/chunk_count` 索引状态列）；Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位，状态落盘一律由 Java 完成。
   - `bio_citation`：Java 独占（引用库行）；Python 不读写。
   - `bio_file_upload`：Java 写（用户上传与 agent 分析产物都经 Java 登记）。
@@ -120,7 +121,7 @@ BioPilot-main/
 - **`allowed_spawns` 与风险档位由框架强制**，不靠提示词自律；批量同类对象**一个对象一路**派发。
 - **技能的读写各自归口**：管理面（`bio_skill` 表、OSS `users/<uid>/skills/`、安装准入）归 Java `bio-skill`；引擎只做只读消费（按 `content_sha` 物化的用户缓存），不写管理状态，也不接受 `tools.py` 这类「加载即执行」的非标准扩展。**内置流程（笔记/选题/审查）不是 skill**，写在对应 agent 的 `AGENT.md` 里，模板在该角色 `references/` 下。
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
-- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_paper`/`bio_document`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
+- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_paper`/`bio_document`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；唯一例外是 `bio_rag_index_state`，它的隔离键叫 `user_domain`（`local` 或用户 id），因为本地语料域不属于任何用户。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
 - **跨进程互斥只认 MySQL 锁**：per-conversation run 互斥与整合消费权认领都走 DB 锁（`GET_LOCK`/行级 `FOR UPDATE`），进程内锁只作单进程快路径；拿不到锁降级为文本提示，绝不排队阻塞。
 - **OSS 一致性方向固定**：对象先落、元数据行后写（失败留孤儿对象、不留死行）；删除反向（先删行、再删对象，孤儿可后台对账清扫）。论文标题恒来自解析器出口，上传登记也不回退文件名。
 - **config 快照语义**：run 启动时对配置做一次快照、全程读快照；设置页与模型切换都是**下一个 run 生效**，绝不热改在途 run。
