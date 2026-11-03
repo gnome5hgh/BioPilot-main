@@ -1,270 +1,303 @@
 package com.biopilot.file.service.impl;
 
-import com.biopilot.file.service.DocumentService;
-
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.biopilot.file.domain.BioDocument;
-import com.biopilot.file.domain.FileObjectKeys;
-import com.biopilot.file.domain.UserFileKind;
-import com.biopilot.file.dto.DocumentSummary;
-import com.biopilot.file.dto.DocumentView;
-import com.biopilot.file.mapper.BioDocumentMapper;
 import com.biopilot.common.core.exception.ServiceException;
 import com.biopilot.common.oss.core.MinioTemplate;
+import com.biopilot.file.domain.BioFile;
+import com.biopilot.file.domain.FileNames;
+import com.biopilot.file.domain.FileObjectKeys;
+import com.biopilot.file.dto.DocumentSummary;
+import com.biopilot.file.dto.DocumentView;
+import com.biopilot.file.mapper.BioFileMapper;
+import com.biopilot.file.service.DocumentService;
+import com.biopilot.file.service.OssGcService;
 import java.nio.charset.StandardCharsets;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import com.biopilot.file.service.FileCatalogService;
 
 /**
- * 文档编辑器：bio_document 元数据 + OSS 正文。
+ * 文档编辑器：{@code bio_file} 元数据 + OSS 正文。
  *
- * <p>读取以行内 {@code content} 为准（每次保存同步写行，OSS 故障不会让读者看到旧正文）；
- * OSS 保存同一份正文，供迁移与遗留行（{@code content} 为 NULL）回退读取。</p>
+ * <p>正文只存在 OSS，读取以对象为准；保存时先写新版本对象，再用版本号做条件更新，
+ * 提交后才删旧对象。这样并发写只有一个能成功，失败方只会留下没人引用的对象，
+ * 不会出现“指针已换、正文还是旧的”或“正文已换、指针还是旧的”。</p>
  */
 @Service
 public class DocumentServiceImpl implements DocumentService {
 
-    private static final Logger log = LoggerFactory.getLogger(DocumentServiceImpl.class);
+    private static final int DOC_NAME_MAX = 200;
+    private static final int LIST_LIMIT = 1000;
 
-    private final BioDocumentMapper documentMapper;
-    private final FileCatalogService catalog;
+    private final BioFileMapper files;
     private final MinioTemplate minio;
+    private final OssGcService gc;
     private final TransactionTemplate transaction;
 
-    public DocumentServiceImpl(BioDocumentMapper documentMapper, FileCatalogService catalog,
-                           MinioTemplate minio,
-                           PlatformTransactionManager transactionManager) {
-        this.documentMapper = documentMapper;
-        this.catalog = catalog;
+    public DocumentServiceImpl(BioFileMapper files, MinioTemplate minio,
+                               OssGcService gc,
+                               PlatformTransactionManager transactionManager) {
+        this.files = files;
         this.minio = minio;
+        this.gc = gc;
         this.transaction = new TransactionTemplate(transactionManager);
     }
 
     public List<DocumentSummary> list(long userId) {
-        return documentMapper.selectList(new QueryWrapper<BioDocument>().orderByDesc("seq"))
+        return listForAgent(String.valueOf(userId));
+    }
+
+    public List<DocumentSummary> listForAgent(String userId) {
+        return files.listForAgent(userId, BioFile.KIND_DOCUMENT, LIST_LIMIT)
                 .stream()
                 .map(d -> new DocumentSummary(d.getId(), d.getName(), d.getUpdatedAt()))
                 .toList();
     }
 
     public Map<String, Object> create(long userId, Map<String, Object> body) {
-        String rawName = String.valueOf(body.getOrDefault("name", "新文档.md")).trim();
-        String name = rawName.isEmpty() ? "新文档.md" : rawName;
+        String name = FileNames.displayName(
+                String.valueOf(body.getOrDefault("name", "新文档.md")),
+                DOC_NAME_MAX, "新文档.md");
         String content = String.valueOf(body.getOrDefault("content", ""));
         String user = String.valueOf(userId);
         String id = UUID.randomUUID().toString().replace("-", "");
-        String ossKey = FileObjectKeys.document(user, id);
-        minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
-        BioDocument doc = new BioDocument();
-        doc.setId(id);
-        doc.setUserId(user);
-        doc.setName(name);
-        doc.setContent(content);
-        doc.setOssKey(ossKey);
-        doc.setUpdatedAt(now());
+        byte[] data = content.getBytes(StandardCharsets.UTF_8);
+        String sha = FileNames.sha256(data);
+        String ossKey = FileObjectKeys.document(user, id, 1, sha, attempt());
+        minio.putObject(ossKey, data, "text/markdown");
+        BioFile row = newRow(user, id, name, ossKey, data, sha, 1, now());
         try {
-            transaction.executeWithoutResult(status -> {
-                catalog.reserve(user, UserFileKind.DOCUMENT.code(), name, id);
-                documentMapper.insert(doc);
-            });
+            transaction.executeWithoutResult(status -> files.insert(row));
+        } catch (DuplicateKeyException e) {
+            gc.enqueue(ossKey, "compensate", 0);
+            throw new ServiceException(409, "同名文件已存在，请换一个名字");
         } catch (RuntimeException e) {
-            quietRemove(ossKey);
+            gc.enqueue(ossKey, "compensate", 0);
             throw e;
         }
-        return Map.of("status", "ok", "id", id);
+        return Map.of("status", "ok", "id", id, "name", name, "version", 1);
     }
 
     public DocumentView get(long userId, String docId) {
-        BioDocument doc = find(docId);
-        // 行内 content 是读取真相：每次保存都同步写行，OSS 写失败也不会让读者看到旧正文。
-        // 只有遗留行 content 为 NULL 时才回退读对象。
-        String content = doc.getContent();
-        if (content == null && doc.getOssKey() != null && !doc.getOssKey().isBlank()) {
-            try {
-                content = new String(minio.getObject(doc.getOssKey()), StandardCharsets.UTF_8);
-            } catch (RuntimeException ignored) {
-                // 对象也读不到：按空文档返回，不抛异常
-            }
+        return getForAgent(String.valueOf(userId), docId);
+    }
+
+    public DocumentView getForAgent(String userId, String docId) {
+        BioFile row = find(userId, docId);
+        String content = readContent(userId, row);
+        return new DocumentView(row.getId(), row.getName(), content,
+                row.getVersion() == null ? 1 : row.getVersion(), row.getUpdatedAt());
+    }
+
+    public DocumentView getByName(String userId, String rawName) {
+        String name = FileNames.displayName(rawName, DOC_NAME_MAX, "未命名.md");
+        BioFile row = files.selectByNameForAgent(userId, BioFile.KIND_DOCUMENT,
+                FileNames.nameKey(name));
+        if (row == null) {
+            throw new ServiceException(404, "文档不存在");
         }
-        return new DocumentView(doc.getId(), doc.getName(),
-                content == null ? "" : content, doc.getUpdatedAt());
+        String content = readContent(userId, row);
+        return new DocumentView(row.getId(), row.getName(), content,
+                row.getVersion() == null ? 1 : row.getVersion(), row.getUpdatedAt());
     }
 
     public Map<String, Object> save(long userId, String docId, Map<String, Object> body) {
-        BioDocument doc = find(docId);
-        String content = String.valueOf(body.getOrDefault("content", ""));
-        String name = body.get("name") == null ? null : String.valueOf(body.get("name")).trim();
-        String finalName = name == null || name.isEmpty() ? doc.getName() : name;
-        boolean renamed = !finalName.equals(doc.getName());
         String user = String.valueOf(userId);
-        if (renamed) {
-            // 预检让常见冲突在写对象前返回 409；并发窗口仍由唯一键兜底
-            catalog.assertNameAvailable(finalName, UserFileKind.DOCUMENT.code(), docId);
+        BioFile row = find(user, docId);
+        String content = String.valueOf(body.getOrDefault("content", ""));
+        String name = body.get("name") == null ? row.getName()
+                : FileNames.displayName(String.valueOf(body.get("name")),
+                        DOC_NAME_MAX, row.getName());
+        long expected = expectedVersion(body, row);
+        long nextVersion = expected + 1;
+        byte[] data = content.getBytes(StandardCharsets.UTF_8);
+        String sha = FileNames.sha256(data);
+        String ossKey = FileObjectKeys.document(user, docId, nextVersion, sha, attempt());
+        minio.putObject(ossKey, data, "text/markdown");
+        Integer updated;
+        try {
+            updated = transaction.execute(status -> files.updateDocumentForAgent(
+                    docId, user, name, FileNames.nameKey(name), ossKey, sha,
+                    data.length, "text/markdown", nextVersion, now(), expected));
+        } catch (DuplicateKeyException e) {
+            gc.enqueue(ossKey, "compensate", 0);
+            throw new ServiceException(409, "同名文件已存在，请换一个名字");
+        } catch (RuntimeException e) {
+            gc.enqueue(ossKey, "compensate", 0);
+            throw e;
         }
-        String oldKey = doc.getOssKey();
-        String ossKey = FileObjectKeys.document(user, docId);
-        doc.setContent(content);
-        doc.setOssKey(ossKey);
-        doc.setName(finalName);
-        doc.setUpdatedAt(now());
-        // 更新走「先改库、再写对象」：改名撞键在写对象前回 409，
-        // 不会出现「请求被拒但 OSS 已被新内容覆盖」；正文同时写进行内
-        // （读取真相），对象写失败只记日志，下一次保存再补。
-        transaction.executeWithoutResult(status -> {
-            if (renamed) {
-                catalog.rename(user, UserFileKind.DOCUMENT.code(), docId, finalName);
-            }
-            documentMapper.updateById(doc);
-        });
-        writeDocumentObject(ossKey, content, docId);
-        removeLegacyKey(user, oldKey, ossKey);
-        return Map.of("status", "ok");
+        if (updated == null || updated == 0) {
+            // 另一个写者已经先提交；新对象没有任何行引用，交给 GC
+            gc.enqueue(ossKey, "compensate", 0);
+            throw new ServiceException(409, "文档已被其他会话修改，请刷新后重试");
+        }
+        gc.enqueue(row.getOssKey(), "update");
+        return Map.of("status", "ok", "id", docId, "name", name,
+                "version", nextVersion);
     }
 
     /**
-     * agent 成稿入库：按 (user_id, 归一化名) upsert。新建时对象先落；更新时先写库
-     * 再写对象（行内 content 是读取真相）。
+     * agent 成稿入库：按 (user_id, 归一化名) upsert。
      *
-     * <p>引擎内部调用没有浏览器登录态，名字登记走显式 user_id 的查询与占名。
-     * 同名目标若是论文/数据文件，返回冲突而不是覆盖。</p>
-     *
-     * @param userId  归属用户（字符串，兼容 REPL 的 local 域）
-     * @param rawName 文档名（超 200 字符截断，非法路径字符替换为下划线）
-     * @param content markdown 全文
-     * @return {@code {status, id, name, created}}
+     * <p>新建时对象先落、行后写；已有同名文档时走条件更新（版本号来自刚读到的行）。
+     * 同名目标是论文/数据文件时返回 409，不覆盖。</p>
      */
-    public Map<String, Object> saveByName(String userId, String rawName, String content) {
-        String name = safeDocumentName(rawName);
+    public Map<String, Object> saveByName(String userId, String rawName, String content,
+                                          Long expectedVersion) {
         String user = String.valueOf(userId);
-        FileCatalogService.Reservation existing = catalog.find(user, name);
-        if (existing != null && !UserFileKind.DOCUMENT.code().equals(existing.kind())) {
-            throw FileCatalogService.conflict(name, existing.kind());
-        }
+        String name = FileNames.displayName(rawName, DOC_NAME_MAX, "未命名.md");
+        String key = FileNames.nameKey(name);
+        BioFile existing = files.selectByNameForAgent(user, BioFile.KIND_DOCUMENT, key);
         if (existing != null) {
-            return updateExisting(user, existing.refId(), name, content);
+            return updateExisting(user, existing, name, content, expectedVersion);
         }
         String id = UUID.randomUUID().toString().replace("-", "");
-        String ossKey = FileObjectKeys.document(user, id);
-        minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
+        byte[] data = content.getBytes(StandardCharsets.UTF_8);
+        String sha = FileNames.sha256(data);
+        String ossKey = FileObjectKeys.document(user, id, 1, sha, attempt());
+        minio.putObject(ossKey, data, "text/markdown");
+        BioFile row = newRow(user, id, name, ossKey, data, sha, 1, now());
         try {
-            transaction.executeWithoutResult(status -> {
-                catalog.reserve(user, UserFileKind.DOCUMENT.code(), name, id);
-                documentMapper.insertForAgent(id, user, name, content, ossKey, now());
-            });
-            return Map.of("status", "ok", "id", id, "name", name, "created", true);
-        } catch (RuntimeException e) {
-            quietRemove(ossKey);
-            // 并发抢名：对手若也是文档就改成更新，否则如实回冲突
-            FileCatalogService.Reservation winner = catalog.find(user, name);
-            if (winner != null && UserFileKind.DOCUMENT.code().equals(winner.kind())) {
-                return updateExisting(user, winner.refId(), name, content);
-            }
+            transaction.executeWithoutResult(status -> files.insert(row));
+            return Map.of("status", "ok", "id", id, "name", name,
+                    "version", 1, "created", true);
+        } catch (DuplicateKeyException e) {
+            gc.enqueue(ossKey, "compensate", 0);
+            // 并发抢名：赢家若也是文档就改成更新，否则如实回冲突
+            BioFile winner = files.selectByNameForAgent(user, BioFile.KIND_DOCUMENT, key);
             if (winner != null) {
-                throw FileCatalogService.conflict(name, winner.kind());
+                return updateExisting(user, winner, winner.getName(), content, expectedVersion);
             }
+            throw new ServiceException(409, "同名文件已存在，请换一个名字");
+        } catch (RuntimeException e) {
+            gc.enqueue(ossKey, "compensate", 0);
             throw e;
         }
     }
 
     public void delete(long userId, String docId) {
-        BioDocument doc = find(docId);
-        String user = String.valueOf(userId);
-        transaction.executeWithoutResult(status -> {
-            catalog.release(user, UserFileKind.DOCUMENT.code(), docId);
-            documentMapper.deleteById(docId);
-        });
-        // 行已删；对象只在没有其他行引用时删除（历史同名文档可能共用名字基键）
-        removeLegacyKey(user, doc.getOssKey(), null);
+        deleteForAgent(String.valueOf(userId), docId);
     }
 
-    /** 更新已有文档的正文；对象键按 id 生成，旧的名字基键在成功后清理。 */
-    private Map<String, Object> updateExisting(String user, String docId, String name,
-                                               String content) {
-        BioDocument existing = documentMapper.selectByIdForAgent(user, docId);
-        if (existing == null) {
-            // 登记行指向的文档已不存在：清掉悬空登记，让本次调用按新建重来
-            catalog.release(user, UserFileKind.DOCUMENT.code(), docId);
-            throw new ServiceException(409, "文档登记已失效，请重试");
-        }
-        String ossKey = FileObjectKeys.document(user, docId);
-        // 与 save 同序：先写库（失败不会污染对象），再写对象（读取始终以行内 content 为准）
+    public void deleteForAgent(String userId, String docId) {
+        BioFile row = find(userId, docId);
         transaction.executeWithoutResult(status ->
-                documentMapper.updateForAgent(docId, user, content, ossKey, now()));
-        writeDocumentObject(ossKey, content, docId);
-        removeLegacyKey(user, existing.getOssKey(), ossKey);
-        return Map.of("status", "ok", "id", docId, "name", name, "created", false);
+                files.deleteForAgent(docId, userId, BioFile.KIND_DOCUMENT));
+        // 行已删；对象提交后交给 GC，删除失败也不会留下死行
+        gc.enqueue(row.getOssKey(), "delete");
     }
 
-    private BioDocument find(String docId) {
-        BioDocument doc = documentMapper.selectOne(new LambdaQueryWrapper<BioDocument>()
-                .eq(BioDocument::getId, docId));
-        if (doc == null) {
+    private Map<String, Object> updateExisting(String user, BioFile existing, String name,
+                                               String content, Long expectedVersion) {
+        long current = existing.getVersion() == null ? 1 : existing.getVersion();
+        long expected = expectedVersion == null ? current : expectedVersion;
+        if (expected != current) {
+            // 调用方拿的是旧版本：不写对象，直接让上层刷新后重试
+            throw new ServiceException(409, "文档已被其他会话修改，请刷新后重试");
+        }
+        long nextVersion = expected + 1;
+        byte[] data = content.getBytes(StandardCharsets.UTF_8);
+        String sha = FileNames.sha256(data);
+        String ossKey = FileObjectKeys.document(user, existing.getId(), nextVersion, sha,
+                attempt());
+        minio.putObject(ossKey, data, "text/markdown");
+        Integer updated;
+        try {
+            updated = transaction.execute(status -> files.updateDocumentForAgent(
+                    existing.getId(), user, name, FileNames.nameKey(name), ossKey, sha,
+                    data.length, "text/markdown", nextVersion, now(), expected));
+        } catch (DuplicateKeyException e) {
+            gc.enqueue(ossKey, "compensate", 0);
+            throw new ServiceException(409, "同名文件已存在，请换一个名字");
+        } catch (RuntimeException e) {
+            gc.enqueue(ossKey, "compensate", 0);
+            throw e;
+        }
+        if (updated == null || updated == 0) {
+            gc.enqueue(ossKey, "compensate", 0);
+            throw new ServiceException(409, "文档已被其他会话修改，请刷新后重试");
+        }
+        gc.enqueue(existing.getOssKey(), "update");
+        return Map.of("status", "ok", "id", existing.getId(), "name", name,
+                "version", nextVersion, "created", false);
+    }
+
+    private BioFile find(String user, String docId) {
+        BioFile row = files.selectForAgent(user, BioFile.KIND_DOCUMENT, docId);
+        if (row == null) {
             throw new ServiceException(404, "文档不存在");
         }
-        return doc;
-    }
-
-    private static String safeDocumentName(String rawName) {
-        String name = rawName == null ? "" : rawName.trim();
-        if (name.isEmpty()) {
-            throw new ServiceException(422, "文档名不能为空");
-        }
-        if (name.length() > 200) {
-            name = name.substring(0, 200);
-        }
-        String safe = name.replaceAll("[\\\\/:*?\"<>|\\x00-\\x1f]", "_").trim();
-        return safe.isEmpty() ? "未命名.md" : safe;
+        return row;
     }
 
     /**
-     * 清理旧的名字基对象键：它可能仍被同名的另一行共用（并发重复的历史数据），
-     * 只有确认没有其他行引用时才删除，否则留给后台对账。
+     * 读正文；旧对象被 GC 删除与读者取键之间存在竞态，404 时重读行一次。
      */
-    private void removeLegacyKey(String user, String oldKey, String newKey) {
-        if (oldKey == null || oldKey.isBlank() || oldKey.equals(newKey)) {
-            return;
-        }
+    private String readContent(String user, BioFile row) {
         try {
-            if (documentMapper.countByOssKeyForUser(user, oldKey) == 0) {
-                quietRemove(oldKey);
+            return new String(minio.getObject(row.getOssKey()), StandardCharsets.UTF_8);
+        } catch (RuntimeException first) {
+            BioFile fresh = files.selectForAgent(user, BioFile.KIND_DOCUMENT, row.getId());
+            if (fresh != null && !Objects.equals(fresh.getOssKey(), row.getOssKey())) {
+                try {
+                    return new String(minio.getObject(fresh.getOssKey()),
+                            StandardCharsets.UTF_8);
+                } catch (RuntimeException ignored) {
+                    // 落到下面的统一错误
+                }
             }
-        } catch (RuntimeException e) {
-            // 计数失败时宁可留孤儿，也不能误删另一行的正文
+            throw new ServiceException(502, "文档正文读取失败，请稍后重试");
         }
     }
 
-    /**
-     * 写正文对象；失败只记日志（行内 content 是读取真相，下一次保存会重试对象）。
-     */
-    private void writeDocumentObject(String ossKey, String content, String docId) {
+    private long expectedVersion(Map<String, Object> body, BioFile row) {
+        Object value = body == null ? null : body.get("expected_version");
+        if (value == null || String.valueOf(value).isBlank()) {
+            return row.getVersion() == null ? 1 : row.getVersion();
+        }
         try {
-            minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
-        } catch (RuntimeException e) {
-            log.warn("文档正文写 OSS 失败（行内 content 仍可读） id={}: {}",
-                    docId, e.getMessage());
+            long expected = Long.parseLong(String.valueOf(value));
+            long current = row.getVersion() == null ? 1 : row.getVersion();
+            if (expected != current) {
+                // 调用方拿的是旧版本，直接按冲突处理，避免覆盖别人的修改
+                throw new ServiceException(409, "文档已被其他会话修改，请刷新后重试");
+            }
+            return expected;
+        } catch (NumberFormatException e) {
+            throw new ServiceException(422, "expected_version 必须是整数");
         }
     }
 
-    /** 删除失败只留孤儿，可后台对账清扫；不能影响已提交的数据库结果。 */
-    private void quietRemove(String key) {
-        try {
-            minio.removeObject(key);
-        } catch (RuntimeException ignored) {
-            // 行已落库；对象删除失败只留孤儿
-        }
+    private BioFile newRow(String user, String id, String name, String ossKey,
+                           byte[] data, String sha, long version, String now) {
+        BioFile row = new BioFile();
+        row.setId(id);
+        row.setUserId(user);
+        row.setKind(BioFile.KIND_DOCUMENT);
+        row.setName(name);
+        row.setNameKey(FileNames.nameKey(name));
+        row.setOssKey(ossKey);
+        row.setSizeBytes((long) data.length);
+        row.setContentType("text/markdown");
+        row.setSha256(sha);
+        row.setVersion(version);
+        row.setSource("document");
+        row.setCreatedAt(now);
+        row.setUpdatedAt(now);
+        return row;
     }
 
     private String now() {
-        return OffsetDateTime.now(ZoneOffset.UTC).toString();
+        return FileNames.now();
+    }
+
+    /** 每次写入的尝试标识：让并发写者各自落在不同对象键上。 */
+    private String attempt() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 }

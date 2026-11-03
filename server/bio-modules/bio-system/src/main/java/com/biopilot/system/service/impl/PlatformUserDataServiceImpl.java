@@ -3,6 +3,8 @@ package com.biopilot.system.service.impl;
 import com.biopilot.system.service.PlatformUserDataService;
 
 import com.biopilot.common.oss.core.MinioTemplate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -39,13 +41,27 @@ public class PlatformUserDataServiceImpl implements PlatformUserDataService {
      */
     public void purge(String userId) {
         List<String> objects = new ArrayList<>();
-        objects.addAll(ossKeys("bio_file_upload", "oss_key", userId));
-        objects.addAll(ossKeys("bio_paper", "oss_key", userId));
-        objects.addAll(ossKeys("bio_document", "oss_key", userId));
+        objects.addAll(ossKeys("bio_file", "oss_key", userId));
 
-        // 先删行：引用库 → 论文/文档/文件 → 技能 → 项目/定时任务
-        for (String table : List.of("bio_citation", "bio_paper", "bio_document",
-                "bio_file_upload", "bio_skill", "bio_project", "bio_schedule_task")) {
+        // 先把对象键放进删除 outbox：直接删失败时 GC 还会重试，不会永久留孤儿。
+        String now = OffsetDateTime.now(ZoneOffset.UTC).toString();
+        for (String key : objects) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            try {
+                jdbc.update("INSERT IGNORE INTO bio_oss_gc"
+                                + " (oss_key, reason, attempts, next_at, created_at)"
+                                + " VALUES (?,?,0,?,?)",
+                        key, "purge", now, now);
+            } catch (RuntimeException e) {
+                log.warn("删户对象入 GC 队列失败 {}: {}", key, e.getMessage());
+            }
+        }
+
+        // 先删行：引用库 → 统一文件表 → 技能 → 项目/定时任务
+        for (String table : List.of("bio_citation", "bio_file",
+                "bio_skill", "bio_project", "bio_schedule_task")) {
             try {
                 jdbc.update("DELETE FROM " + table + " WHERE user_id=?", userId);
             } catch (RuntimeException e) {

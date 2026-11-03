@@ -24,11 +24,10 @@ from biopilot.core.skills import (
     sync_user_skills,
 )
 from biopilot.tools.skills.load_skill import LoadSkillTool
-from biopilot.core.tool.services.roots import declared_roots
 from biopilot.core.llm import LLMClient
 from biopilot.core.security.services.classifier import build_classifier
 from biopilot.core.security import (
-    AuditMiddleware, WorkspacePolicyMiddleware,
+    AuditMiddleware,
     ContentGuardMiddleware, CommandGuardMiddleware, PolicyEngineMiddleware,
 )
 from biopilot.core.llm import StructuredOutput
@@ -249,8 +248,6 @@ async def assemble_web_session(user_id: str, conversation_id: str,
 
     middlewares = [
         AuditMiddleware(db=db),
-        WorkspacePolicyMiddleware(workspace=config.runtime.workspace,
-                                  write_roots=declared_roots(config)),
         ContentGuardMiddleware(classifier=build_classifier(config)),
         CommandGuardMiddleware(),
         PolicyEngineMiddleware(confirm_above=config.runtime.confirm_above),
@@ -518,14 +515,11 @@ def main(argv: list[str] | None = None) -> int | None:
     )
     set_memory_context(memory_ctx)
 
-    # 安全管道：五个中间件（经验记忆中间件已移除——工具调用经验不再注入 prompt，
-    # 改由 MemoryConsolidator 后台整合进核心记忆块）。
+    # 安全管道：四个中间件（经验记忆中间件已移除——工具调用经验不再注入 prompt，
+    # 改由 MemoryConsolidator 后台整合进核心记忆块）。路径权威已随文件工具 OSS 化退役。
     middlewares = [
         # 审计事件 insert-only 落 MySQL（bio_security_audit_event），不依赖工作区目录
         AuditMiddleware(db=db),
-        # write_roots = 已声明的产物根 + 工作区：写目标落在其外时升级确认
-        WorkspacePolicyMiddleware(workspace=config.runtime.workspace,
-                                  write_roots=declared_roots(config)),
         # 语义判定层按配置构造：未启用或缺端点即 None（整层不装配）
         ContentGuardMiddleware(classifier=build_classifier(config)),
         # 命令防护：零工具声明 format="shell_command" 时是纯 no-op（为将来的 shell 工具留的缝）

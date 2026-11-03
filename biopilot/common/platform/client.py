@@ -120,8 +120,61 @@ class PlatformClient:
             "oss_key": response.headers.get("X-Oss-Key", "") or "",
             "content_type": (response.headers.get("Content-Type")
                              or "application/octet-stream"),
+            "sha256": response.headers.get("X-Content-Sha256", "") or "",
+            "version": _int_header(response.headers.get("X-File-Version")),
+            "kind": response.headers.get("X-File-Kind", "") or "",
         }
         return response.content, meta
+
+    def get_document(self, user_id: str, doc_id: str) -> dict:
+        """按 id 读取文档（正文在 OSS，Java 返回全文与版本号）。
+
+        Args:
+            user_id: 归属用户。
+            doc_id: 文档 id。
+
+        Returns:
+            ``{id, name, content, version, updated_at}``。
+
+        Raises:
+            PlatformError: 不存在或平台不可用。
+        """
+        return self._request(
+            "GET", f"/internal/documents/{quote(str(doc_id), safe='')}",
+            user_id=user_id, timeout=self._transfer_timeout).json()
+
+    def get_document_by_name(self, user_id: str, name: str) -> dict:
+        """按归一化名读取文档。"""
+        return self._request(
+            "GET", "/internal/documents/by-name", user_id=user_id,
+            params={"name": name}, timeout=self._transfer_timeout).json()
+
+    def list_documents(self, user_id: str) -> list[dict]:
+        """列出本人的文档（不含正文）。"""
+        data = self._request("GET", "/internal/documents", user_id=user_id).json()
+        return list(data.get("documents") or [])
+
+    def delete_document(self, user_id: str, doc_id: str) -> dict:
+        """删除文档（Java 先删行，对象交给 GC）。"""
+        return self._request(
+            "DELETE", f"/internal/documents/{quote(str(doc_id), safe='')}",
+            user_id=user_id).json()
+
+    def list_files(self, user_id: str, *, run_id: str = "",
+                   limit: int = 100) -> list[dict]:
+        """列出本人的数据文件/分析产物。"""
+        params: dict[str, str | int] = {"limit": int(limit)}
+        if run_id:
+            params["run_id"] = run_id
+        data = self._request("GET", "/internal/files", user_id=user_id,
+                             params=params).json()
+        return list(data.get("files") or [])
+
+    def delete_file(self, user_id: str, file_id: str) -> dict:
+        """删除数据文件/分析产物（Java 先删行，对象交给 GC）。"""
+        return self._request(
+            "DELETE", f"/internal/files/{quote(str(file_id), safe='')}",
+            user_id=user_id).json()
 
     def skill_package(self, user_id: str, name: str) -> tuple[bytes, str]:
         """取回本人已安装技能的 zip 包字节与内容 sha。
@@ -243,24 +296,28 @@ class PlatformClient:
         applied = data.get("applied") or {}
         return {str(key): bool(value) for key, value in applied.items()}
 
-    def save_document(self, user_id: str, name: str, content: str) -> dict:
+    def save_document(self, user_id: str, name: str, content: str,
+                      expected_version: int | None = None) -> dict:
         """保存或覆盖用户文档编辑器中的 markdown 文档。
 
         Args:
             user_id: 归属用户。
             name: 文档名。
             content: markdown 全文。
+            expected_version: 乐观锁版本；None 时 Java 用刚读到的版本。
 
         Returns:
-            Java 侧返回的 ``{id, name, created}``。
+            Java 侧返回的 ``{id, name, version, created}``。
 
         Raises:
-            PlatformError: 平台不可用或保存被拒。
+            PlatformError: 平台不可用或保存被拒（409 表示版本冲突）。
         """
+        payload: dict[str, object] = {"name": name, "content": content or ""}
+        if expected_version is not None:
+            payload["expected_version"] = int(expected_version)
         return self._request(
             "POST", "/internal/documents/save", user_id=user_id,
-            json={"name": name, "content": content or ""},
-            timeout=self._transfer_timeout).json()
+            json=payload, timeout=self._transfer_timeout).json()
 
     def search_literature(self, user_id: str, payload: dict) -> dict:
         """转发文献检索请求，取回平台聚合后的候选与各源错误。

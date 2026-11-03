@@ -56,43 +56,32 @@ class CatalogFlowTest {
     @BeforeEach
     void ensureTables() {
         // 测试库表结构随实体演进：先删后建，避免存量表缺列导致插入/查询 500
-        jdbc.execute("DROP TABLE IF EXISTS bio_paper");
-        jdbc.execute("DROP TABLE IF EXISTS bio_file_upload");
-        jdbc.execute("DROP TABLE IF EXISTS bio_document");
-        jdbc.execute("DROP TABLE IF EXISTS bio_user_file");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_paper ("
+        jdbc.execute("DROP TABLE IF EXISTS bio_file");
+        jdbc.execute("DROP TABLE IF EXISTS bio_oss_gc");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_file ("
                 + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
-                + "title VARCHAR(500) NOT NULL, file_name VARCHAR(255) NULL,"
+                + "kind VARCHAR(16) NOT NULL, name VARCHAR(255) NOT NULL,"
+                + "name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NULL,"
                 + "oss_key VARCHAR(500) NOT NULL, size_bytes BIGINT NOT NULL DEFAULT 0,"
-                + "indexed INTEGER NOT NULL DEFAULT 0, kb_enabled TINYINT NOT NULL DEFAULT 0,"
-                + "citation_id VARCHAR(64) NULL, authors VARCHAR(1000) NOT NULL DEFAULT '',"
-                + "year VARCHAR(10) NOT NULL DEFAULT '', journal VARCHAR(300) NOT NULL DEFAULT '',"
-                + "index_status VARCHAR(20) NOT NULL DEFAULT 'not_added',"
-                + "index_error VARCHAR(500) NULL, indexed_at VARCHAR(40) NULL,"
-                + "chunk_count INT NOT NULL DEFAULT 0, created_at VARCHAR(40) NOT NULL,"
-                + "seq BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_papers_seq (seq), KEY idx_papers_user (user_id))");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_file_upload ("
-                + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
-                + "name VARCHAR(255) NOT NULL, oss_key VARCHAR(500) NOT NULL,"
-                + "size_bytes BIGINT NOT NULL DEFAULT 0, content_type VARCHAR(120) NULL,"
-                + "source VARCHAR(16) NOT NULL DEFAULT 'upload',"
-                + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
-                + "KEY idx_upload_user (user_id))");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_document ("
-                + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
-                + "name VARCHAR(200) NOT NULL, content MEDIUMTEXT NULL,"
-                + "oss_key VARCHAR(500) NULL, updated_at VARCHAR(40) NOT NULL,"
-                + "seq BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_documents_seq (seq), KEY idx_documents_user (user_id))");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_user_file ("
-                + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
-                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,"
-                + "name VARCHAR(255) NOT NULL, ref_id VARCHAR(64) NOT NULL,"
-                + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_user_file_name (user_id, name_key),"
-                + "UNIQUE KEY uk_user_file_ref (kind, ref_id),"
-                + "KEY idx_user_file_user (user_id))");
+                + "content_type VARCHAR(120) NULL, sha256 CHAR(64) NULL,"
+                + "version BIGINT NOT NULL DEFAULT 1, source VARCHAR(16) NULL,"
+                + "run_id VARCHAR(64) NULL, conversation_id VARCHAR(64) NULL,"
+                + "title VARCHAR(500) NULL, authors VARCHAR(1000) NULL,"
+                + "year VARCHAR(10) NULL, journal VARCHAR(300) NULL,"
+                + "kb_enabled TINYINT NULL, indexed INTEGER NULL,"
+                + "index_status VARCHAR(20) NULL, index_error VARCHAR(500) NULL,"
+                + "indexed_at VARCHAR(40) NULL, chunk_count INT NULL,"
+                + "citation_id VARCHAR(64) NULL, created_at VARCHAR(40) NOT NULL,"
+                + "updated_at VARCHAR(40) NULL, seq BIGINT NOT NULL AUTO_INCREMENT,"
+                + "PRIMARY KEY (id), UNIQUE KEY uk_file_seq (seq),"
+                + "UNIQUE KEY uk_file_name (user_id, name_key),"
+                + "KEY idx_file_user_kind (user_id, kind, seq),"
+                + "KEY idx_file_kb (user_id, kind, kb_enabled, index_status))");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_oss_gc ("
+                + "id BIGINT NOT NULL AUTO_INCREMENT, oss_key VARCHAR(500) NOT NULL,"
+                + "reason VARCHAR(32) NOT NULL, attempts INT NOT NULL DEFAULT 0,"
+                + "next_at VARCHAR(40) NULL, created_at VARCHAR(40) NOT NULL,"
+                + "PRIMARY KEY (id), UNIQUE KEY uk_oss_gc_key (oss_key))");
         truncateAll();
         when(minio.getObject(anyString()))
                 .thenReturn("正文".getBytes(StandardCharsets.UTF_8));
@@ -107,10 +96,8 @@ class CatalogFlowTest {
     }
 
     private void truncateAll() {
-        jdbc.execute("TRUNCATE TABLE bio_user_file");
-        jdbc.execute("TRUNCATE TABLE bio_paper");
-        jdbc.execute("TRUNCATE TABLE bio_file_upload");
-        jdbc.execute("TRUNCATE TABLE bio_document");
+        jdbc.execute("TRUNCATE TABLE bio_file");
+        jdbc.execute("TRUNCATE TABLE bio_oss_gc");
     }
 
     private String tokenFor(String userName) {
@@ -204,8 +191,8 @@ class CatalogFlowTest {
         ResponseEntity<Map> fetched = rest.exchange("/api/v1/documents/" + docId,
                 HttpMethod.GET, new HttpEntity<>(headers), Map.class);
         assertThat(fetched.getBody().get("name")).isEqualTo("笔记.md");
-        // 读取以行内 content 为准（OSS 是同一份正文的持久副本）
-        assertThat(fetched.getBody().get("content")).isEqualTo("初始内容");
+        // 正文以 OSS 为唯一真相；测试桩固定返回“正文”
+        assertThat(fetched.getBody().get("content")).isEqualTo("正文");
 
         ResponseEntity<Map> saved = rest.exchange("/api/v1/documents/" + docId, HttpMethod.PUT,
                 new HttpEntity<>(Map.of("content", "改后的内容"), headers), Map.class);
@@ -278,12 +265,15 @@ class CatalogFlowTest {
 
     private void insertKbPaper(String id, long userId, int kb, String status,
                                String indexedAt, int chunks) {
-        jdbc.update("INSERT INTO bio_paper (id, user_id, title, file_name, oss_key,"
-                        + " size_bytes, indexed, kb_enabled, index_status, indexed_at,"
-                        + " chunk_count, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                id, String.valueOf(userId), "t", id + ".pdf",
+        jdbc.update("INSERT INTO bio_file (id, user_id, kind, name, name_key, oss_key,"
+                        + " size_bytes, content_type, version, source, title,"
+                        + " indexed, kb_enabled, index_status, indexed_at,"
+                        + " chunk_count, created_at, updated_at)"
+                        + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                id, String.valueOf(userId), "paper", id + ".pdf", (id + ".pdf").toLowerCase(),
                 "users/" + userId + "/papers/" + id + "/a.pdf", 10,
+                "application/pdf", 1, "paper", "t",
                 "indexed".equals(status) ? 1 : 0, kb, status, indexedAt, chunks,
-                "2026-01-01T00:00:00Z");
+                "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
     }
 }

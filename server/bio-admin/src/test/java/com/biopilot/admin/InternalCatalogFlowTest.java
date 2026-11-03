@@ -43,37 +43,34 @@ class InternalCatalogFlowTest {
 
     @BeforeEach
     void ensureTables() {
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_paper ("
+        jdbc.execute("DROP TABLE IF EXISTS bio_file");
+        jdbc.execute("DROP TABLE IF EXISTS bio_oss_gc");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_file ("
                 + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
-                + "title VARCHAR(500) NOT NULL, file_name VARCHAR(255) NULL,"
+                + "kind VARCHAR(16) NOT NULL, name VARCHAR(255) NOT NULL,"
+                + "name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NULL,"
                 + "oss_key VARCHAR(500) NOT NULL, size_bytes BIGINT NOT NULL DEFAULT 0,"
-                + "indexed INTEGER NOT NULL DEFAULT 0, kb_enabled TINYINT NOT NULL DEFAULT 0,"
-                + "citation_id VARCHAR(64) NULL, authors VARCHAR(1000) NOT NULL DEFAULT '',"
-                + "year VARCHAR(10) NOT NULL DEFAULT '', journal VARCHAR(300) NOT NULL DEFAULT '',"
-                + "index_status VARCHAR(20) NOT NULL DEFAULT 'not_added',"
-                + "index_error VARCHAR(500) NULL, indexed_at VARCHAR(40) NULL,"
-                + "chunk_count INT NOT NULL DEFAULT 0, created_at VARCHAR(40) NOT NULL,"
-                + "seq BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_papers_seq (seq), KEY idx_papers_user (user_id))");
-        jdbc.execute("DROP TABLE IF EXISTS bio_file_upload");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_file_upload ("
-                + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
-                + "name VARCHAR(255) NOT NULL, oss_key VARCHAR(500) NOT NULL,"
-                + "size_bytes BIGINT NOT NULL DEFAULT 0, content_type VARCHAR(120) NULL,"
-                + "source VARCHAR(16) NOT NULL DEFAULT 'upload',"
-                + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
-                + "KEY idx_upload_user (user_id))");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_user_file ("
-                + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
-                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,"
-                + "name VARCHAR(255) NOT NULL, ref_id VARCHAR(64) NOT NULL,"
-                + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_user_file_name (user_id, name_key),"
-                + "UNIQUE KEY uk_user_file_ref (kind, ref_id),"
-                + "KEY idx_user_file_user (user_id))");
-        jdbc.execute("TRUNCATE TABLE bio_paper");
-        jdbc.execute("TRUNCATE TABLE bio_file_upload");
-        jdbc.execute("TRUNCATE TABLE bio_user_file");
+                + "content_type VARCHAR(120) NULL, sha256 CHAR(64) NULL,"
+                + "version BIGINT NOT NULL DEFAULT 1, source VARCHAR(16) NULL,"
+                + "run_id VARCHAR(64) NULL, conversation_id VARCHAR(64) NULL,"
+                + "title VARCHAR(500) NULL, authors VARCHAR(1000) NULL,"
+                + "year VARCHAR(10) NULL, journal VARCHAR(300) NULL,"
+                + "kb_enabled TINYINT NULL, indexed INTEGER NULL,"
+                + "index_status VARCHAR(20) NULL, index_error VARCHAR(500) NULL,"
+                + "indexed_at VARCHAR(40) NULL, chunk_count INT NULL,"
+                + "citation_id VARCHAR(64) NULL, created_at VARCHAR(40) NOT NULL,"
+                + "updated_at VARCHAR(40) NULL, seq BIGINT NOT NULL AUTO_INCREMENT,"
+                + "PRIMARY KEY (id), UNIQUE KEY uk_file_seq (seq),"
+                + "UNIQUE KEY uk_file_name (user_id, name_key),"
+                + "KEY idx_file_user_kind (user_id, kind, seq),"
+                + "KEY idx_file_kb (user_id, kind, kb_enabled, index_status))");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_oss_gc ("
+                + "id BIGINT NOT NULL AUTO_INCREMENT, oss_key VARCHAR(500) NOT NULL,"
+                + "reason VARCHAR(32) NOT NULL, attempts INT NOT NULL DEFAULT 0,"
+                + "next_at VARCHAR(40) NULL, created_at VARCHAR(40) NOT NULL,"
+                + "PRIMARY KEY (id), UNIQUE KEY uk_oss_gc_key (oss_key))");
+        jdbc.execute("TRUNCATE TABLE bio_file");
+        jdbc.execute("TRUNCATE TABLE bio_oss_gc");
         when(minio.getObject(anyString()))
                 .thenReturn("PDF-BYTES".getBytes(StandardCharsets.UTF_8));
     }
@@ -87,11 +84,17 @@ class InternalCatalogFlowTest {
 
     private void paper(String id, String userId, int kb, String status, int indexed,
                        int chunks) {
-        jdbc.update("INSERT INTO bio_paper (id, user_id, title, file_name, oss_key,"
-                        + " size_bytes, indexed, kb_enabled, index_status, chunk_count,"
-                        + " created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                id, userId, "t", "a.pdf", "users/" + userId + "/papers/" + id + "/a.pdf",
-                10, indexed, kb, status, chunks, "2026-01-01T00:00:00+00:00");
+        String name = id + ".pdf";
+        jdbc.update("INSERT INTO bio_file (id, user_id, kind, name, name_key, oss_key,"
+                        + " size_bytes, content_type, version, source, title,"
+                        + " indexed, kb_enabled, index_status, chunk_count,"
+                        + " created_at, updated_at)"
+                        + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                id, userId, "paper", name, name,
+                "users/" + userId + "/papers/" + id + "/" + name,
+                10, "application/pdf", 1, "paper", "t",
+                indexed, kb, status, chunks,
+                "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00");
     }
 
     private Map<String, Object> post(String path, String userId, Object body) {
@@ -114,13 +117,13 @@ class InternalCatalogFlowTest {
         assertThat(out.get("queued")).isEqualTo(1);
         assertThat(out.get("requeued")).isEqualTo(1);
         assertThat(jdbc.queryForObject(
-                "SELECT index_status FROM bio_paper WHERE id='p1'", String.class))
+                "SELECT index_status FROM bio_file WHERE kind='paper' AND id='p1'", String.class))
                 .isEqualTo("queued");
         assertThat(jdbc.queryForObject(
-                "SELECT chunk_count FROM bio_paper WHERE id='p2'", Integer.class))
+                "SELECT chunk_count FROM bio_file WHERE kind='paper' AND id='p2'", Integer.class))
                 .isZero();
         assertThat(jdbc.queryForObject(
-                "SELECT index_status FROM bio_paper WHERE id='p3'", String.class))
+                "SELECT index_status FROM bio_file WHERE kind='paper' AND id='p3'", String.class))
                 .isEqualTo("queued");
     }
 
@@ -133,10 +136,10 @@ class InternalCatalogFlowTest {
 
         assertThat(out.get("queued")).isEqualTo(1);
         assertThat(jdbc.queryForObject(
-                "SELECT index_status FROM bio_paper WHERE id='p1'", String.class))
+                "SELECT index_status FROM bio_file WHERE kind='paper' AND id='p1'", String.class))
                 .isEqualTo("queued");
         assertThat(jdbc.queryForObject(
-                "SELECT index_status FROM bio_paper WHERE id='p2'", String.class))
+                "SELECT index_status FROM bio_file WHERE kind='paper' AND id='p2'", String.class))
                 .isEqualTo("not_added");
     }
 
@@ -149,7 +152,7 @@ class InternalCatalogFlowTest {
                 Map.of("paper_ids", List.of("p1", "p2")));
         assertThat(indexed.get("accepted")).isEqualTo(List.of("p1"));
         assertThat(jdbc.queryForObject(
-                "SELECT index_status FROM bio_paper WHERE id='p1'", String.class))
+                "SELECT index_status FROM bio_file WHERE kind='paper' AND id='p1'", String.class))
                 .isEqualTo("indexing");
 
         Map<String, Object> applied = post("/internal/kb/result", "42",
@@ -158,7 +161,7 @@ class InternalCatalogFlowTest {
                                 "error", ""))));
         assertThat(((Map<?, ?>) applied.get("applied")).get("p1")).isEqualTo(true);
         assertThat(jdbc.queryForObject(
-                "SELECT chunk_count FROM bio_paper WHERE id='p1'", Integer.class))
+                "SELECT chunk_count FROM bio_file WHERE kind='paper' AND id='p1'", Integer.class))
                 .isEqualTo(7);
 
         // 已经 indexed，不再是 indexing：重复上报不落盘
@@ -172,7 +175,7 @@ class InternalCatalogFlowTest {
     @Test
     void result_is_rejected_after_detach() {
         paper("p1", "42", 1, "indexing", 0, 0);
-        jdbc.update("UPDATE bio_paper SET kb_enabled=0 WHERE id='p1'");
+        jdbc.update("UPDATE bio_file SET kb_enabled=0 WHERE kind='paper' AND id='p1'");
 
         Map<String, Object> applied = post("/internal/kb/result", "42",
                 Map.of("results", List.of(
@@ -181,7 +184,7 @@ class InternalCatalogFlowTest {
 
         assertThat(((Map<?, ?>) applied.get("applied")).get("p1")).isEqualTo(false);
         assertThat(jdbc.queryForObject(
-                "SELECT index_status FROM bio_paper WHERE id='p1'", String.class))
+                "SELECT index_status FROM bio_file WHERE kind='paper' AND id='p1'", String.class))
                 .isEqualTo("indexing");
     }
 
@@ -194,7 +197,7 @@ class InternalCatalogFlowTest {
                 new HttpEntity<>(internalHeaders("42")), byte[].class);
         assertThat(owned.getStatusCode().value()).isEqualTo(200);
         assertThat(owned.getBody()).isEqualTo("PDF-BYTES".getBytes(StandardCharsets.UTF_8));
-        assertThat(owned.getHeaders().getFirst("X-File-Name")).isEqualTo("a.pdf");
+        assertThat(owned.getHeaders().getFirst("X-File-Name")).isEqualTo("p1.pdf");
 
         ResponseEntity<byte[]> foreign = rest.exchange(
                 "/internal/attachments/paper/p1", HttpMethod.GET,
@@ -222,7 +225,7 @@ class InternalCatalogFlowTest {
                     .startsWith("users/42/files/analysis/run-1/");
         }
         assertThat(jdbc.queryForObject(
-                "SELECT COUNT(*) FROM bio_file_upload WHERE name='volcano.png'",
+                "SELECT COUNT(*) FROM bio_file WHERE kind='artifact' AND name='volcano.png'",
                 Integer.class)).isEqualTo(2);
     }
 }

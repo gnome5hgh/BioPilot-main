@@ -10,6 +10,9 @@
 绝不退回进程内执行。
 """
 import logging
+import mimetypes
+import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -25,6 +28,12 @@ _CORPUS_MOUNT = "/corpus"
 
 #: 单段输出的字符上限——脚本可能打印整张表刷爆上下文；截断并标注，不静默吞掉。
 _OUTPUT_CAP = 16000
+
+
+def _safe(value: str) -> str:
+    """把用户/会话 id 收敛成可安全拼进本地临时路径的片段。"""
+    text = re.sub(r"[^A-Za-z0-9._-]", "_", str(value or "")).replace("..", "_")
+    return text or "unknown"
 
 
 def _clip(text: str) -> str:
@@ -96,7 +105,8 @@ class RunPythonTool(Tool):
                 mounts.append((str(Path(path).resolve()), f"{_CORPUS_MOUNT}/{name}"))
         # 对话附件：只读挂进 /corpus/uploads——模型写的分析代码据此读数据文件
         if user_id and conversation_id:
-            uploads = (user_cache_root(cfg) / user_id / "uploads" / conversation_id)
+            uploads = (user_cache_root(cfg) / _safe(user_id) / "uploads"
+                       / _safe(conversation_id))
             if uploads.is_dir():
                 mounts.append((str(uploads.resolve()), f"{_CORPUS_MOUNT}/uploads"))
 
@@ -144,10 +154,13 @@ class RunPythonTool(Tool):
                 if not src.exists() or not src.is_file():
                     continue
                 try:
+                    name = str(f.get("name") or src.name)
+                    content_type = (mimetypes.guess_type(name)[0]
+                                    or "application/octet-stream")
                     created = platform.upload_artifact(
-                        str(user_id), run_id, str(f.get("name") or src.name),
-                        src.read_bytes(), "application/octet-stream")
+                        str(user_id), run_id, name, src.read_bytes(), content_type)
                     f["oss_key"] = created.get("oss_key", "")
+                    f["file_id"] = created.get("file_id", "")
                 except Exception as exc:
                     logger.warning("分析产物上传失败（%s）：%r", f.get("name"), exc)
         finally:
@@ -184,9 +197,9 @@ class RunPythonTool(Tool):
         shown = files if files is not None else res.files
         if shown:
             for f in shown:
-                line = f"{Path(scratch) / f['name']} ({f['size']} B)"
-                if f.get("oss_key"):
-                    line += "（已登记到文件管理）"
+                line = f"{f['name']} ({f['size']} B)"
+                if f.get("file_id"):
+                    line += f"（已登记到文件管理，file_id={f['file_id']}）"
                 lines.append(line)
         else:
             lines.append("(无)")
@@ -238,4 +251,9 @@ class RunPythonTool(Tool):
             "files": files,
             "sandbox": self._policy_summary(policy),
         }
-        return ToolResult(text=self._format(res, policy.scratch, files), summary=summary)
+        try:
+            text = self._format(res, policy.scratch, files)
+        finally:
+            # 产物已上传平台；scratch 是执行期临时目录，用完即删。
+            shutil.rmtree(policy.scratch, ignore_errors=True)
+        return ToolResult(text=text, summary=summary)

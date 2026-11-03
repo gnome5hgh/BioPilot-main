@@ -14,6 +14,9 @@ import io.minio.messages.Item;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 /** MinIO 对象存取的最小封装：对象键与 Python 侧保持同一约定。 */
@@ -127,6 +130,43 @@ public class MinioTemplate {
             throw new IllegalStateException("MinIO 前缀清理失败: " + prefix, e);
         }
         return count;
+    }
+
+    /**
+     * 列出前缀下的对象键与最后修改时间（孤儿对账与旧版本清理用）。
+     *
+     * @param prefix 对象键前缀，如 {@code users/42/files/documents/doc1/}
+     * @param limit  最多返回多少个对象
+     * @return 对象信息列表；bucket 不存在时返回空列表
+     */
+    public List<ObjectInfo> listKeys(String prefix, int limit) {
+        List<ObjectInfo> out = new ArrayList<>();
+        try {
+            Iterable<Result<Item>> items = client.listObjects(ListObjectsArgs.builder()
+                    .bucket(properties.getBucket())
+                    .prefix(prefix)
+                    .recursive(true)
+                    .maxKeys(Math.max(1, limit))
+                    .build());
+            for (Result<Item> result : items) {
+                if (out.size() >= limit) {
+                    break;
+                }
+                Item item = result.get();
+                out.add(new ObjectInfo(item.objectName(), item.size(), item.lastModified()));
+            }
+        } catch (ErrorResponseException e) {
+            if (!isNoSuchBucket(e)) {
+                throw new IllegalStateException("MinIO 列举失败: " + prefix, e);
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("MinIO 列举失败: " + prefix, e);
+        }
+        return out;
+    }
+
+    /** 对象键 + 大小 + 最后修改时间。 */
+    public record ObjectInfo(String key, long size, ZonedDateTime lastModified) {
     }
 
     private static boolean isNoSuchBucket(ErrorResponseException e) {

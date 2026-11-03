@@ -15,6 +15,11 @@
       <groupId>com.biopilot</groupId>
       <artifactId>bio-common-core</artifactId>
     </dependency>
+    <!-- PaperRequeueHook：文件域在标题变化后通知本域重排索引 -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-file</artifactId>
+    </dependency>
     <!-- AgentInternalClient：唤醒索引器 / 读引擎运行时信息 -->
     <dependency>
       <groupId>com.biopilot</groupId>

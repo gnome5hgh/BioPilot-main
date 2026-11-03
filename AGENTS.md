@@ -63,7 +63,7 @@ BioPilot/
 ## 环境与依赖
 
 - 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。可在设置页填写（加密存 `bio_config_secret`），也可走环境变量。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
-- `corpus.analysis_dir` / `corpus.research_dir` 这类**个人路径没有默认值、必须显式配**（留空则回落到 `<workspace>/analysis` / `<workspace>/research`）。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。笔记与论文**不落本地语料目录**：笔记定稿进文档编辑器，论文由平台 OSS + `bio_paper` 提供。
+- `corpus.analysis_dir` / `corpus.research_dir` 这类**个人路径没有默认值、必须显式配**（留空则回落到 `<workspace>/analysis` / `<workspace>/research`）。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。笔记与论文**不落本地语料目录**：笔记定稿进文档编辑器，论文由平台 OSS + `bio_file`（paper 行）提供。
 - 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 与 LLM key 是**硬依赖**：不可达/未配置即启动 fail-fast（真相源不能静默降级）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
 
 ## 仓库职责
@@ -85,22 +85,20 @@ BioPilot/
 
 三层平台的分工不是「按语言分」，而是「按职责分」。新增代码前先回答：它属于平台业务，还是 agent 运行时？
 
-- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_paper` 统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）、用户技能管理（`bio-skill`：标准包准入、OSS 包、启停/更新/卸载）。
+- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档/分析产物的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_file` 的 paper 行统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）、用户技能管理（`bio-skill`：标准包准入、OSS 包、启停/更新/卸载）。
 - **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、引擎配置（`bio_config` + 引导 env）、用户技能运行时消费（按用户物化技能缓存）。
-- **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_paper` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
+- **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_file` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
 - **单写者规则（按表/列）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
   - `bio_rag_index_state`：Python 独占（RAG 增量索引状态）。隔离键是 `user_domain`（`local` 或登录用户 id），不是 `user_id`——本地语料域没有用户归属，这是该表不带 `user_id` 列的唯一理由。
   - `bio_config`、`bio_config_secret`、`bio_config_history`：Python 独占（运行时配置、加密密钥、保存历史）；Java 只经 `/admin/settings` 代理，不直连这三张表。
-  - `bio_paper`：Java 独占（身份/文件列、`kb_enabled`、书目字段、`citation_id`，以及 `indexed/index_status/index_error/indexed_at/chunk_count` 索引状态列）；Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位，状态落盘一律由 Java 完成。
+  - `bio_file`：Java 独占（论文/数据文件/文档/分析产物统一表）。按列分写者：`bio-file` 写身份/文件/书目/`citation_id`/`kb_enabled`，`bio-kb` 写 `indexed/index_status/index_error/indexed_at/chunk_count`。Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位。文件正文只在 OSS，表里只有 `oss_key`/`sha256`/`version`；同名唯一键是 `(user_id, name_key)`，artifact 的 `name_key` 为 NULL（不占名）。
   - `bio_citation`：Java 独占（引用库行）；Python 不读写。
-  - `bio_file_upload`：Java 写（用户上传与 agent 分析产物都经 Java 登记，`source` 区分 `upload`/`artifact`）。
+  - `bio_oss_gc`：OSS 删除 outbox（系统级、无 `user_id`；Java 定时任务读写）。
   - `bio_schedule_task`：Java 独占（任务定义与 `last_run_at` / `next_run_at` 进度列都由 Java 写）；Python 只接收 `/internal/schedule/run` 触发后执行 agent。
   - `bio_skill`：Java 独占写（用户技能安装记录，带 `user_id`）；Python 只读 `enabled/content_sha`，用于把技能包物化成本地缓存。
-  - `bio_document`：Java 写 HTTP CRUD 与 `/internal/documents/save`；Python 的 `save_document` 只转发内部端点，不直接写表或 OSS。
-  - `bio_user_file`：Java 独占（用户文件同名登记：论文/数据文件/文档共用一个名字空间）。唯一键 `(user_id, name_key)` 是权威约束，创建走「同一事务内先占名再写业务行」，**禁止应用层「先查再插」**；分析产物（`bio_file_upload.source='artifact'`）不参与。Python 不读写。
   - `sys_*`、`bio_project`、`bio_literature_mcp_server`：Java 独占。
-- **表命名规范**：系统表 `sys_<entity>`；BioPilot 业务表 `bio_<domain>_<entity>`，域内用单数实体名（如 `bio_paper`、`bio_file_upload`、`bio_schedule_task`）。平台表 DDL 只在 `server/script/sql/` 与 `docker/mysql-init/` 维护；Python 的 `_SCHEMA` 只建引擎自己的表。
+- **表命名规范**：系统表 `sys_<entity>`；BioPilot 业务表 `bio_<domain>_<entity>`，域内用单数实体名（如 `bio_file`、`bio_schedule_task`）。平台表 DDL 只在 `server/script/sql/` 与 `docker/mysql-init/` 维护；Python 的 `_SCHEMA` 只建引擎自己的表。
 - **禁止事项**：Java 不实现 agent 编排/记忆/检索/切块/嵌入；Python 不新增平台 CRUD（新增前先判断是否属于 agent 运行时），不自建文献检索/MCP 客户端/调度循环/外部 URL 抓取，也不直连 OSS 取平台文件——检索调 `/internal/literature/search`、PDF 下载调 `/internal/literature/fetch-pdf`（SSRF 与 `%PDF` 校验在 Java `bio-common-net`）、文件字节调 `/internal/attachments/*`、产物登记调 `/internal/files/artifacts`、定时任务只接收 `/internal/schedule/run`；Web 不直连 8300，全部经 `/api` → Java。
 
 ## 硬红线
@@ -116,14 +114,14 @@ BioPilot/
 - **写工具必须声明安全元数据**（`risk_level` / `side_effects` / `provenance` 等），注册表加载时校验合法值。
 - **路径检查与写盘共用同一份解析结果**：检查通过的路径参数就地归一化为解析后的绝对路径（防 TOCTOU）。
 - **SQL 是唯一真相源**：压缩与窗口驱逐**永不删 SQL 行**；读—改—写类块写入必须经一次持锁事务，不能「读旧值→算新值→写回」分三步做。
-- **知识库一致性以 `bio_paper` 为唯一真相**：引擎启动与每轮索引都对账向量库——不属于任何「已加入」论文的块直接清理，已就绪论文的向量块数与 `chunk_count` 不一致则重建；`failed` 不自动重试（用户重试由 Java 先置 `queued`），避免对账反复消耗解析与嵌入资源。
+- **知识库一致性以 `bio_file` 的 paper 行为唯一真相**：引擎启动与每轮索引都对账向量库——不属于任何「已加入」论文的块直接清理，已就绪论文的向量块数与 `chunk_count` 不一致则重建；`failed` 不自动重试（用户重试由 Java 先置 `queued`），避免对账反复消耗解析与嵌入资源。
 - **压缩只改窗口，旧摘要并入重摘**：每次压缩把上一份摘要作为底稿送回摘要模型（Claude Code 式，集成指令约束漂移），窗口恒只有一份最新摘要、多次压缩不累积；摘要不携带用户原话（业界无代码插全量原话的先例，实测还会挤爆摘要预算）——硬约束、截止时间等边界由任务快照逐字保留（快照从不参与重摘），原话不作回溯；摘要失败时保持原窗口，不拿空摘要替换历史。
 - **摘要不携带用户原话与工具引用**：压缩摘要有损、用户原话不进摘要且不作回溯；跨会话知识只走记忆块（`bio_memory_block`）。工具结果外置后的指针只在窗口内可回取。
 - **领域产物的读写各自归口**：长期记忆写入归轮末后台整合（`MemoryConsolidator`），**不向任何 agent 暴露记忆写工具**；所有 agent 只通过只读召回（`memory_read` / `read_tool_result`）读取。语料索引归 `rag-agent` 独占读写。引用库是平台功能（Java `bio-citation`），agent 既不读写也不做溯源标注。supervisor 因此持有 spawn + 只读召回，仍不持有执行类工具。
 - **`allowed_spawns` 与风险档位由框架强制**，不靠提示词自律；批量同类对象**一个对象一路**派发。
 - **技能的读写各自归口**：管理面（`bio_skill` 表、OSS `users/<uid>/skills/`、安装准入）归 Java `bio-skill`；引擎只做只读消费（按 `content_sha` 物化的用户缓存），不写管理状态，也不接受 `tools.py` 这类「加载即执行」的非标准扩展。**内置流程（笔记/选题/审查）不是 skill**，写在对应 agent 的 `AGENT.md` 里，模板在该角色 `references/` 下。
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
-- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_paper`/`bio_document`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；例外有三类：`bio_rag_index_state` 的隔离键叫 `user_domain`（`local` 或用户 id），因为本地语料域不属于任何用户；`bio_config`/`bio_config_secret`/`bio_config_history` 是部署级全局配置，没有用户维度。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
+- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_file`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；例外有三类：`bio_rag_index_state` 的隔离键叫 `user_domain`（`local` 或用户 id），因为本地语料域不属于任何用户；`bio_config`/`bio_config_secret`/`bio_config_history` 是部署级全局配置，没有用户维度；`bio_oss_gc` 是系统级 outbox，没有用户维度。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
 - **跨进程互斥只认 MySQL 锁**：per-conversation run 互斥与整合消费权认领都走 DB 锁（`GET_LOCK`/行级 `FOR UPDATE`），进程内锁只作单进程快路径；拿不到锁降级为文本提示，绝不排队阻塞。
 - **OSS 一致性方向固定**：对象先落、元数据行后写（失败留孤儿对象、不留死行）；删除反向（先删行、再删对象，孤儿可后台对账清扫）。论文标题恒来自解析器出口，上传登记也不回退文件名。
 - **config 快照语义**：run 启动时对配置做一次快照、全程读快照；设置页与模型切换都是**下一个 run 生效**，绝不热改在途 run。保存设置会丢弃 Agent 缓存；`rag.*` 与平台客户端是进程级单例，标「需重启」。
@@ -133,7 +131,7 @@ BioPilot/
 - **多用户 RAG 隔离**：向量 collection 按用户域加后缀（`_{user_domain}`），`local` 域保持原名；BM25 按用户分语料，重建走 singleflight。
 - **流式零开销**：`stream_callback` / `telemetry_callback` 为 `None` 时，全链路保持非流式行为。
 - **常量与配置的落点**：一个枚举一个文件（`constants/enums/<name>.py`，`__init__` 只再导出）；常量**有第二个消费方才**进 `constants/`；可调参数进顶层 `biopilot/config/`，组件自己的行为参数跟组件走。
-- **标题宁空勿错且只由 Java 产出**：论文标题由 `bio-common-pdf` 在入库时提取并写 `bio_paper.title`；Python（RAG 索引、`read_pdf`）只从数据库读标题，不再自行推导。取不到就如实为空，**绝不回退到 PDF 文件名**。
+- **标题宁空勿错且只由 Java 产出**：论文标题由 `bio-common-pdf` 在入库时提取并写 `bio_file.title`；Python（RAG 索引、`read_pdf`）只从数据库读标题，不再自行推导。取不到就如实为空，**绝不回退到 PDF 文件名**。
 - **已退役的实现不要复活**：意图的旧混合路由与澄清链路、路径白名单、记忆的 markdown 投影与 git 投影提交、`conversation_search` 召回工具都已整体移出主干。跨会话知识只走记忆块（`bio_memory_block`），会话内精确回溯不再提供（摘要有损、原话不留）。旧文档里的描述不作论据。
 
 ## 关键入口

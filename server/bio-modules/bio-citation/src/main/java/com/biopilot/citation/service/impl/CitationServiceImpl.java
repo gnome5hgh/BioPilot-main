@@ -5,7 +5,7 @@ import com.biopilot.citation.service.CitationService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.biopilot.file.domain.BioPaper;
+import com.biopilot.file.domain.BioFile;
 import com.biopilot.file.service.PaperDeletionHook;
 import com.biopilot.file.service.PaperMetadataHook;
 import com.biopilot.file.service.PaperService;
@@ -94,7 +94,7 @@ public class CitationServiceImpl implements CitationService, PaperDeletionHook, 
      */
     @Transactional
     public CitationView fromPaper(long userId, String paperId) {
-        BioPaper paper = papers.getForUpdate(userId, paperId);
+        BioFile paper = papers.getForUpdate(userId, paperId);
         if (paper.getCitationId() != null && !paper.getCitationId().isBlank()) {
             BioCitation existing = mapper.selectById(paper.getCitationId());
             if (existing != null) {
@@ -141,7 +141,7 @@ public class CitationServiceImpl implements CitationService, PaperDeletionHook, 
      */
     @Transactional
     public boolean removeByPaper(long userId, String paperId) {
-        BioPaper paper = papers.get(userId, paperId);
+        BioFile paper = papers.get(userId, paperId);
         if (paper.getCitationId() == null || paper.getCitationId().isBlank()) {
             return false;
         }

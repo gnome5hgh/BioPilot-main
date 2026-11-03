@@ -1,6 +1,6 @@
 package com.biopilot.file.dto;
 
-import com.biopilot.file.domain.BioPaper;
+import com.biopilot.file.domain.BioFile;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /** 论文列表/详情的对外视图（snake_case 与前端既有契约一致）。 */
@@ -22,10 +22,11 @@ public record PaperView(
         @JsonProperty("chunk_count") int chunkCount,
         @JsonProperty("created_at") String createdAt) {
 
-    public static PaperView from(BioPaper p) {
-        String fileName = p.getFileName();
+    public static PaperView from(BioFile p) {
+        String fileName = p.getName();
         if (fileName == null || fileName.isBlank()) {
-            fileName = p.getOssKey() == null ? "" : p.getOssKey().substring(p.getOssKey().lastIndexOf('/') + 1);
+            fileName = p.getOssKey() == null ? ""
+                    : p.getOssKey().substring(p.getOssKey().lastIndexOf('/') + 1);
         }
         // 勾选状态是「是否在知识库」的唯一真相。索引列由另一个进程写，跨栈通知
         // 丢失或并发移出时会留下旧值；不归一化就会在文件管理里显示「已就绪」，

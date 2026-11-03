@@ -18,8 +18,8 @@
 
 **确认键为 ``(工具名, 主因, 作用域值)``**（主因 ∈ risk_threshold / path_fence /
 command）。分开主因是为了让授权范围有界：在档位上点过一次头，不该顺带把围栏与
-命令也放行。作用域值 = 有效目标路径（经 ``effective_target_path`` 导出，覆盖
-filename 便捷入口）或命令原文。
+命令也放行。作用域值 = 逻辑目标键（经 ``effective_target_key`` 导出，文档 id/名
+或文件 id）或命令原文。
 
 硬拒不在这里：只有显式规则（敏感路径黑名单、写入内容的高置信命中、命令熔断）
 产生拒绝，档位机制本身只能升级确认。
@@ -65,10 +65,9 @@ class PolicyEngineMiddleware(SecurityMiddleware):
         self.confirm_above = confirm_above
 
         # 已确认集合，键为 (工具名, 主因, 作用域值)：同一工具换了主因或目标仍需
-        # 单独确认。作用域值经 tool.effective_target_path(args) 导出：有 path 参数的
-        # 工具取 args["path"]；有 pathless 便捷入口的工具（如 write_file 的 filename
-        # 模式）覆写为组合落盘路径——否则键会塌缩为 (工具名, 主因, None)，一次授权
-        # 即放行全会话 pathless 写。返回 None 的确认工具键作用域值为 None（防御式）。
+        # 单独确认。作用域值经 tool.effective_target_key(args) 导出：文档按 id 或
+        # 归一化名、数据文件按 id——否则键会塌缩为 (工具名, 主因, None)，一次授权
+        # 即放行全会话所有写。返回 None 的确认工具键作用域值为 None（防御式）。
         self._confirmed: set[tuple[str, str, str | None]] = set()
 
     async def before(self, ctx: ToolContext) -> None:
@@ -98,7 +97,7 @@ class PolicyEngineMiddleware(SecurityMiddleware):
         # fail-safe——笔误只会多问一次，不会被静默放行。
         tool_risk = RISK_ORDER.get(tool.risk_level, RISK_ORDER["critical"])
         if tool_risk > RISK_ORDER[self.confirm_above]:
-            causes.append((CAUSE_RISK, tool.effective_target_path(ctx.args)))
+            causes.append((CAUSE_RISK, tool.effective_target_key(ctx.args)))
         # 其他中间件登记的主因（写围栏、命令防护…）
         causes.extend(ctx.escalations)
 

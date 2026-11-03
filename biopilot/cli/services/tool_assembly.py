@@ -11,15 +11,11 @@ core（core 不得 import tools），也不适合放在 tools（tools 不应反�
 """
 from biopilot.config import BioPilotConfig
 from biopilot.core.tool import Tool
-from biopilot.core.tool.constants import ScopeRoot
-from biopilot.core.tool.services.roots import _root_map
-from biopilot.tools.file.write_file import WriteFileTool
 
 __all__ = ["make_tools"]
 
 
-def make_tools(config: BioPilotConfig, tool_items: list[type[Tool] | Tool],
-               default_write_root: str | None = None) -> list[Tool]:
+def make_tools(config: BioPilotConfig, tool_items: list[type[Tool] | Tool]) -> list[Tool]:
     """装配工具列表，兼容「类」与「已实例化工具」两种传参。
 
     类（如 ReadFileTool 等无参原子工具）经 cls() 实例化；已实例化工具（如
@@ -36,20 +32,11 @@ def make_tools(config: BioPilotConfig, tool_items: list[type[Tool] | Tool],
     Returns:
         装配好的 Tool 实例列表（已注入 [目录] 提示、默认写根与 _config）。
     """
-    roots = _root_map(config)
     tools = []
     for item in tool_items:
         # 类走无参实例化；现成实例直接复用——两分支共用后续注入逻辑
         tool = item() if isinstance(item, type) else item
-        # 路径发现：把解析后的绝对路径追加进 description，LLM 经函数 schema 可见。
-        # 排除 scratch——scratch 路径对 LLM 不透明（草稿路径由任务文本给出，无枚举工具）
-        for r in tool.root_hints:
-            if r in roots and r != ScopeRoot.SCRATCH:
-                tool.description += f"\n[目录] {r}={roots[r]}"
-        if (default_write_root and isinstance(tool, WriteFileTool)
-                and default_write_root in roots):
-            tool._default_write_root = roots[default_write_root]
-        # 注入 config：依赖配置派生路径的工具直接读它，避免经 RAG 服务的全局单例间接取
+        # 文件工具已改为平台 id/名字，不再向描述里注入本地目录提示。
         tool._config = config
         tools.append(tool)
     return tools

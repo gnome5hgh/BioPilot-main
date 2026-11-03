@@ -1,82 +1,96 @@
-# biopilot/tools/file/edit_file.py
-"""EditFileTool：定向修改既有文本文件(search-replace,小范围改动)。
+"""EditFileTool：对平台文档做定向 search-replace。
 
-LLM 只需输出变更部分(省 token),且不误伤无关内容。安全边界由中间件强制:path 可为
-任意绝对路径,敏感路径黑名单(workspace/security、workspace/infra、.git 等)由
-WorkspacePolicyMiddleware 拦截。风险为 high(与 write_file 对齐),高于默认免问档,
-执行前确认。本工具只负责落盘 + 登记产物,不做索引入库——论文索引归 rag-agent,
-笔记类产物不参与检索。
+读取文档正文 → 内存替换 → 带版本号写回。版本冲突返回 409 文本，由模型重新读取后
+重试；不再读写本地文件。
 """
-from pathlib import Path
-
+from biopilot.common.platform import PlatformError
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import WRITE_HINTS
-from biopilot.common.storage.atomic import atomic_write
+from biopilot.tools.file._support import current_user_id, platform_for
 
 
 class EditFileTool(Tool):
-    """定向修改既有文本文件的工具（search-replace，小范围改动）。
+    """定向修改平台文档的工具（search-replace）。
 
     Attributes:
         name: str，工具名 "edit_file"
         description: str，工具描述
-        parameters: dict，JSON Schema（path/old_text/new_text）
-        risk_level: str，"high"（与 write_file 对齐，高于默认免问档 → 执行前确认）
-        root_hints: list[str]，WRITE_HINTS（产物类根名）
+        parameters: dict，JSON Schema（id/name/old_text/new_text）
+        risk_level: str，"high"
         side_effects: list[str]，["write_file"]
-        wants_run_state: bool，True（写盘后登记产物账本）
     """
     name = "edit_file"
-    description = "修改既有笔记（定向替换 search-replace；小范围改动，须精确匹配 old_text）"
+    description = ("定向修改平台文档（search-replace，须精确匹配 old_text）。"
+                   "用 id 或 name 定位文档；版本冲突时先 read_file 读取最新内容再重试。")
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "format": "path", "description": "文件绝对路径"},
-            "old_text": {"type": "string", "format": "content", "description": "要替换的原文（须精确匹配，可先 grep 确认）"},
-            "new_text": {"type": "string", "format": "content", "description": "替换后的文本"},
+            "id": {"type": "string", "format": "file_id",
+                   "description": "文档 id（与 name 二选一）"},
+            "name": {"type": "string", "format": "file_name",
+                     "description": "文档名（与 id 二选一）"},
+            "old_text": {"type": "string", "format": "content",
+                         "description": "要替换的原文（须精确且唯一）"},
+            "new_text": {"type": "string", "format": "content",
+                         "description": "替换后的文本"},
         },
-        "required": ["path", "old_text", "new_text"],
+        "required": ["old_text", "new_text"],
     }
-    risk_level = "high"                        # 与 write_file 对齐:定向替换，高于默认免问档 → 执行前确认
-    root_hints = WRITE_HINTS
+    risk_level = "high"
+    root_hints = []
     side_effects = ["write_file"]
-    #: 注入本次 run 的状态容器，用于把落盘路径登记进产物账本
-    wants_run_state = True
 
-    def execute(self, path: str, old_text: str, new_text: str,
-                _run_state=None) -> ToolResult:
-        """在文件里精确替换一处 old_text 为 new_text;不唯一或不存在时拒绝并给指引。
-
-        查找用 str.count 判断唯一性——锚点必须唯一,避免替换错位置。
-        _run_state 为本次 run 的状态容器（未注入时为 None）：替换落盘成功后把路径
-        登记进产物账本。入库不在本工具：调用方据返回文本派发 rag-agent 重新入库。
+    def execute(self, old_text: str, new_text: str, id: str | None = None,
+                name: str | None = None) -> ToolResult:
+        """在平台文档里精确替换一处 old_text。
 
         Args:
-            path: str，目标文件绝对路径
-            old_text: str，待替换的原文（须唯一命中）
-            new_text: str，替换后的文本
-            _run_state: RunState | None，本次 run 的状态容器（登记产物）
+            old_text: 待替换原文（须唯一命中）。
+            new_text: 替换后的文本。
+            id: 文档 id。
+            name: 文档名。
 
         Returns:
-            ToolResult；未命中/多次命中都返回可行动错误文本。
+            ToolResult；未命中/多次命中/版本冲突都返回可行动文本。
         """
-        # 空 old_text 守卫:str.count("") 恒大于 1,会误入"多命中"分支报出令人困惑的错,
-        # 直接明示参数错误。
         if not old_text:
             return ToolResult(text="old_text 不能为空，请提供要替换的原文")
-        p = Path(path)
-        if not p.exists():
-            return ToolResult(text=f"文件不存在: {path}")
-        content = p.read_text(encoding="utf-8")
-        count = content.count(old_text)
-        if count == 0:
-            return ToolResult(text="未找到要替换的文本，请先用 read_file/grep 确认当前内容")
-        if count > 1:
-            return ToolResult(text=f"待替换文本出现 {count} 次，请提供更长的唯一锚点")
-        atomic_write(p, content.replace(old_text, new_text))
-        if _run_state is not None:
-            _run_state.artifacts[str(p)] = "edit_file"
-        # 本地文件不进检索库：知识库只索引平台论文，rag-agent 也不再扫描目录。
-        return ToolResult(
-            text=f"已编辑 {path}",
-            completion=f"File edited: {path}")
+        user = current_user_id()
+        platform = platform_for(self)
+        try:
+            if id:
+                doc = platform.get_document(user, id)
+            elif name:
+                doc = platform.get_document_by_name(user, name)
+            else:
+                return ToolResult(text="edit_file 需要 id 或 name", is_error=True)
+            content = str(doc.get("content") or "")
+            count = content.count(old_text)
+            if count == 0:
+                return ToolResult(text="未找到要替换的文本，请先用 read_file 确认当前内容")
+            if count > 1:
+                return ToolResult(text=f"待替换文本出现 {count} 次，请提供更长的唯一锚点")
+            saved = platform.save_document(
+                user, str(doc.get("name") or name or ""),
+                content.replace(old_text, new_text),
+                expected_version=int(doc.get("version") or 1))
+            return ToolResult(
+                text=(f"已编辑《{saved.get('name') or doc.get('name')}》"
+                      f"（version={saved.get('version')}）"))
+        except PlatformError as e:
+            if getattr(e, "status_code", None) == 409:
+                return ToolResult(
+                    text="文档已被其他会话修改，请先 read_file 读取最新内容再重试",
+                    is_error=True)
+            return ToolResult(text=f"编辑失败：{e}", is_error=True)
+        finally:
+            platform.close()
+
+    def effective_target_key(self, args: dict) -> str | None:
+        """确认键作用域：优先文档 id，其次文档名。"""
+        user = current_user_id()
+        if args.get("id"):
+            return f"doc:{user}:{args['id']}"
+        name = args.get("name")
+        if isinstance(name, str) and name.strip():
+            return f"name:{user}:{name.strip().lower()}"
+        return None

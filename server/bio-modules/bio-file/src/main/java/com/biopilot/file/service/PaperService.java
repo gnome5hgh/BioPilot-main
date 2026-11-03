@@ -1,6 +1,6 @@
 package com.biopilot.file.service;
 
-import com.biopilot.file.domain.BioPaper;
+import com.biopilot.file.domain.BioFile;
 import com.biopilot.file.dto.AgentFileData;
 import com.biopilot.file.dto.DownloadData;
 import com.biopilot.file.dto.PaperView;
@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.web.multipart.MultipartFile;
 
-/** 论文目录：bio_paper 的身份/文件/书目列 + OSS 对象生命周期。 */
+/** 论文目录：bio_file 的论文行 + OSS 对象生命周期。 */
 public interface PaperService {
 
     /** 上传一份 PDF（可选同时加入知识库）。 */
@@ -20,7 +20,7 @@ public interface PaperService {
                      String contentType, boolean addToKb);
 
     /** 预检论文文件名是否与本人已有文件重名。 */
-    void assertNameAvailable(String fileName);
+    void assertNameAvailable(long userId, String fileName);
 
     /** 登记已落 OSS 的对象（文献导入的异步路径）。 */
     void register(long userId, String paperId, Map<String, Object> body);
@@ -29,10 +29,10 @@ public interface PaperService {
     List<PaperView> list(long userId);
 
     /** 按 id 取本人论文；不存在抛 404。 */
-    BioPaper get(long userId, String paperId);
+    BioFile get(long userId, String paperId);
 
     /** 事务内锁住论文行（加入引用库时防并发重复插入）。 */
-    BioPaper getForUpdate(long userId, String paperId);
+    BioFile getForUpdate(long userId, String paperId);
 
     /** 写入/清空论文的引用库关联列。 */
     void linkCitation(long userId, String paperId, String citationId);

@@ -9,7 +9,7 @@ from pathlib import Path
 from biopilot.config import BioPilotConfig
 from biopilot.core.tool.constants import ScopeRoot
 
-__all__ = ["_root_map", "semantic_roots", "declared_roots"]
+__all__ = ["_root_map", "semantic_roots"]
 
 
 def _root_map(config: BioPilotConfig) -> dict[str, str]:
@@ -36,30 +36,3 @@ def semantic_roots(config: BioPilotConfig) -> dict[str, str]:
     return _root_map(config)
 
 
-def declared_roots(config: BioPilotConfig) -> list[str]:
-    """已声明的产物根（写围栏的允许集合）：语义根 + 工作区本身。
-
-    工作区也算在内——记忆块、scratch 等运行期目录都在它下面，agent 在自己
-    数据根里的写入属「声明内」，不该平白弹一次确认。返回值全部解析为绝对路径、
-    保持顺序并去重，供 WorkspacePolicyMiddleware 判定「写目标在不在声明内」。
-
-    Args:
-        config: BioPilotConfig，路径来源。
-
-    Returns:
-        list[str]，允许写入的根目录绝对路径列表。
-    """
-    candidates = list(_root_map(config).values())
-    candidates.append(config.runtime.workspace)
-    seen: set[str] = set()
-    roots: list[str] = []
-    for candidate in candidates:
-        # 空配置不能当根：Path("").resolve() 会得到当前目录，那等于把整个仓库
-        # 当成「声明内」——围栏形同虚设。没配的根直接跳过。
-        if not candidate:
-            continue
-        resolved = str(Path(candidate).resolve())
-        if resolved not in seen:
-            seen.add(resolved)
-            roots.append(resolved)
-    return roots

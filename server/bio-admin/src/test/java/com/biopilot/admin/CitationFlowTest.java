@@ -52,16 +52,32 @@ class CitationFlowTest {
     @BeforeEach
     void ensureTables() {
         jdbc.execute("DROP TABLE IF EXISTS bio_citation");
-        jdbc.execute("DROP TABLE IF EXISTS bio_paper");
-        jdbc.execute("DROP TABLE IF EXISTS bio_user_file");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_user_file ("
-                + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
-                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,"
-                + "name VARCHAR(255) NOT NULL, ref_id VARCHAR(64) NOT NULL,"
-                + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_user_file_name (user_id, name_key),"
-                + "UNIQUE KEY uk_user_file_ref (kind, ref_id),"
-                + "KEY idx_user_file_user (user_id))");
+        jdbc.execute("DROP TABLE IF EXISTS bio_file");
+        jdbc.execute("DROP TABLE IF EXISTS bio_oss_gc");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_file ("
+                + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
+                + "kind VARCHAR(16) NOT NULL, name VARCHAR(255) NOT NULL,"
+                + "name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NULL,"
+                + "oss_key VARCHAR(500) NOT NULL, size_bytes BIGINT NOT NULL DEFAULT 0,"
+                + "content_type VARCHAR(120) NULL, sha256 CHAR(64) NULL,"
+                + "version BIGINT NOT NULL DEFAULT 1, source VARCHAR(16) NULL,"
+                + "run_id VARCHAR(64) NULL, conversation_id VARCHAR(64) NULL,"
+                + "title VARCHAR(500) NULL, authors VARCHAR(1000) NULL,"
+                + "year VARCHAR(10) NULL, journal VARCHAR(300) NULL,"
+                + "kb_enabled TINYINT NULL, indexed INTEGER NULL,"
+                + "index_status VARCHAR(20) NULL, index_error VARCHAR(500) NULL,"
+                + "indexed_at VARCHAR(40) NULL, chunk_count INT NULL,"
+                + "citation_id VARCHAR(64) NULL, created_at VARCHAR(40) NOT NULL,"
+                + "updated_at VARCHAR(40) NULL, seq BIGINT NOT NULL AUTO_INCREMENT,"
+                + "PRIMARY KEY (id), UNIQUE KEY uk_file_seq (seq),"
+                + "UNIQUE KEY uk_file_name (user_id, name_key),"
+                + "KEY idx_file_user_kind (user_id, kind, seq),"
+                + "KEY idx_file_kb (user_id, kind, kb_enabled, index_status))");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_oss_gc ("
+                + "id BIGINT NOT NULL AUTO_INCREMENT, oss_key VARCHAR(500) NOT NULL,"
+                + "reason VARCHAR(32) NOT NULL, attempts INT NOT NULL DEFAULT 0,"
+                + "next_at VARCHAR(40) NULL, created_at VARCHAR(40) NOT NULL,"
+                + "PRIMARY KEY (id), UNIQUE KEY uk_oss_gc_key (oss_key))");
         jdbc.execute("CREATE TABLE IF NOT EXISTS bio_citation ("
                 + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
                 + "cite_key VARCHAR(64) NOT NULL, entry_type VARCHAR(32) NOT NULL DEFAULT 'article',"
@@ -73,18 +89,6 @@ class CitationFlowTest {
                 + "PRIMARY KEY (id), UNIQUE KEY uk_citation_seq (seq),"
                 + "UNIQUE KEY uk_citation_user_key (user_id, cite_key),"
                 + "KEY idx_citation_user (user_id))");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_paper ("
-                + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
-                + "title VARCHAR(500) NOT NULL, file_name VARCHAR(255) NULL,"
-                + "oss_key VARCHAR(500) NOT NULL, size_bytes BIGINT NOT NULL DEFAULT 0,"
-                + "indexed INTEGER NOT NULL DEFAULT 0, kb_enabled TINYINT NOT NULL DEFAULT 0,"
-                + "citation_id VARCHAR(64) NULL, authors VARCHAR(1000) NOT NULL DEFAULT '',"
-                + "year VARCHAR(10) NOT NULL DEFAULT '', journal VARCHAR(300) NOT NULL DEFAULT '',"
-                + "index_status VARCHAR(20) NOT NULL DEFAULT 'not_added',"
-                + "index_error VARCHAR(500) NULL, indexed_at VARCHAR(40) NULL,"
-                + "chunk_count INT NOT NULL DEFAULT 0, created_at VARCHAR(40) NOT NULL,"
-                + "seq BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id),"
-                + "UNIQUE KEY uk_papers_seq (seq), KEY idx_papers_user (user_id))");
         when(minio.getObject(anyString()))
                 .thenReturn("正文".getBytes(StandardCharsets.UTF_8));
     }
@@ -92,8 +96,8 @@ class CitationFlowTest {
     @AfterEach
     void clean() {
         jdbc.execute("DROP TABLE IF EXISTS bio_citation");
-        jdbc.execute("DROP TABLE IF EXISTS bio_paper");
-        jdbc.execute("DROP TABLE IF EXISTS bio_user_file");
+        jdbc.execute("DROP TABLE IF EXISTS bio_file");
+        jdbc.execute("DROP TABLE IF EXISTS bio_oss_gc");
         jdbc.execute("TRUNCATE TABLE sys_user");
         jdbc.execute("TRUNCATE TABLE sys_login_log");
         jdbc.execute("TRUNCATE TABLE sys_user_role");
@@ -142,7 +146,8 @@ class CitationFlowTest {
         assertThat(removed.get("removed")).isEqualTo(true);
         assertThat(list(user)).isEmpty();
         assertThat(citationIdOf("p2")).isNull();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bio_paper WHERE id='p2'",
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM bio_file WHERE kind='paper' AND id='p2'",
                 Integer.class)).isEqualTo(1);
     }
 
@@ -188,7 +193,8 @@ class CitationFlowTest {
 
     private String citationIdOf(String paperId) {
         List<String> ids = jdbc.queryForList(
-                "SELECT citation_id FROM bio_paper WHERE id=?", String.class, paperId);
+                "SELECT citation_id FROM bio_file WHERE kind='paper' AND id=?",
+                String.class, paperId);
         return ids.isEmpty() ? null : ids.get(0);
     }
 

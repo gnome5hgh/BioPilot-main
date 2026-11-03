@@ -432,7 +432,6 @@ function riskLabel(level) {
 function causeLabel(cause) {
   return {
     risk_threshold: '风险档位超过免问上限',
-    path_fence: '写入位置超出允许范围',
     command: '命令需要人工判断',
   }[cause] || ''
 }

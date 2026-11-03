@@ -5,25 +5,7 @@
 """
 from abc import ABC, abstractmethod
 
-from biopilot.core.constants import SideEffect
 from biopilot.core.tool.domain.dto.tool_result import ToolResult
-
-#: 判定「写者」身份的副作用集合。写互斥（同一文件不许两个写者同时改）与
-#: 写围栏（落盘目标必须在声明根内）共用这一份判据——两处都只关心
-#: 「这次调用会不会改动某个路径上的文件」，不关心改法。
-WRITE_EFFECTS = frozenset({SideEffect.WRITE_FILE, SideEffect.DELETE_FILE})
-
-
-def is_writer(tool) -> bool:
-    """判断工具是否声明了文件写副作用（写者身份的唯一判据）。
-
-    Args:
-        tool: Tool | None，工具实例
-
-    Returns:
-        True 表示该工具会改动文件、要按写目标参与写互斥与写围栏。
-    """
-    return bool(set(getattr(tool, "side_effects", None) or ()) & WRITE_EFFECTS)
 
 
 class Tool(ABC):
@@ -116,24 +98,19 @@ class Tool(ABC):
         """
         ...
 
-    def effective_target_path(self, args: dict) -> str | None:
-        """导出本次调用的有效目标路径（无法解析时 None）。
+    def effective_target_key(self, args: dict) -> str | None:
+        """导出本次调用的逻辑目标键（无法解析时 None）。
 
-        会话确认键（PolicyEngineMiddleware）与同路径写锁（ToolExecutor 的路径锁）
-        统一经此取目标，而不直接读 ``args["path"]``——工具若有 pathless 便捷
-        入口（如 write_file 的 filename+dir 模式），子类覆写为组合后的落盘
-        路径，保证：同一文件无论从哪个入口写，键一致（同锁同确认）；不同
-        文件键不同（各自确认、互不串锁）。返回 None（目标不存在/调用必报错
-        不落盘）时确认键退化为 (工具名, None)、写锁不加持——与无 path 参数
-        的确认类工具的既有防御行为一致。
-
-        默认实现：返回 ``args["path"]``（绝大多数工具的单一入口）。
+        会话确认键（PolicyEngineMiddleware）统一经此取目标，避免一次 ``a`` 放行本
+        会话所有写操作。键是稳定的逻辑标识（文档 id/归一化名、文件 id），不是本地
+        路径；默认实现兼容仍用 ``path`` 的旧工具，新工具应覆写为
+        ``kind:user:ref`` 形式。
 
         Args:
             args: dict，已解析的工具调用参数
 
         Returns:
-            本次调用的有效目标路径；无法解析时 None（确认键退化为 (工具名, None)、写锁不加持）。
+            本次调用的逻辑目标键；无法解析时 None（确认键退化为 (工具名, None)）。
         """
         return args.get("path")
 

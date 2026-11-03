@@ -1,68 +1,75 @@
-# biopilot/tools/file/glob.py
-"""GlobTool：按文件名模式在指定目录内定位文件(只读)。
+"""GlobTool：按名字模式列出平台文档/文件。
 
-用于定位产物、检查文件是否已存在——让 agent 不必盲猜精确路径。根目录必须显式
-给出，不再有默认笔记/论文目录。只读 → low 风险、无需确认。
+不再扫描本地目录；模型用文件名模式在平台清单里定位资源，返回 ``kind id name``。
+只读 → low 风险、无需确认。
 """
-from pathlib import Path
+import fnmatch
 
-from biopilot.core.security.middleware.workspace import is_denied_path
+from biopilot.common.platform import PlatformError
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import SEARCH_HINTS
+from biopilot.tools.file._support import current_user_id, platform_for
 
 
 class GlobTool(Tool):
-    """按 glob 模式在指定目录内定位文件的只读工具。
+    """按名字模式列出平台文件的只读工具。
 
     Attributes:
         name: str，工具名 "glob"
-        description: str，工具描述（含 root 说明）
-        parameters: dict，JSON Schema（pattern/root）
+        description: str，工具描述
+        parameters: dict，JSON Schema（pattern/kind/limit）
         risk_level: str，"low"（只读）
-        root_hints: list[str]，SEARCH_HINTS（记忆/产物根）
     """
     name = "glob"
-    description = ("按 glob 模式列出文件路径（如 **/*.md、**/*.csv）。"
-                   "用于定位文件、检查文件是否已存在。root 必须显式指定为绝对路径。")
+    description = ("按名字模式列出平台文档/数据文件（如 *.md、*qc*）。"
+                   "返回 kind id name；用 read_file 读取内容。")
     parameters = {
         "type": "object",
         "properties": {
-            "pattern": {"type": "string", "description": "glob 模式（** 递归）"},
-            "root": {"type": "string", "format": "path",
-                     "description": "搜索根目录绝对路径（必填）"},
+            "pattern": {"type": "string", "description": "文件名模式（支持 * ?）"},
+            "kind": {"type": "string",
+                     "enum": ["all", "document", "data", "artifact"],
+                     "description": "类型过滤；默认 all"},
+            "limit": {"type": "integer", "description": "最多返回条数；默认 50"},
         },
-        "required": ["pattern", "root"],
+        "required": ["pattern"],
     }
     risk_level = "low"
-    root_hints = SEARCH_HINTS
 
-    def execute(self, pattern: str, root: str | None = None) -> ToolResult:
-        """按 glob 模式列出匹配的文件路径(最多 50 条);根目录必须显式指定。
+    def execute(self, pattern: str = "*", kind: str = "all",
+                limit: int = 50) -> ToolResult:
+        """按名字模式列出平台文件。
 
         Args:
-            pattern: glob 模式(** 递归匹配子目录)
-            root: 搜索根目录绝对路径（必填）
+            pattern: 文件名模式（大小写不敏感）。
+            kind: all/document/data/artifact。
+            limit: 最多返回条数。
 
         Returns:
-            命中路径每行一条;无匹配返回"无匹配"
-
+            ToolResult，每行 ``kind id name``；无匹配返回“无匹配”。
         """
-        # 不再有默认语料根：root 必须由任务文本/调用方给出。
-        if not root:
-            return ToolResult(text="未传 root——请显式给搜索根目录绝对路径")
-        cfg = getattr(self, "_config", None)
-        base = Path(root)
+        user = current_user_id()
+        platform = platform_for(self)
+        cap = max(1, min(int(limit or 50), 200))
+        rows: list[tuple[str, str, str]] = []
         try:
-            # 白名单退役：读路径放开后无根约束，pattern 逃逸出 base 不再视为越界
-            # （`../../**/*` 等命中照常返回），仅黑名单过滤防通配符枚举敏感路径。
-            hits: list[str] = []
-            for p in base.glob(pattern):
-                # 敏感路径黑名单：命中 workspace/security、workspace/infra、.git 等直接跳过（防通配符枚举）
-                if cfg is not None and is_denied_path(p.resolve(), cfg.runtime.workspace):
-                    continue
-                hits.append(str(p))
-                if len(hits) >= 50:                          # 封顶防爆炸
-                    break                                    # 遍历即截断，替代先物化后切片
-        except ValueError as e:                              # 非法模式（空等）
-            return ToolResult(text=f"glob 模式无效: {e}")
-        return ToolResult(text="\n".join(hits) if hits else "无匹配")
+            if kind in ("all", "document"):
+                for doc in platform.list_documents(user):
+                    name = str(doc.get("name") or "")
+                    if fnmatch.fnmatch(name.lower(), pattern.lower()):
+                        rows.append(("document", str(doc.get("id") or ""), name))
+            if kind in ("all", "data", "artifact"):
+                for item in platform.list_files(user, limit=200):
+                    item_kind = str(item.get("kind") or "data")
+                    if kind != "all" and item_kind != kind:
+                        continue
+                    name = str(item.get("name") or "")
+                    if fnmatch.fnmatch(name.lower(), pattern.lower()):
+                        rows.append((item_kind, str(item.get("id") or ""), name))
+            if not rows:
+                return ToolResult(text="无匹配")
+            return ToolResult(text="\n".join(
+                f"{k}\t{i}\t{n}" for k, i, n in rows[:cap]))
+        except PlatformError as e:
+            return ToolResult(text=f"列出文件失败：{e}", is_error=True)
+        finally:
+            platform.close()
