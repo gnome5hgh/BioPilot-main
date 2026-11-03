@@ -1,9 +1,9 @@
 """AnalyzeFiguresTool：提取 PDF 图表并用视觉模型结构化分析。
 
-note-agent 笔记 §5 用它拿「图 + 逐图分析」（embed_dir 把图存进 note 目录返回
-Obsidian 嵌入标记）；paper-agent 图表问答用它单图分析。视觉 key 缺失/无图/
-调用失败全部降级为文本反馈——笔记流程不被视觉故障打断。二进制 PNG 直接落盘
-（atomic_write_bytes），不走 write_file——避免触发 RAG 热索引钩子污染向量库。
+note-agent 笔记 §5 用它拿「图 + 逐图分析」（embed_dir 由任务文本/草稿路径显式给出）；
+paper-agent 图表问答用它单图分析。视觉 key 缺失/无图/调用失败全部降级为文本反馈——
+笔记流程不被视觉故障打断。二进制 PNG 直接落盘（atomic_write_bytes），不走 write_file
+——避免触发 RAG 热索引钩子污染向量库。
 """
 import asyncio
 import re
@@ -12,7 +12,6 @@ from pathlib import Path
 from biopilot.config import BioPilotConfig
 from biopilot.core.llm import LLMClient
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import ScopeRoot
 from biopilot.common.storage.atomic import atomic_write_bytes
 from biopilot.core.vision import FigureAnalyzer, FigureExtractor
 
@@ -21,14 +20,13 @@ MAX_FIGURES = 12
 
 
 class AnalyzeFiguresTool(Tool):
-    """提取并分析 PDF 图表的工具（视觉模型看图，可选把图存进笔记目录）。
+    """提取并分析 PDF 图表的工具（视觉模型看图，可选把图存到显式目录）。
 
     Attributes:
         name: str，工具名 "analyze_figures"
         description: str，工具描述
         parameters: dict，JSON Schema（path/figure/embed_dir）
         risk_level: str，"low"
-        root_hints: list[str]，笔记根与论文根
         provenance: str，"image"（图表分析结果属外部内容）
         side_effects: list[str]，["read_file", "write_file"]
         needs_parent: bool，True（视觉调用归属父 agent 轮次进审计）
@@ -50,7 +48,6 @@ class AnalyzeFiguresTool(Tool):
         "required": ["path"],
     }
     risk_level = "low"
-    root_hints = [ScopeRoot.NOTE, ScopeRoot.PDF]              # 提示:读 PDF + 产图落 note（embed_dir）
     provenance = "image"                     # 图表分析结果属外部内容
     side_effects = ["read_file", "write_file"]
     #: 需要父 Agent 引用：视觉调用归属父 agent 的轮次进审计（见 _telemetry）

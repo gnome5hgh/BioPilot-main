@@ -1,15 +1,15 @@
 """WriteFileTool：写入或整篇重写文件(filename+dir 便捷入口 / path 精确入口)。
 
 path 可写任意绝对路径(敏感路径黑名单除外,WorkspacePolicyMiddleware 强制)。
-filename+dir 便捷入口省略 dir 时落装配注入的默认根(factory default_write_root:
-note-agent→note、research-agent→research——代码层防产物错位)。写盘与入库解耦:本工具只负责
-落盘 + 登记产物,入库由调用方落盘后派发 rag-agent 完成(结果文本提示这一点)。
+filename+dir 便捷入口必须显式给 dir；只有装配时明确配置了默认写根的 agent
+（如 research-agent）才能省略。笔记不再有默认写根：保存位置由任务文本给出。
+写盘与入库解耦:本工具只负责落盘 + 登记产物,入库由调用方落盘后派发 rag-agent 完成。
 """
 from pathlib import Path
 
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.security.middleware.workspace import is_denied_path
-from biopilot.core.tool.constants import NOTE_HINTS
+from biopilot.core.tool.constants import WRITE_HINTS
 from biopilot.common.storage.atomic import atomic_write
 
 
@@ -21,18 +21,18 @@ class WriteFileTool(Tool):
         description: str，工具描述（含双入口说明）
         parameters: dict，JSON Schema（content/path/filename/dir）
         risk_level: str，"high"（写/覆盖操作，高于默认免问档 → 执行前确认）
-        root_hints: list[str]，NOTE_HINTS
+        root_hints: list[str]，WRITE_HINTS
         side_effects: list[str]，["write_file"]
         wants_run_state: bool，True（写盘后登记产物账本）
-        _default_write_root: str | None，装配注入的默认写根（filename 模式省略 dir 时的落点）
+        _default_write_root: str | None，装配注入的默认写根（仅显式配置的角色可用）
     """
     name = "write_file"
     description = (
         "写入或整篇重写文件。两种入口二选一：① path=绝对路径（精确控制，敏感路径黑名单外均可写）；"
-        "② filename=纯文件名（可选 dir=绝对目录，缺省落本 agent 默认根）。"
-        "已存在的文件将被覆盖（小范围修改请用 edit_file 定向替换）；"
-        "写入语料库（note/pdf 根内）的文件需另行派发 rag-agent 入库，临时文件请显式给 dir。"
-        "任务文本指定了保存位置时必须显式传 dir 或 path——默认根只是没指定时的兜底。"
+        "② filename=纯文件名 + dir=绝对目录（filename 模式必须给 dir；"
+        "只有本角色明确配置了默认写根时才可省略）。"
+        "已存在的文件将被覆盖（小范围修改请用 edit_file 定向替换）。"
+        "任务文本指定了保存位置时必须显式传 path 或 dir。"
     )
     parameters = {
         "type": "object",
@@ -42,13 +42,13 @@ class WriteFileTool(Tool):
             "filename": {"type": "string",
                          "description": "纯文件名（不得含路径分隔符或..；与 path 二选一）"},
             "dir": {"type": "string", "format": "path",
-                    "description": "filename 模式的目标目录（缺省=本 agent 默认写根）"},
+                    "description": "filename 模式的目标目录（必须显式给出）"},
             "content": {"type": "string", "format": "content", "description": "文件完整新内容"},
         },
         "required": ["content"],
     }
     risk_level = "high"                        # 写/覆盖操作；高于默认免问档 → 执行前确认
-    root_hints = NOTE_HINTS
+    root_hints = WRITE_HINTS
     side_effects = ["write_file"]
     #: 注入本次 run 的状态容器，用于把落盘路径登记进产物账本
     wants_run_state = True
@@ -57,8 +57,8 @@ class WriteFileTool(Tool):
         """双入口 → 落盘路径的组合规则唯一真相源。
 
         execute() 与 effective_target_path() 共用，组合规则只写这一份：
-        path 模式 → Path(path)；filename 模式 → (dir 或默认写根)/filename。
-        入口冲突/缺失、filename 含路径分隔符或 ".."、无默认写根——一律抛
+        path 模式 → Path(path)；filename 模式 → (dir 或本角色默认写根)/filename。
+        入口冲突/缺失、filename 含路径分隔符或 ".."、无 dir 且无默认写根——一律抛
         ValueError（消息即 LLM 面报错文本）。execute 把它转成 ToolResult，
         effective_target_path 把它折叠为 None（该调用必然报错、不落盘，
         确认键/写锁无需作用域）。

@@ -1,8 +1,8 @@
 # biopilot/tools/file/glob.py
-"""GlobTool：按文件名模式在资料库内定位文件(只读)。
+"""GlobTool：按文件名模式在指定目录内定位文件(只读)。
 
-note-agent 定位 PDF/笔记、paper-agent 下载前去重与找论文——让 agent 不必盲猜
-精确路径。只读 → low 风险、无需确认。
+用于定位产物、检查文件是否已存在——让 agent 不必盲猜精确路径。根目录必须显式
+给出，不再有默认笔记/论文目录。只读 → low 风险、无需确认。
 """
 from pathlib import Path
 
@@ -19,38 +19,39 @@ class GlobTool(Tool):
         description: str，工具描述（含 root 说明）
         parameters: dict，JSON Schema（pattern/root）
         risk_level: str，"low"（只读）
-        root_hints: list[str]，SEARCH_HINTS（笔记/论文/记忆根）
+        root_hints: list[str]，SEARCH_HINTS（记忆/产物根）
     """
     name = "glob"
-    description = ("按 glob 模式列出文件路径（如 **/*.pdf、**/*Disentangled*.pdf）。"
-                   "用于定位文件、检查文件是否已存在。root 指定搜索根（缺省=语料库笔记根，可传任意绝对路径）。")
+    description = ("按 glob 模式列出文件路径（如 **/*.md、**/*.csv）。"
+                   "用于定位文件、检查文件是否已存在。root 必须显式指定为绝对路径。")
     parameters = {
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "glob 模式（** 递归）"},
             "root": {"type": "string", "format": "path",
-                     "description": "搜索根目录绝对路径（默认笔记目录）"},
+                     "description": "搜索根目录绝对路径（必填）"},
         },
-        "required": ["pattern"],
+        "required": ["pattern", "root"],
     }
     risk_level = "low"
     root_hints = SEARCH_HINTS
 
     def execute(self, pattern: str, root: str | None = None) -> ToolResult:
-        """按 glob 模式列出匹配的文件路径(最多 50 条);根目录可显式指定。
+        """按 glob 模式列出匹配的文件路径(最多 50 条);根目录必须显式指定。
 
         Args:
             pattern: glob 模式(** 递归匹配子目录)
-            root: 搜索根目录绝对路径;缺省用配置的笔记目录,可传任意绝对路径
+            root: 搜索根目录绝对路径（必填）
 
         Returns:
             命中路径每行一条;无匹配返回"无匹配"
 
         """
-        # 通过 _config 取默认根(make_tools 注入);root 显式传入则覆盖默认。
-        # config 读取用防御式 getattr——测试与裸构造时可能没有 _config。
+        # 不再有默认语料根：root 必须由任务文本/调用方给出。
+        if not root:
+            return ToolResult(text="未传 root——请显式给搜索根目录绝对路径")
         cfg = getattr(self, "_config", None)
-        base = Path(root) if root else Path(cfg.corpus.note_dir if cfg else ".")
+        base = Path(root)
         try:
             # 白名单退役：读路径放开后无根约束，pattern 逃逸出 base 不再视为越界
             # （`../../**/*` 等命中照常返回），仅黑名单过滤防通配符枚举敏感路径。

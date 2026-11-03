@@ -10,7 +10,7 @@ import threading
 import time
 
 from biopilot.config import BioPilotConfig
-from biopilot.core.rag.domain import IndexOutcome, IndexRunOutcome, IndexStatus
+from biopilot.core.rag.domain import IndexOutcome, IndexStatus
 from biopilot.core.rag.parsers.chunker import AcademicChunker
 from biopilot.core.rag.services.breaker import RetrievalBreaker
 
@@ -348,21 +348,6 @@ class RAGService:
         return self._rewriter
 
     # ---------- 对外便捷入口（索引/检索持同一把锁） ----------
-    def index_document(self, path: str, title: str | None = None) -> IndexOutcome:
-        """单篇文档的增量重索引（持锁）。
-
-        调用索引器的 index_document 方法，在锁保护下执行，保证索引状态一致。
-
-        Args:
-            path: 文档的绝对路径。
-            title: 论文标题（平台论文从 `bio_paper.title` 传入；语料文件为空）。
-
-        Returns:
-            IndexOutcome，本次入库的状态、块数与原因。
-        """
-        with self.lock:
-            return self.get_indexer().index_document(path, title=title)
-
     def index_document_bytes(self, data: bytes, doc_key: str,
                              title: str | None = None) -> IndexOutcome:
         """把一篇平台论文（内存字节）索引进向量库（持锁）。
@@ -382,18 +367,6 @@ class RAGService:
         with self.lock:
             return self.get_indexer().index_document_bytes(
                 data, doc_key, title=title)
-
-    def index_all(self) -> IndexRunOutcome:
-        """全量增量扫描：重索引新增/变更文档、清理已删除文档（持锁）。
-
-        这里必须与单篇索引一样持同一把锁：索引过程会重建 BM25、整库写入
-        向量库，若不持锁，查询会读到写到一半的中间状态。
-
-        Returns:
-            IndexRunOutcome，本次扫描的变更/清理/块数统计。
-        """
-        with self.lock:
-            return self.get_indexer().index_all()
 
     def index_status(self) -> IndexStatus:
         """索引体检快照（持锁，只读）。

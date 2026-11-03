@@ -38,4 +38,4 @@ TOOLS = make_tools(BioPilotConfig.from_env(), [
     GlobTool, GrepTool,
     AnalyzeFiguresTool(),
     SaveDocumentTool(),  # 笔记定稿入库（网页文档编辑器可见）
-], default_write_root="note") + get_recall_tools()
+]) + get_recall_tools()

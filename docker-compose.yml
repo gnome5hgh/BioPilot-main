@@ -146,9 +146,7 @@ services:
       BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}
       # 容器内统一用挂载点；宿主侧的 workspace 可另行重定向（见 volumes 第一行）
       BIOPILOT_RUNTIME_WORKSPACE: /app/.biopilot
-      # 容器内没有旧 config.yaml 可导入；语料路径统一落在挂载卷里
-      BIOPILOT_CORPUS_PDF_DIR: /app/.biopilot/rag/pdf
-      BIOPILOT_CORPUS_NOTE_DIR: /app/.biopilot/rag/note
+      # 容器内没有旧 config.yaml 可导入；产物路径统一落在挂载卷里
       BIOPILOT_CORPUS_ANALYSIS_DIR: /app/.biopilot/analysis
       BIOPILOT_CORPUS_RESEARCH_DIR: /app/.biopilot/research
       # 运行时配置的真相源是 MySQL；设置页写入 bio_config

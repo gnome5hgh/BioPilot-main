@@ -47,7 +47,6 @@ from biopilot.core.rag.constants import (
 from biopilot.core.rag.domain import (
     Chunk,
     IndexOutcome,
-    IndexRunOutcome,
     IndexStatus,
     Section,
     indexed_text,
@@ -65,7 +64,7 @@ _DESCRIBE_CONCURRENCY = 4
 #: 配方哈希的逻辑版本号：切块/解析「算法逻辑」修订号（非参数）。参数
 #: （``rag.chunker.*``、embed_model）自动进 ``_recipe_hash`` 指纹；算法逻辑改动
 #: （如 ``_pack_sentences`` 改写、章节产出规则变更、丢弃判据词表调整）无法被参数
-#: 枚举，只能手动 +1 → 下次 ``index_all`` 全量重扫重嵌。仅当切块/解析逻辑改动、
+#: 枚举，只能手动 +1 → 下次重新索引时全量重扫重嵌。仅当切块/解析逻辑改动、
 #: 产出块集合可能变化时才改，不要为参数调整而动它。
 #: 修订 2：split_doc 新增期刊样板章节（致谢/资助/利益冲突/数据可用性等）与
 #: 正文残渣（不成句微碎片）的丢弃判据，产出块集合变小。
@@ -221,42 +220,15 @@ class RagIndexer:
     # ---------- 路径/状态工具 ----------
     @property
     def _is_local(self) -> bool:
-        """当前实例是否工作在本机语料域（目录扫描 + mtime 指纹）。
+        """当前实例是否工作在本机域（``local``）。
 
-        用户域没有本地语料根：成员由平台表决定、论文以字节索引。这里收口这条
-        判定，避免同一条件散落在解析、入库、删除、体检各处。
+        本地域不再有目录语料：索引只接受平台论文的内存字节。保留这个判定是为了
+        状态门控与 collection 命名，不再用于目录扫描。
 
         Returns:
             bool: local 域为 True。
         """
         return self.service.user_domain == "local"
-
-    def _rel_path(self, path: str) -> str | None:
-        """判断路径是否属于本地语料，并给出它相对语料根的路径。
-
-        现在的用途**只是「这个文件属不属于语料」这道判定**——存储与块 id 一律用
-        绝对路径（见 Chunk.path），调用方拿它当真假用：返回 None 即跳过。
-        返回相对路径而非布尔值是为了在报错文案与体检清单里给出更短的展示路径。
-
-        不在论文目录下的路径一律返回 None——不能用文件名代替：别的目录（记忆、
-        笔记）里的文件也会触发索引钩子，用文件名会把它们的同名文件当成同一篇，
-        后索引的覆盖并删掉前者的块。用户域没有本地语料根（论文走内存字节），
-        一律返回 None。
-
-        Args:
-            path: 绝对或相对路径（会被解析为绝对路径）。
-
-        Returns:
-            str | None: 相对论文目录的路径，若文件不在语料根下则返回 None。
-        """
-        if not self._is_local:
-            return None
-        abs_path = Path(path).resolve()
-        try:
-            return str(abs_path.relative_to(
-                Path(self.service.config.corpus.pdf_dir).resolve()))
-        except ValueError:
-            return None
 
 
     def read_state(self) -> tuple[object, dict] | None:
@@ -269,7 +241,7 @@ class RagIndexer:
         """读原始状态，返回 (配方指纹, docs)。
 
         返回值不做版本判断——版本门控由调用方决定（增量更新要求同版本，
-        index_all 遇到不符版本则全量重扫）。状态存在 MySQL，读不到（无记录 /
+        遇到不符版本的重新索引走全量重扫）。状态存在 MySQL，读不到（无记录 /
         库不可达 / 内容损坏）即视为状态缺失，调用方走全量重扫。
 
         Returns:
@@ -291,9 +263,8 @@ class RagIndexer:
     def _record_document(self, doc_key: str, stamp: float) -> None:
         """把单篇文档的指纹记进状态（读—改—写在存取器的事务里完成）。
 
-        本地域保留版本门控：配方不符时旧状态是 index_all 的删除清理依据，覆盖写会
-        造成半更新（详见 index_document 的说明）。用户域以平台表为真相，状态只记
-        「索引过哪些论文」，不受配方门控约束。
+        用户域以平台表为真相，状态只记「索引过哪些论文」，不受配方门控约束；
+        local 域保留版本门控，配方不符时旧状态作废、按全量重扫处理。
 
         Args:
             doc_key: 文档标识（绝对路径或 ``paper:<id>``）。
@@ -616,56 +587,6 @@ class RagIndexer:
         return state
 
     # ---------- 公开 API ----------
-    def index_document(self, path: str, title: str | None = None) -> IndexOutcome:
-        """单篇本地语料文档的增量重索引入口，文档写入/编辑/下载完成后调用。
-
-        为什么必须"先删后建"？
-        - 块 ID 由文档标识和块序号哈希生成，与内容无关。
-        - 若文档内容缩短（如删掉某些章节），旧块 ID 不再出现，若不清除则会永久残留。
-        - 因此每次索引必须先清除旧块，再写入新块。
-
-        边界条件处理：
-        - 用户域没有本地语料根，直接返回 skipped（平台论文走 ``index_document_bytes``）。
-        - 若文件不存在，返回 skipped（不索引）。
-        - 若文件不在知识库根目录（如记忆目录），返回 skipped（避免跨目录同名文件冲突）。
-        - 若文档切块后为空（如全空白或只有参考文献），删除旧块后返回 empty，不写入新块、状态不更新。
-        - 若文档内容未变（指纹未变），外部调用方应避免调用本方法（但本方法本身不检查）。
-
-        状态版本门控：仅当状态缺失或配方哈希与当前一致时才写入状态。配方
-        不符说明存在旧配方状态、待 index_all 全量重扫（旧状态里还留着其他文档的
-        记录，是删除清理的依据），此时覆盖写单篇状态会抹掉这份依据（半更新），
-        让下次全量重扫的清理环节失效。
-
-        Args:
-            path: 文档的绝对路径（或相对路径，会被解析）。
-            title: 论文标题（平台论文从 `bio_paper.title` 传入；语料文件为空）。
-
-        Returns:
-            IndexOutcome，本次入库的状态（IndexOutcomeStatus）、写入块数与原因。
-            INDEXED 写入 chunks 块；SKIPPED 是文件不存在或不在语料根下，EMPTY 是旧块
-            已清理但切不出新块——后两种都带 reason 供调用方如实转述。
-        """
-        if not self._is_local:
-            # 用户域只收平台论文：本地路径没有归属校验，索引进个人 collection
-            # 会污染检索面，且平台表里也没有对应行可以收敛。
-            return IndexOutcome(IndexOutcomeStatus.SKIPPED,
-                                reason="用户域只索引平台论文，不接受本地路径")
-
-        p = Path(path)
-        if not p.exists():
-            return IndexOutcome(IndexOutcomeStatus.SKIPPED, reason="文件不存在")   # 索引不存在的文件：跳过
-
-        key = str(p.resolve())
-        if self._rel_path(key) is None:
-            # 非语料目录的路径（笔记、记忆）直接跳过。
-            # 那些目录里的写入也会触发本钩子，但本模块只索引 PDF；
-            # 若不跳过，同名文件会被当成同一篇，导致先入索引的块被静默覆盖删除。
-            return IndexOutcome(IndexOutcomeStatus.SKIPPED, reason="不在语料根目录下（只索引 PDF）")
-
-        return self._index(
-            key, path=str(p), data=None, title=title,
-            stamp=p.stat().st_mtime, is_pdf=p.suffix.lower() == ".pdf")
-
     def index_document_bytes(self, data: bytes, doc_key: str,
                              title: str | None = None) -> IndexOutcome:
         """单篇平台论文（内存字节）的增量重索引，不落本地文件。
@@ -745,19 +666,17 @@ class RagIndexer:
     def remove_document(self, doc_key: str) -> bool:
         """把一篇文档从索引里整体移除（不动磁盘文件与平台论文行）。
 
-        与 index_document 的「先删后建」共用同一套清理动作：按文档标识定点取块 id，
+        与 index_document_bytes 的「先删后建」共用同一套清理动作：按文档标识定点取块 id，
         删 BM25 行、向量行、图表对象，最后从状态里移除该文档。用于「移出知识库
-        但保留文件」——不能走 index_all，那会顺带重扫整个语料根。
+        但保留平台行」——只删这一篇的索引，不重扫其他文档。
 
         Args:
-            doc_key: 文档标识：本地绝对路径或 ``paper:<paper_id>``。
+            doc_key: 文档标识（``paper:<paper_id>``）。
 
         Returns:
-            bool: 执行了移除时为 True；本地路径不属于语料根时为 False。
+            bool: 执行了移除时为 True。
         """
         key = doc_key if paper_id_of(doc_key) else str(Path(doc_key).resolve())
-        if self._is_local and self._rel_path(key) is None:
-            return False
         store = self.service._ensure_vector_store()
         bm25 = self.service._ensure_bm25()
         chunk_ids = store.doc_chunk_ids(key)
@@ -769,167 +688,24 @@ class RagIndexer:
         self._forget_document(key)
         return True
 
-    def index_all(self) -> IndexRunOutcome:
-        """全量增量扫描：只重索引新增或变更的文档，并清理已删除的文档。
-
-        只适用于 ``local`` 域（本地语料目录）。用户域没有本地文件可扫，成员与状态
-        由平台表驱动，调用会被拒绝。
-
-        状态版本门控：
-        - 状态缺失、内容损坏或配方哈希与当前不符（切块参数/逻辑
-          升级后的首次运行）→ 放弃旧状态，全量重扫重嵌。
-        - 不从向量库元数据恢复不符配方的状态：库内块无法确认由当前配方
-          产出，恢复会让旧配方块因指纹未变而永久残留。
-
-        一致性兜底机制（仅同版本状态下生效，保留原有两兜底）：
-        - 若向量库为空但状态非空 → 状态过期（可能手动清空过向量库），清空状态。
-        - 若状态为空但向量库非空 → 状态丢失，从向量库元数据重建状态。
-
-        BM25 重建策略：
-        - 每次全量扫描都会从向量库的全部文档重建 BM25，因为 BM25 仅驻留内存，进程重启后为空，必须依赖向量库作为可信数据源。
-
-        删除清理策略：
-        - 已删除的文档逐个移除（按路径定点查块 id，替代全表扫描），无需整库重建，避免开销。
-        - 若遇到状态中的路径不在论文目录下（旧版本残留），则跳过清理（防御性）。
-
-        增量索引策略：
-        - 对于变更的文档，直接调用 `index_document`（内部会先删后建），保证每个文档的一致性。
-
-        Returns:
-            IndexRunOutcome，本次扫描的统计：重索引文档数（changed）、清理文档数
-            （removed）、写入块数合计（chunks）、重建后 BM25 文档数（bm25_docs）
-            与是否走了全量重扫（recipe_reset，状态缺失或配方哈希不符时为 True）。
-
-        Raises:
-            RuntimeError: 用户域没有可扫描的本地语料目录。
-        """
-        if not self._is_local:
-            raise RuntimeError(
-                "用户域的知识库由平台状态驱动索引，不支持目录扫描式全量收敛；"
-                "请在知识库页触发重新索引")
-
-        store = self.service._ensure_vector_store()
-        raw = self._read_state()
-
-        if raw is None or raw[0] != self._recipe:
-            # 状态缺失或配方哈希不符（参数/逻辑升级后的首次运行）：放弃旧状态，
-            # 全量重扫重嵌。不能从向量库元数据恢复——库内块无法确认由当前配方
-            # 产出，恢复会让旧配方块因指纹未变而永久残留。
-            recipe_reset = True
-            state = {}
-        else:
-            recipe_reset = False
-            state = raw[1]
-            # 同版本下保留原有两兜底：向量库被清空 → 状态作废；状态空 → 从元数据恢复。
-            if store.count() == 0 and state:
-                state = {}
-            elif not state and store.count() > 0:
-                state = self._derive_state_from_store(store)
-
-        # 2. 从向量库的全部文档整体重建 BM25（因为 BM25 是内存索引，进程重启后为空）。
-        self.service._ensure_bm25().rebuild(
-            [(c.id, indexed_text(c)) for c, _mtime in store.all_documents()])
-
-        # 收集待索引论文：扫描论文目录，按修改时间比对找出变更项。
-        roots = [Path(self.service.config.corpus.pdf_dir)]
-        new_state: dict = {}
-        changed: list[Path] = []
-        seen: set[Path] = set()
-
-        # 3. 扫描论文目录，列出所有 .pdf 文件。
-        for root in roots:
-            if not root.exists():
-                continue
-            for p in root.rglob("*"):
-                if not p.is_file() or p.suffix.lower() != ".pdf":
-                    continue
-                seen.add(p.resolve())
-                key = str(p.resolve())
-
-                # 4. 对比状态文件中的修改时间，筛选出变更的文件。
-                mtime = p.stat().st_mtime
-                if state.get(key) != mtime:
-                    changed.append(p)
-                new_state[key] = mtime
-
-        # 5. 从状态中找出已删除的文件（状态里有记录但本次扫描没见到的）。
-        removed = [k for k in state if k not in {str(s) for s in seen}]
-
-        # 6. 清理已删除的文档。
-        removed_count = 0
-        for abs_path in removed:
-            # 防御性跳过：正常流程下状态文件里的键只可能是论文目录下的路径
-            # （写入前就用 _rel_path 过滤过），但旧版本可能残留其他目录的键——
-            # 遇到时跳过，不要误删对应块。
-            if self._rel_path(abs_path) is None:
-                continue
-            # 定点查询该文档的所有块 ID（替代全表扫描后按路径过滤）
-            rm_ids = store.doc_chunk_ids(abs_path)
-            rm_image_keys = self._collect_media_keys(rm_ids)
-            for did in rm_ids:
-                self.service._ensure_bm25().remove_document(did)
-            store.delete_doc(abs_path)
-            self._remove_media_objects(rm_image_keys)
-            removed_count += 1
-
-        # 7. 增量索引变更的文档，累计本次写入的块数。
-        total_chunks = 0
-        for p in changed:
-            outcome = self.index_document(str(p))
-            total_chunks += outcome.chunks
-
-        # 8. 保存新的状态文件（_save_state 自动带当前配方哈希）。
-        self._save_state(new_state)
-
-        # 9. 收敛孤儿图表原图：扫描期间删掉的文档、配方重置丢弃的旧块，都可能留下没有
-        #    块指向的对象。放在最后做——此时库内块集合已是最终状态。
-        images_swept = self._sweep_orphan_images()
-
-        # bm25_docs 取扫描结束后的实际条数：重建在扫描前用旧库内容完成，
-        # 变更文档是重建之后才增量写入 BM25 的，故不能拿重建输入的长度充当
-        # （首次扫描时旧库为空，那样会恒为 0）。
-        return IndexRunOutcome(changed=len(changed), removed=removed_count,
-                               chunks=total_chunks,
-                               bm25_docs=self.service._ensure_bm25().count(),
-                               recipe_reset=recipe_reset,
-                               images_swept=images_swept)
-
     def status(self) -> IndexStatus:
-        """体检：把索引状态、向量库、关键词索引与语料根对照一遍（只读）。
+        """体检：把索引状态、向量库、关键词索引对照一遍（只读）。
 
-        回答「库里现在到底有什么、和语料是否一致」，不写任何东西、也不触发重扫——
-        发现 `ghost` 或 `not_indexed` 时要不要收敛由调用方决定（跑一次 index_all）。
-        用户域没有本地语料目录，磁盘对照部分留空（成员与状态以平台表为准）。
+        本地目录语料已退役：只报告平台论文索引的状态与库侧计数，不扫任何磁盘目录。
+        发现不一致时由调用方决定是否让平台重新排队索引。
 
         Returns:
-            IndexStatus 快照。Milvus 不可达时库侧三个计数留 0（避免为探测白等 RPC 超时），
-            其余数值仍按状态与磁盘算出。
+            IndexStatus 快照。Milvus 不可达时库侧三个计数留 0（避免为探测白等 RPC 超时）。
         """
         st = IndexStatus(recipe=self._recipe, milvus_ok=self.service.milvus_available())
 
         raw = self._read_state()
-        docs: dict = {}
         if raw is not None:
             version, docs = raw
             st.state_present = True
             st.state_version = version
             st.recipe_in_sync = version == st.recipe
             st.indexed_docs = len(docs)
-
-        # 论文目录扫描：磁盘有而状态没有 = 新增未入库；状态有而磁盘没有 = 删除未收敛。
-        # 同一套 .pdf 过滤与 _rel_path 围栏，保证口径与索引扫描一致。
-        # 清单用相对路径展示，便于人读；状态里的键是绝对路径。
-        if self._is_local:
-            corpus: set[str] = set()
-            root = Path(self.service.config.corpus.pdf_dir)
-            if root.exists():
-                for p in root.rglob("*"):
-                    if p.is_file() and p.suffix.lower() == ".pdf":
-                        corpus.add(str(p.resolve()))
-            st.corpus_docs = len(corpus)
-            known = set(docs)
-            st.not_indexed = [r for r in (self._rel_path(p) for p in sorted(corpus - known)) if r]
-            st.ghost = [r for r in (self._rel_path(p) for p in sorted(known - corpus)) if r]
 
         if st.milvus_ok:
             store = self.service._ensure_vector_store()

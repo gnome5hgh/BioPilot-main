@@ -61,9 +61,9 @@ class SubmitReviewTool(Tool):
     # 终止型工具：校验通过的提交即本 agent 任务终结，Agent.run 直接
     # 结束 ReAct 循环——重复提交会白烧 token，属于成本事故。
     terminal = True
-    # 审稿流目标是 scratch/note 草稿路径；execute 不读文件内容（只格式化提交字段），
+    # 审稿流目标是任务文本给出的草稿路径；execute 不读文件内容（只格式化提交字段），
     # 声明 scratch 仅生成 [目录] 提示、零安全影响（强制在 WorkspacePolicy，与本声明无关）。
-    root_hints = [ScopeRoot.NOTE, ScopeRoot.SCRATCH, ScopeRoot.RESEARCH]
+    root_hints = [ScopeRoot.SCRATCH, ScopeRoot.RESEARCH]
 
     def execute(self, path: str, verdict: str, issues: list) -> ToolResult:
         """校验并格式化审查裁决;非法输入返回可行动报错文本。

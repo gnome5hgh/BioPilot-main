@@ -74,9 +74,9 @@ class RunPythonTool(Tool):
                       conversation_id: str | None = None) -> sb.SandboxPolicy:
         """按配置组装本次执行政策：临时目录、只读挂载、资源上限。
 
-        论文库（pdf 根）默认只读挂载到容器内 ``/corpus/pdf``；``sandbox.read_roots``
-        里点名的语义根再各挂一份到 ``/corpus/<根名>``。每次都新建一个独立的
-        临时目录，使产物清单只反映本次执行。
+        ``sandbox.read_roots`` 里点名的语义根各挂一份到 ``/corpus/<根名>``；
+        对话附件只读挂到 ``/corpus/uploads``。不再有论文 PDF 语料挂载。每次都
+        新建一个独立的临时目录，使产物清单只反映本次执行。
 
         Args:
             cfg: BioPilotConfig，配置来源
@@ -90,8 +90,6 @@ class RunPythonTool(Tool):
         scratch = Path(roots["scratch"]) / "code" / f"run-{uuid.uuid4().hex[:8]}"
 
         mounts: list[tuple[str, str]] = []
-        if cfg.corpus.pdf_dir:
-            mounts.append((str(Path(cfg.corpus.pdf_dir).resolve()), f"{_CORPUS_MOUNT}/pdf"))
         for name in cfg.security.sandbox.read_roots:
             path = roots.get(name)
             if path:

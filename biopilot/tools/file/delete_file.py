@@ -23,8 +23,7 @@ class DeleteFileTool(Tool):
     name = "delete_file"
     description = (
         "删除一个文件（不可逆）。path 必须是精确的绝对路径，"
-        "不支持通配符、不支持批量、不猜测相近文件名；目录一律拒绝。"
-        "删掉的是论文 PDF 时，索引里残留的条目需要再跑一次索引收敛才会被清掉。")
+        "不支持通配符、不支持批量、不猜测相近文件名；目录一律拒绝。")
     parameters = {
         "type": "object",
         "properties": {
@@ -38,7 +37,7 @@ class DeleteFileTool(Tool):
     }
     risk_level = "critical"                    # 不可逆操作；即使免问档调到 high 仍会确认
     side_effects = ["delete_file"]
-    root_hints = [ScopeRoot.NOTE, ScopeRoot.PDF, ScopeRoot.RESEARCH]
+    root_hints = [ScopeRoot.RESEARCH, ScopeRoot.ANALYSIS]
 
     def effective_target_path(self, args: dict) -> str | None:
         """导出写互斥键：被删的那个路径（基类默认行为，显式声明以表明契约）。

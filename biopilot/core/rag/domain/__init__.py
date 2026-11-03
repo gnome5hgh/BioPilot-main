@@ -4,7 +4,7 @@
 
 - ``entity/`` —— 领域实体与值对象：RAG 业务里「一个东西」的模型（检索块 Chunk、章节 Section）
 - ``dto/``    —— 层间传递的数据载体：函数/服务之间搬运的入参与结果对象
-  （解析产物 PdfText/Block、索引结果 IndexOutcome/IndexRunOutcome/IndexStatus、
+  （解析产物 PdfText/Block、索引结果 IndexOutcome/IndexStatus、
   查询改写结果 RewriteResult）
 
 消费方一律从本包取（``from biopilot.core.rag.domain import Chunk``），不关心内部怎么分文件。
@@ -14,7 +14,6 @@
 from biopilot.core.rag.domain.dto import (
     Block,
     IndexOutcome,
-    IndexRunOutcome,
     IndexStatus,
     PdfText,
     RewriteResult,
@@ -38,7 +37,6 @@ __all__ = [
     "Block",
     "PdfText",
     "IndexOutcome",
-    "IndexRunOutcome",
     "IndexStatus",
     "RewriteResult",
 ]

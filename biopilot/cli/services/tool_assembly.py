@@ -1,9 +1,10 @@
 """make_tools：工具装配——[目录] 提示注入 + 默认写根盖章 + config 注入。
 
 提示与强制分离：root_hints 仅生成 description 里的 [目录] 行，帮助 LLM 定位
-语料库目录；真正的强制边界是「绝对路径 + 敏感路径黑名单」（WorkspacePolicyMiddleware）。
-default_write_root 按 agent 装配注入（note-agent→"note"、research-agent→"research"）：
+产物目录；真正的强制边界是「绝对路径 + 敏感路径黑名单」（WorkspacePolicyMiddleware）。
+default_write_root 按 agent 装配注入（仅 research-agent 这类明确声明默认产物根的角色）：
 write_file 的 filename+dir 便捷入口省略 dir 时落到该根，防止产物错位（代码层强制）。
+笔记没有默认写根：保存位置必须由任务文本给出。
 
 装配属于 cli 层：它需要同时认识 core 的根表/常量与 tools 的工具类，不能放在
 core（core 不得 import tools），也不适合放在 tools（tools 不应反向依赖装配）。
@@ -24,7 +25,7 @@ def make_tools(config: BioPilotConfig, tool_items: list[type[Tool] | Tool],
     类（如 ReadFileTool 等无参原子工具）经 cls() 实例化；已实例化工具（如
     SpawnSubAgentTool(agent_timeouts=...)——需要构造参数，无参 cls() 会抛
     TypeError）直接复用同一实例。isinstance(item, type) 判定类为「可实例化」，
-    否则视为现成实例。default_write_root 语义根名（"note"/"research"/…）非 None
+    否则视为现成实例。default_write_root 语义根名（"research"/…）非 None
     时，盖章到 WriteFileTool 实例的 _default_write_root（filename 模式缺省落点）。
 
     Args:

@@ -1,17 +1,14 @@
-"""IndexStatusTool：索引体检——对照索引状态、向量库、关键词索引与语料根。
+"""IndexStatusTool：平台论文索引体检——对照索引状态、向量库与关键词索引。
 
-索引器（rag-agent）的**只读**诊断工具。回答「库里现在到底有什么、和语料是否一致」：
-已索引多少篇、多少块、有没有删除未收敛的残留（幽灵）、有没有新增未入库的文件、
-索引状态与当前切块配方是否一致。
+索引器（rag-agent）的**只读**诊断工具。回答「库里现在到底有什么」：
+已索引多少篇、多少块、索引状态与当前切块配方是否一致。本地目录语料已退役，
+不再扫描磁盘、也不再报告幽灵块/未入库。
 
-不写任何东西、不触发重扫。查出不一致时由调用方决定是否跑一次 reindex_all 收敛。
+不写任何东西、不触发重扫。发现不一致时让用户在知识库页重新索引。
 """
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.rag.services.rag_service import get_rag_service
 from biopilot.core.tool.services.runtime_context import get_rag_domain
-
-#: 幽灵 / 未入库清单在输出里的展示上限（超出只报总数，避免几十篇刷屏）
-_LIST_CAP = 10
 
 
 class IndexStatusTool(Tool):
@@ -27,10 +24,9 @@ class IndexStatusTool(Tool):
 
     name = "index_status"
     description = (
-        "体检语料索引：报告已索引文档数与块数、索引状态与当前切块配方是否一致、"
-        "删除后未收敛的残留（幽灵块）、新增未入库的文件。"
-        "只读、不触发重建。用户问「索引里有什么 / 索引好像不对 / 是不是漏了几篇」时先用它，"
-        "再据结论决定是否调 reindex_all 收敛。")
+        "体检平台论文索引：报告已索引文档数与块数、索引状态与当前切块配方是否一致。"
+        "只读、不触发重建。用户问「索引里有什么 / 索引好像不对 / 是不是漏了几篇」时先用它；"
+        "需要重建时让用户在知识库页操作（勾选/重试/全部重新索引）。")
     parameters = {"type": "object", "properties": {}, "required": []}
     risk_level = "low"
     side_effects = ["read_file"]
@@ -45,7 +41,7 @@ class IndexStatusTool(Tool):
         try:
             st = get_rag_service(user_domain=get_rag_domain()).index_status()
         except Exception as e:
-            # 与 reindex_all 同款：外部服务缺席如实回报，不让异常穿透 ReAct 循环
+            # 外部服务缺席如实回报，不让异常穿透 ReAct 循环
             return ToolResult(text=f"索引体检失败：{e}", is_error=True)
 
         lines = [
@@ -54,34 +50,16 @@ class IndexStatusTool(Tool):
             f"关键词索引（BM25）：{st.bm25_docs} 篇" if st.milvus_ok else "关键词索引：未读（库不可连）",
         ]
         if not st.state_present:
-            lines.append(
-                f"索引状态：不存在或不可解析（语料根下现见 {st.corpus_docs} 篇，"
-                "从未建过索引或状态损坏）→ 跑一次 reindex_all 会全量重扫")
+            lines.append("索引状态：不存在或不可解析（从未建过索引或状态损坏）")
         else:
-            lines.append(f"索引状态：记录 {st.indexed_docs} 篇；语料根下现见 {st.corpus_docs} 篇")
+            lines.append(f"索引状态：记录 {st.indexed_docs} 篇")
             lines.append(
                 "切块配方：与当前配置一致" if st.recipe_in_sync
                 else "切块配方：**与当前配置不一致**（切块参数或解析逻辑改过）"
-                     "→ 下次全量扫描会重扫重嵌")
-
-        if st.ghost:
-            lines.append(f"⚠ 幽灵块 {len(st.ghost)} 篇（已删除但索引残留）：{_fmt(st.ghost)}"
-                         "→ 跑 reindex_all 收敛")
-        if st.not_indexed:
-            lines.append(f"⚠ 未入库 {len(st.not_indexed)} 篇（在语料根但不在索引）：{_fmt(st.not_indexed)}"
-                         "→ 跑 index_paths 补入或 reindex_all 收敛")
-        if not st.ghost and not st.not_indexed and st.state_present:
-            lines.append("一致性：索引与语料一致，无残留、无遗漏")
+                     "→ 让用户在知识库页点「全部重新索引」")
 
         return ToolResult(text="\n".join(lines), summary={
             "milvus_ok": st.milvus_ok, "recipe_in_sync": st.recipe_in_sync,
-            "indexed_docs": st.indexed_docs, "corpus_docs": st.corpus_docs,
+            "indexed_docs": st.indexed_docs,
             "store_chunks": st.store_chunks, "store_docs": st.store_docs,
-            "bm25_docs": st.bm25_docs,
-            "ghost": len(st.ghost), "not_indexed": len(st.not_indexed)})
-
-
-def _fmt(items: list) -> str:
-    """把路径清单压成一行；超出上限只报总数与头几条。"""
-    shown = "、".join(items[:_LIST_CAP])
-    return shown if len(items) <= _LIST_CAP else f"{shown} …等 {len(items)} 篇"
+            "bm25_docs": st.bm25_docs})

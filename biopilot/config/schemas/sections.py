@@ -209,21 +209,18 @@ class PlatformConfig:
 
 @dataclass
 class CorpusConfig:
-    """语料库与产物路径。个人绝对路径，经 config.yaml / env 提供，留空走各自回退。
+    """产物路径。个人绝对路径，经 config.yaml / env 提供，留空走工作区回退。
+
+    笔记与论文不再使用本地语料目录：笔记定稿进平台文档编辑器，论文由平台
+    （OSS + ``bio_paper``）提供字节；这里只保留分析产物与研究产物两个落点。
 
     Attributes:
-        note_dir: str，笔记目录（产出落点，不是索引源）
-        pdf_dir: str，PDF 目录（RAG 索引源）
+        analysis_dir: str，分析产物根（空则回退 workspace/analysis）
         research_dir: str，研究产物目录（空则回退 workspace/research）
     """
 
-    #: 语料库笔记目录（笔记产物的默认落点；不进检索知识库,note/）——留空则文件类工具无可用根。
-    note_dir: str = ""
     #: 分析产物根（生信分析代码与结果；空则回退 workspace/analysis）
     analysis_dir: str = ""
-
-    #: 语料库 PDF 目录（RAG 索引源,pdf/）。
-    pdf_dir: str = ""
 
     #: 研究产物目录（产物区,research/）——空则由 factory 回退 workspace/research。
     research_dir: str = ""

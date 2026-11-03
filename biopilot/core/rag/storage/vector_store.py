@@ -141,7 +141,7 @@ class VectorStore:
             if stale:
                 logger.warning(
                     "向量库集合 %s 的结构已过期（缺字段：%s），删除重建；"
-                    "库现在是空的，请跑一次全量索引（reindex_all）重新入库。",
+                    "库现在是空的，请让用户在知识库页点「全部重新索引」重新入库。",
                     collection_name, "、".join(stale))
                 self._client.drop_collection(collection_name, timeout=write_timeout)
                 self._create_collection(dim)

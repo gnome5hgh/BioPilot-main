@@ -8,7 +8,6 @@
 from pathlib import Path
 
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import ScopeRoot
 from biopilot.core.rag.parsers.pdf_extract import extract_pdf
 
 
@@ -33,7 +32,6 @@ class ReadPdfTool(Tool):
         description: str，工具描述
         parameters: dict，JSON Schema（path）
         risk_level: str，"low"（只读）
-        root_hints: list[str]，论文语料根
         provenance: str，"pdf"（论文全文属外部内容）
         side_effects: list[str]，["read_file"]
     """
@@ -48,7 +46,6 @@ class ReadPdfTool(Tool):
         "required": ["path"],
     }
     risk_level = "low"
-    root_hints = [ScopeRoot.PDF]                    # 提示语料库 PDF 根（只读语义在中间件）
     provenance = "pdf"                       # 论文全文属外部内容
     side_effects = ["read_file"]
 
@@ -56,7 +53,7 @@ class ReadPdfTool(Tool):
         """解析 PDF 为 markdown 文本,顶部带论文标题;解析不出内容时给出提示。
 
         精确路径优先(走抽取缓存,同一篇被反复读时只解析一次);精确失败才走容错分支
-        ——LLM 可能折叠路径空白,按归一化 basename 在 pdf 根下找唯一命中。
+        ——LLM 可能折叠路径空白,按归一化 basename 在请求路径所在目录找唯一命中。
 
         Args:
             path: str，PDF 文件绝对路径
@@ -84,9 +81,8 @@ class ReadPdfTool(Tool):
     def _resolve_fuzzy(self, path: str):
         """精确路径失败时的容错解析。安全语义:唯一命中才用、不猜。
 
-        0 候选 → 明确"未找到";多候选 → 明确"不唯一"交 LLM 澄清。搜索根取语料库 pdf 根
-        （由装配注入的配置给出）；未注入配置时退回请求路径所在目录——直接把根当成当前
-        工作目录去递归会让结果不可预期。
+        0 候选 → 明确"未找到";多候选 → 明确"不唯一"交 LLM 澄清。搜索根只取
+        **请求路径所在目录**——不再有全局 PDF 语料根，也不跨目录递归。
 
         Args:
             path: str，精确解析失败的原始路径
@@ -94,9 +90,7 @@ class ReadPdfTool(Tool):
         Returns:
             唯一命中时返回解析结果；0 候选抛 FileNotFoundError，多候选抛 ValueError（交 LLM 澄清）。
         """
-        cfg = getattr(self, "_config", None)
-        pdf_dir = getattr(getattr(cfg, "corpus", None), "pdf_dir", "") if cfg is not None else ""
-        root = Path(pdf_dir) if pdf_dir else Path(path).parent
+        root = Path(path).parent
         # 归一化目标取 basename 而非全路径:LLM 空格折叠只影响文件名本身,子目录层级
         # 不应参与匹配——否则同 basename 异目录的文件会被全路径比较误判为唯一命中,
         # 该不唯一的场景本应报"不唯一"交 LLM 澄清(安全语义,不猜)。

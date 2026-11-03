@@ -22,17 +22,18 @@ class GrepTool(Tool):
         description: str，工具描述
         parameters: dict，JSON Schema（pattern/path）
         risk_level: str，"low"（只读）
-        root_hints: list[str]，SEARCH_HINTS（笔记/论文/记忆根）
+        root_hints: list[str]，SEARCH_HINTS（记忆/产物根）
     """
     name = "grep"
     description = ("在文件或目录内搜索文本（正则），返回 file:line 匹配行。"
-                   "用于确认锚点文本、核对内容。目录递归搜索 md/txt 等文本文件。")
+                   "用于确认锚点文本、核对内容。目录递归搜索 md/txt 等文本文件。"
+                   "path 必须显式指定，不再有默认语料根。")
     parameters = {
         "type": "object",
         "properties": {
             "pattern": {"type": "string", "description": "正则表达式（如 'Disentangled Progressive'）"},
             "path": {"type": "string", "format": "path",
-                     "description": "文件或目录绝对路径（目录递归；缺省=语料库笔记根）。"
+                     "description": "文件或目录绝对路径（目录递归；必填）。"
                                     "别名 root 同样接受"},
             # 别名的声明不是可选项：路径策略中间件按 format="path" 收集要校验的参数名，
             # 别名不进 schema 就等于开了一条绕过敏感路径黑名单的通道。
@@ -51,7 +52,7 @@ class GrepTool(Tool):
 
         Args:
             pattern: 正则表达式
-            path: 文件路径或目录(目录递归,只搜文本文件,跳过二进制/PDF);缺省=语料库笔记根
+            path: 文件路径或目录(目录递归,只搜文本文件,跳过二进制/PDF);必填
             root: str | None，path 的别名（工具提示词里把数据目录称作「根」，
                 模型常按该措辞传参；接受别名省掉一次「参数名不对」的往返）
 
@@ -66,16 +67,12 @@ class GrepTool(Tool):
             regex = re.compile(pattern)
         except re.error as e:
             return ToolResult(text=f"正则无效: {e}")
+        if not path:
+            return ToolResult(text="未传 path——请显式给文件或目录的绝对路径")
         # cfg 防御式读取(测试与裸构造时可能没有 _config)。敏感路径黑名单:
         # 目录递归时跳过审计/密钥等目录,防通配符枚举。
         cfg = getattr(self, "_config", None)
-        if path:
-            p = Path(path)
-        else:
-            default_root = cfg.corpus.note_dir if cfg is not None else ""
-            if not default_root:
-                return ToolResult(text="未传 path 且语料库笔记根未配置——请显式传 path 绝对路径")
-            p = Path(default_root)
+        p = Path(path)
         files = [p] if p.is_file() else [
             f for f in p.rglob("*")
             if f.suffix.lower() in _TEXT_SUFFIXES

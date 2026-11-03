@@ -36,7 +36,7 @@ class FormatCheckTool(Tool):
         "required": ["path"],
     }
     risk_level = "low"
-    root_hints = [ScopeRoot.NOTE, ScopeRoot.SCRATCH]
+    root_hints = [ScopeRoot.SCRATCH]
     #: 两侧都只读：读笔记与读模板比结构，不写任何落点
     side_effects = ["read_file"]
 

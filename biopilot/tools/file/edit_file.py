@@ -9,7 +9,7 @@ LLM 只需输出变更部分(省 token),且不误伤无关内容。安全边界�
 from pathlib import Path
 
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import NOTE_HINTS
+from biopilot.core.tool.constants import WRITE_HINTS
 from biopilot.common.storage.atomic import atomic_write
 
 
@@ -21,7 +21,7 @@ class EditFileTool(Tool):
         description: str，工具描述
         parameters: dict，JSON Schema（path/old_text/new_text）
         risk_level: str，"medium"（与 write_file 对齐）
-        root_hints: list[str]，NOTE_HINTS（笔记类根名）
+        root_hints: list[str]，WRITE_HINTS（产物类根名）
         side_effects: list[str]，["write_file"]
         wants_run_state: bool，True（写盘后登记产物账本）
     """
@@ -37,7 +37,7 @@ class EditFileTool(Tool):
         "required": ["path", "old_text", "new_text"],
     }
     risk_level = "high"                        # 与 write_file 对齐:定向替换，高于默认免问档 → 执行前确认
-    root_hints = NOTE_HINTS
+    root_hints = WRITE_HINTS
     side_effects = ["write_file"]
     #: 注入本次 run 的状态容器，用于把落盘路径登记进产物账本
     wants_run_state = True

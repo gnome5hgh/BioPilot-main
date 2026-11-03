@@ -13,17 +13,15 @@ __all__ = ["_root_map", "semantic_roots", "declared_roots"]
 
 
 def _root_map(config: BioPilotConfig) -> dict[str, str]:
-    """语义根名 → 绝对路径（语料库目录为外部绝对路径，memory 随 workspace）。
+    """语义根名 → 绝对路径（产物目录可来自配置，memory 随 workspace）。
 
     Args:
         config: BioPilotConfig，路径来源。
 
     Returns:
-        语义根名 → 绝对路径的映射（note/pdf/research/memory/analysis/scratch）。
+        语义根名 → 绝对路径的映射（research/memory/analysis/scratch）。
     """
     return {
-        ScopeRoot.NOTE: config.corpus.note_dir,
-        ScopeRoot.PDF: config.corpus.pdf_dir,
         ScopeRoot.RESEARCH: config.corpus.research_dir or str(
             Path(config.runtime.workspace) / "research"),
         ScopeRoot.MEMORY: str(Path(config.runtime.workspace) / "memory"),

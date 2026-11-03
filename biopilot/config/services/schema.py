@@ -30,9 +30,7 @@ BOOTSTRAP_PATHS: frozenset[str] = frozenset({
     "runtime.agents_dir",
     "platform.base_url",
     "platform.internal_token",
-    "corpus.note_dir",
     "corpus.analysis_dir",
-    "corpus.pdf_dir",
     "corpus.research_dir",
     "rag.storage.uri",
     "rag.storage.collection",
@@ -139,7 +137,7 @@ SECTION_LAYOUT: dict[str, list[dict[str, str]]] = {
     "bootstrap": [
         {"key": "runtime", "label": "运行时路径", "description": "运行数据根、记忆库与 Agent 插件目录。"},
         {"key": "platform", "label": "平台连接", "description": "Java 平台地址与内部 token。"},
-        {"key": "corpus", "label": "语料目录", "description": "文件类工具的数据源与产物落点。"},
+        {"key": "corpus", "label": "产物目录", "description": "分析产物与研究产物的落点；笔记与论文走平台存储。"},
         {"key": "rag.storage", "label": "向量库与对象存储", "description": "Milvus 地址、集合名与 MinIO 连接凭据。"},
         {"key": "compaction.tool_results", "label": "外置回退", "description": "对象存储不可用时的本地回退目录。"},
     ],
@@ -179,9 +177,7 @@ FIELD_META: dict[str, dict[str, str]] = {
     "platform.search_timeout": {"label": "检索超时（秒）"},
     "platform.transfer_timeout": {"label": "文件传输超时（秒）"},
     # ── corpus ──
-    "corpus.note_dir": {"label": "笔记目录"},
     "corpus.analysis_dir": {"label": "分析产物目录"},
-    "corpus.pdf_dir": {"label": "PDF 目录"},
     "corpus.research_dir": {"label": "研究产物目录"},
     # ── intent ──
     "intent.enabled": {"label": "启用意图识别"},

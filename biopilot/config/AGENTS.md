@@ -29,7 +29,7 @@
 
 - **`schemas/sections.py` 是默认值的唯一声明点**：新增可调参数先在这里加字段，消费模块直接读，**不要在模块内另设常量副本**。
 - **加载优先级固定为 默认值 < MySQL `bio_config` < `config.yaml` 引导层 < 环境变量**。数据库模式的 `config.yaml` 只合并 `BOOTSTRAP_PATHS`，运行时字段一律以库为准。
-- **引导层字段只读**：`runtime.workspace` / `runtime.memory_dsn` / `runtime.agents_dir` / `runtime.user_cache_dir`、`platform.base_url` / `internal_token`、`corpus.*`、`rag.storage.uri` / `collection` / `minio.*`、`compaction.tool_results.local_dir`。它们在启动前就要用到，换部署就会变，设置页只展示、不接受写入。
+- **引导层字段只读**：`runtime.workspace` / `runtime.memory_dsn` / `runtime.agents_dir` / `runtime.user_cache_dir`、`platform.base_url` / `internal_token`、`corpus.analysis_dir` / `research_dir`、`rag.storage.uri` / `collection` / `minio.*`、`compaction.tool_results.local_dir`。它们在启动前就要用到，换部署就会变，设置页只展示、不接受写入。
 - **密钥单独加密**：`*.api_key`、`runtime.models`、`platform.internal_token`、`rag.storage.minio.secret_key` 存 `bio_config_secret`，AES-GCM 加密；读取接口只返回「是否已配置 + 末 4 位」，模型清单逐项掩码。主密钥优先取 `BIOPILOT_CONFIG_KEY`，否则用 `<workspace>/config.key`（缺失时首次写入自动生成，0600）。
 - **每次保存都留历史**：`bio_config_history` 存整份快照与 `changed_paths`；版本号做乐观锁，设置页冲突返回 409，可按版本回滚。
 - **读取降级**：数据库或密钥不可用时，loader 告警后回退到「引导文件 + env」，不因配置库故障让进程起不来；写入路径则严格失败，避免在读不到旧密钥时覆盖它们。
