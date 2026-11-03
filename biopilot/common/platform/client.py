@@ -241,25 +241,68 @@ class PlatformClient:
         applied = data.get("applied") or {}
         return {str(key): bool(value) for key, value in applied.items()}
 
+    def save_document(self, user_id: str, name: str, content: str) -> dict:
+        """保存或覆盖用户文档编辑器中的 markdown 文档。
 
-def make_platform_client(config) -> PlatformClient:
-    """按引擎配置构造平台客户端（``platform`` 段缺失时用本机默认值）。
+        Args:
+            user_id: 归属用户。
+            name: 文档名。
+            content: markdown 全文。
+
+        Returns:
+            Java 侧返回的 ``{id, name, created}``。
+
+        Raises:
+            PlatformError: 平台不可用或保存被拒。
+        """
+        return self._request(
+            "POST", "/internal/documents/save", user_id=user_id,
+            json={"name": name, "content": content or ""},
+            timeout=self._transfer_timeout).json()
+
+    def search_literature(self, user_id: str, payload: dict) -> dict:
+        """转发文献检索请求，取回平台聚合后的候选与各源错误。
+
+        Args:
+            user_id: 归属用户。
+            payload: 检索参数（``q`` / ``sources`` / ``year_from`` / ``year_to`` / ``limit``）。
+
+        Returns:
+            Java 侧返回的 ``{results, sources, errors}``。
+
+        Raises:
+            PlatformError: 平台不可用或检索失败。
+        """
+        return self._request(
+            "POST", "/internal/literature/search", user_id=user_id,
+            json=payload).json()
+
+
+def make_platform_client(config, *, client: httpx.Client | None = None) -> PlatformClient:
+    """按引擎配置构造平台客户端（``platform`` 段缺失时回落到声明点默认值）。
 
     Args:
         config: ``BioPilotConfig`` 实例。
+        client: 可注入的 httpx 客户端（测试用）；None 时由 PlatformClient 自建。
 
     Returns:
         绑定当前部署地址与超时的 PlatformClient。
     """
+    # 函数内导入：common 层不在模块加载期反向依赖 config 的 dataclass 定义
+    from biopilot.config.schemas.sections import PlatformConfig
+
+    default = PlatformConfig()
     platform = getattr(config, "platform", None)
-    base_url = (getattr(platform, "base_url", "") or "http://127.0.0.1:8080")
+    base_url = (getattr(platform, "base_url", "") or default.base_url)
     token = (getattr(platform, "internal_token", "")
              or os.environ.get("BIOPILOT_INTERNAL_TOKEN", "") or "")
     return PlatformClient(
         base_url,
         token,
-        timeout=float(getattr(platform, "search_timeout", 60.0) or 60.0),
-        transfer_timeout=float(getattr(platform, "transfer_timeout", 120.0) or 120.0),
+        timeout=float(getattr(platform, "search_timeout", 0) or default.search_timeout),
+        transfer_timeout=float(getattr(platform, "transfer_timeout", 0)
+                               or default.transfer_timeout),
+        client=client,
     )
 
 

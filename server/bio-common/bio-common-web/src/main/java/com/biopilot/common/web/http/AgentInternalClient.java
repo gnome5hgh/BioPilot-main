@@ -30,7 +30,7 @@ public class AgentInternalClient {
             .build();
     private final ObjectMapper mapper;
 
-    @Value("${biopilot.adapter-base:http://127.0.0.1:8300}")
+    @Value("${biopilot.adapter-base}")
     private String adapterBase;
 
     @Value("${biopilot.internal-token:}")

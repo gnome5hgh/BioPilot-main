@@ -170,7 +170,13 @@ services:
     profiles: ["full"]
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/biopilot?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
-      BIOPILOT_ADAPTERBASE: http://webapi:8300
+      # 引擎适配层：@Value 读 biopilot.adapter-base，环境变量名必须带下划线
+      BIOPILOT_ADAPTER_BASE: http://webapi:8300
+      # 对象存储连的是 compose 内的 MinIO 服务名；不设会退回 localhost 指向自己容器
+      BIOPILOT_MINIO_ENDPOINT: minio:9000
+      BIOPILOT_MINIO_ACCESS_KEY: ${BIOPILOT_MINIO_ACCESS_KEY:-minioadmin}
+      BIOPILOT_MINIO_SECRET_KEY: ${BIOPILOT_MINIO_SECRET_KEY:-minioadmin}
+      BIOPILOT_MINIO_BUCKET: ${BIOPILOT_MINIO_BUCKET:-biopilot}
       # 容器内用服务名；空库首次启动时据此种入默认检索源
       BIOPILOT_PAPER_SEARCH_URL: http://paper-search-mcp:8000/mcp
       BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}

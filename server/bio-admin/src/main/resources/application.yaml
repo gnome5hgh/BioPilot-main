@@ -29,6 +29,8 @@ logging:
 biopilot:
   # 内部调用共享 token：Python agent 调 /internal/* 与 Java 调引擎内部端点共用
   internal-token: ${BIOPILOT_INTERNAL_TOKEN:}
+  # 引擎适配层地址：Java 调 Python 的 SSE / 终端 WebSocket / 内部端点
+  adapter-base: ${BIOPILOT_ADAPTER_BASE:http://127.0.0.1:8300}
   # 默认文献检索源：空库首次启动时种入；compose 内由环境变量改成 paper-search-mcp 服务名
   paper-search:
     url: ${BIOPILOT_PAPER_SEARCH_URL:http://127.0.0.1:8000/mcp}

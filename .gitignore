@@ -30,8 +30,9 @@ Thumbs.db
 !.biopilot/skills/
 !.biopilot/intent/
 
-# Documentation (not version controlled)
-docs/
+# Documentation (not version controlled)；只忽略仓库根的设计文档，
+# 别用未锚定的 docs/——那会把 biopilot/tools/docs/（代码包）一起忽略掉
+/docs/
 
 # 本地暂存：ticket 拆解、临时草稿等中间产物，不入库
 .scratch/

@@ -44,12 +44,12 @@ public class LiteratureMcpConfigServiceImpl implements LiteratureMcpConfigServic
     private final McpClientManager manager;
     private final ObjectMapper json;
 
-    /** 首次部署时默认检索源地址：本机开发指向映射端口，compose 内由环境变量改成服务名。 */
-    @Value("${biopilot.paper-search.url:http://127.0.0.1:8000/mcp}")
+    /** 首次部署时默认检索源地址：由 application.yaml 统一声明，compose 内改成服务名。 */
+    @Value("${biopilot.paper-search.url}")
     private String defaultPaperSearchUrl;
 
     /** 是否在空库时自动种入默认检索源；关掉后完全由管理员手工配置。 */
-    @Value("${biopilot.paper-search.enabled:true}")
+    @Value("${biopilot.paper-search.enabled}")
     private boolean defaultPaperSearchEnabled;
 
     public LiteratureMcpConfigServiceImpl(LiteratureMcpServerMapper mapper,

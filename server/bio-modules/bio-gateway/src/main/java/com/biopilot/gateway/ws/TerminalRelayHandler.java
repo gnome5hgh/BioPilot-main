@@ -27,8 +27,7 @@ public class TerminalRelayHandler extends TextWebSocketHandler {
     private static final Logger log = LoggerFactory.getLogger(TerminalRelayHandler.class);
     /** 适配层终端端点：只允许回环/内网（与适配层监听约束同侧）。
         容器部署经 biopilot.adapter-base 派生（env 可覆盖）。 */
-    @org.springframework.beans.factory.annotation.Value(
-            "${biopilot.adapter-base:http://127.0.0.1:8300}")
+    @org.springframework.beans.factory.annotation.Value("${biopilot.adapter-base}")
     private String adapterBase;
 
     private final HttpClient client = HttpClient.newBuilder()

@@ -473,7 +473,7 @@ function statusClass(name) {
 function openMcpForm() {
   Object.assign(mcpForm, {
     open: true, id: '', name: '', transport: 'http',
-    url: 'http://127.0.0.1:8000/mcp', command: '',
+    url: '', command: '',
     allowedTools: 'search_papers', enabled: true,
   })
 }

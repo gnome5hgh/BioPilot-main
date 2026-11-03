@@ -9,15 +9,12 @@
 """
 from __future__ import annotations
 
-import httpx
-
+from biopilot.common.platform import PlatformError, make_platform_client
 from biopilot.core.tool import Tool, ToolResult
 from biopilot.core.tool.services.runtime_context import get_memory_context
 
 __all__ = ["SearchLiteratureTool"]
 
-_DEFAULT_BASE_URL = "http://127.0.0.1:8080"
-_DEFAULT_TIMEOUT = 90.0
 _ABSTRACT_PREVIEW = 400
 
 
@@ -66,36 +63,18 @@ class SearchLiteratureTool(Tool):
     provenance = "search"
 
     def __init__(self):
-        """初始化工具；HTTP 客户端留待实际调用时懒建。"""
+        """初始化工具；平台客户端留待实际调用时构造。"""
         super().__init__()
+        #: 测试注入点：注入 httpx.Client 时复用同一个假传输
         self._client = None
 
-    @classmethod
-    def _make_client(cls, transport=None, timeout: float = _DEFAULT_TIMEOUT) -> httpx.Client:
-        """构造内部调用客户端；测试经 transport 注入 MockTransport。
-
-        Args:
-            transport: httpx.BaseTransport | None，测试注入的假传输
-            timeout: float，请求超时秒数
-
-        Returns:
-            配置好超时与可选假传输的 httpx.Client。
-        """
-        return httpx.Client(transport=transport, timeout=timeout)
-
-    def _platform_settings(self) -> tuple[str, str, float]:
-        """读取平台地址、内部 token 与超时；未注入配置时用本机默认值。
-
-        Returns:
-            (base_url, internal_token, timeout) 三元组。
-        """
+    def _platform(self):
+        """按本 run 的配置快照构造平台客户端；未注入配置时回退环境配置。"""
         cfg = getattr(self, "_config", None)
-        platform = getattr(cfg, "platform", None)
-        base_url = getattr(platform, "base_url", "") or _DEFAULT_BASE_URL
-        token = getattr(platform, "internal_token", "") or ""
-        timeout = float(getattr(platform, "search_timeout", _DEFAULT_TIMEOUT)
-                        or _DEFAULT_TIMEOUT)
-        return base_url.rstrip("/"), token, timeout
+        if cfg is None:
+            from biopilot.config import BioPilotConfig
+            cfg = BioPilotConfig.from_env()
+        return make_platform_client(cfg, client=self._client)
 
     def execute(self, query: str, sources: list[str] | None = None,
                 year_from: int | None = None, year_to: int | None = None,
@@ -114,7 +93,6 @@ class SearchLiteratureTool(Tool):
         """
         if not (query or "").strip():
             return ToolResult(text="检索词不能为空。", is_error=True)
-        base_url, token, timeout = self._platform_settings()
         payload: dict = {"q": query.strip(), "limit": max(1, min(int(limit or 10), 20))}
         if sources:
             payload["sources"] = [str(s) for s in sources if s]
@@ -123,29 +101,15 @@ class SearchLiteratureTool(Tool):
         if year_to is not None:
             payload["year_to"] = int(year_to)
 
-        headers = {"X-User-Id": _current_user_id()}
-        if token:
-            headers["X-Internal-Token"] = token
-
-        client = self._client
-        own_client = client is None
-        if own_client:
-            client = self._make_client(timeout=timeout)
+        platform = self._platform()
         try:
-            response = client.post(f"{base_url}/internal/literature/search",
-                                   json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPStatusError as e:
-            return ToolResult(
-                text=f"文献检索服务返回错误（HTTP {e.response.status_code}）："
-                     f"{_brief(e.response.text)}",
-                is_error=True)
+            data = platform.search_literature(_current_user_id(), payload)
+        except PlatformError as e:
+            return ToolResult(text=f"文献检索服务错误：{_brief(str(e))}", is_error=True)
         except Exception as e:
             return ToolResult(text=f"文献检索服务不可用：{e}", is_error=True)
         finally:
-            if own_client:
-                client.close()
+            platform.close()
 
         results = data.get("results") or []
         errors = data.get("errors") or {}

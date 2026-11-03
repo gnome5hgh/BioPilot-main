@@ -129,8 +129,11 @@ class RunPythonTool(Tool):
             return
         try:
             from biopilot.common.platform import make_platform_client
-            from biopilot.config import BioPilotConfig
-            platform = make_platform_client(BioPilotConfig.from_env())
+            cfg = getattr(self, "_config", None)
+            if cfg is None:
+                from biopilot.config import BioPilotConfig
+                cfg = BioPilotConfig.from_env()
+            platform = make_platform_client(cfg)
         except Exception as e:
             logger.warning("分析产物持久化失败（不阻断工具返回）：%r", e)
             return

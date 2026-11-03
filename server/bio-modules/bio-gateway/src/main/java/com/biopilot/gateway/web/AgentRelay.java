@@ -28,7 +28,7 @@ public class AgentRelay {
     private static final String UNREACHABLE = "{\"code\":502,\"msg\":\"适配层不可达\"}";
 
     /** 适配层地址：只允许回环/内网（与适配层监听约束同侧）。 */
-    @Value("${biopilot.adapter-base:http://127.0.0.1:8300}")
+    @Value("${biopilot.adapter-base}")
     private String adapterBase;
 
     // 锁死 HTTP/1.1：默认的 h2c 升级头（Upgrade/HTTP2-Settings）会让 uvicorn 按协议

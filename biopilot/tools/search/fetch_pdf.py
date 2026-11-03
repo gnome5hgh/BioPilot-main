@@ -73,8 +73,11 @@ class FetchPdfTool(Tool):
                 响应缺 ``%PDF`` magic bytes 按 422（确定性失败）抛出。
         """
         from biopilot.common.platform import make_platform_client
-        from biopilot.config import BioPilotConfig
-        platform = make_platform_client(BioPilotConfig.from_env())
+        cfg = getattr(self, "_config", None)
+        if cfg is None:
+            from biopilot.config import BioPilotConfig
+            cfg = BioPilotConfig.from_env()
+        platform = make_platform_client(cfg)
         try:
             data = platform.fetch_pdf(_current_user_id(), url)
         finally:

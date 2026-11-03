@@ -7,11 +7,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class MinioProperties {
 
     /** MinIO 地址，host:port（不带 scheme）。 */
-    private String endpoint = "localhost:9000";
-    private String accessKey = "minioadmin";
-    private String secretKey = "minioadmin";
+    private String endpoint;
+    private String accessKey;
+    private String secretKey;
     /** 应用统一 bucket：论文、用户文件、文档、技能包、图表原图、工具结果共用。 */
-    private String bucket = "biopilot";
+    private String bucket;
     private boolean secure = false;
 
     public String getEndpoint() {
