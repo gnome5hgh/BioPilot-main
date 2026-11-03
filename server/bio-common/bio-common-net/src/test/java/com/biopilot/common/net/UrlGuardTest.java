@@ -41,6 +41,30 @@ class UrlGuardTest {
     }
 
     @Test
+    void rejectsCgnatAndSpecialRanges() {
+        // 云厂商元数据 100.100.100.200 落在 CGNAT 100.64/10，JDK 不把它当私网
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://100.100.100.200/latest/meta-data"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://198.18.0.1/x"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://192.0.0.8/x"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://240.0.0.1/x"));
+    }
+
+    @Test
+    void rejectsIpv4MappedAndTunnelRanges() {
+        // IPv4 映射地址要拆出内嵌 IPv4 再判；6to4 可绕过点分检查
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://[::ffff:127.0.0.1]/x"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://[::127.0.0.1]/x"));
+        assertThrows(IllegalArgumentException.class,
+                () -> UrlGuard.validateExternal("http://[2002:7f00:0001::1]/x"));
+    }
+
+    @Test
     void rejectsNonHttpSchemes() {
         assertThrows(IllegalArgumentException.class, () -> UrlGuard.validateExternal("file:///etc/passwd"));
         assertThrows(IllegalArgumentException.class, () -> UrlGuard.validateExternal("ftp://example.com/x"));

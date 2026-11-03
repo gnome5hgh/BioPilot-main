@@ -110,6 +110,11 @@ async function importPaper(item) {
 }
 
 async function analyze(item) {
+  // 与侧栏切换会话同一道闸：运行中新建草稿会让两条流共用 running 标志
+  if (chatStore.running) {
+    toast('当前回答还在进行，请先中断再开始新对话', 'error')
+    return
+  }
   chatStore.newDraft()
   chatStore.pendingPrompt = `请分析这篇论文：${item.title}`
     + (item.pmid ? `（PMID ${item.pmid}）` : '')

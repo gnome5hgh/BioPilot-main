@@ -76,8 +76,7 @@ class EditFileTool(Tool):
         atomic_write(p, content.replace(old_text, new_text))
         if _run_state is not None:
             _run_state.artifacts[str(p)] = "edit_file"
-        # 索引不在这里做：改完由调用方派发 rag-agent 重新入库（索引是「先删后建」，
-        # 直接重跑不会留下旧块）。
+        # 本地文件不进检索库：知识库只索引平台论文，rag-agent 也不再扫描目录。
         return ToolResult(
-            text=f"已编辑 {path}（尚未建立索引，请派发 rag-agent）",
+            text=f"已编辑 {path}",
             completion=f"File edited: {path}")

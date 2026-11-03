@@ -144,7 +144,8 @@ class ToolResultStore:
                 client.put_object(
                     self._bucket, key, BytesIO(data), len(data),
                     content_type="text/plain; charset=utf-8")
-                return key, str(self._local_path(user_id, session_id, tool_call_id))
+                # 对象已落 MinIO：本地副本不存在，不能把未写过的路径交给调用方
+                return key, ""
             except Exception as exc:
                 self._failed_at = time.monotonic()
                 logger.warning("工具结果写 MinIO 失败，回退本地: %r", exc)

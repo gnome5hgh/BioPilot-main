@@ -2,6 +2,26 @@ import { defineStore } from 'pinia'
 import http from '../api/auth'
 
 /**
+ * 生成会话草稿 id。
+ *
+ * crypto.randomUUID 只在安全上下文（https / localhost）可用；局域网 http 部署
+ * （docker compose --profile full 的 80 端口）里它不存在，直接调用会让首屏报错。
+ * 降级到 getRandomValues，再不行用时间戳+随机数——草稿 id 只需在客户端内唯一。
+ */
+function newSessionId() {
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID()
+  if (cryptoApi?.getRandomValues) {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+  return `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+/**
  * 对话页的共享状态：会话/项目列表、当前会话、消息与上下文用量。
  *
  * 放在 store 里的原因：左侧导航（MainLayout 里的 AppSidebar）与右侧对话区
@@ -92,7 +112,7 @@ export const useChatStore = defineStore('chat', {
      * @param {string|null} projectId 归属项目
      */
     newDraft(projectId = null) {
-      this.currentId = crypto.randomUUID()
+      this.currentId = newSessionId()
       this.currentProjectId = projectId || ''
       this.draftTitle = ''
       this.messages = []
@@ -167,6 +187,11 @@ export const useChatStore = defineStore('chat', {
 
     /** 删除会话；删的是当前会话时回到空白草稿（不保留项目归属）。 */
     async deleteSession(session) {
+      // 运行中删除会让引擎写回已不存在的会话（孤儿消息行），并在前端留下
+      // 一个等不到确认的弹框；先让用户中断。
+      if (this.running && session.agent_id === this.currentId) {
+        throw new Error('当前会话正在运行，请先中断再删除')
+      }
       await http.delete(`/conversations/${encodeURIComponent(session.agent_id)}`)
       this.sessions = this.sessions.filter((item) => item.agent_id !== session.agent_id)
       if (session.agent_id === this.currentId) {

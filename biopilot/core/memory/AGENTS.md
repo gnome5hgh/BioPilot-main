@@ -2,7 +2,7 @@
 
 ## Scope
 
-- 覆盖 `core/memory/`：Letta 记忆栈的移植——SQLite 持久化、记忆块与会话消息、上下文压缩、记忆整合。
+- 覆盖 `core/memory/`：Letta 记忆栈的移植——MySQL 持久化、记忆块与会话消息、上下文压缩、记忆整合。
 - 根 manifest 的两条硬红线（SQL 是真相源、读—改—写必须走一次持锁事务）在本层同样成立，这里写本包特有的。
 
 ## Module Positioning
@@ -18,7 +18,7 @@ memory/
 ├─ domain/entity/ # 压缩产物：摘要 / 任务快照 / CompactionResult 整合体
 ├─ domain/dto/   # 整合编辑指令契约：MemoryEdit / MemoryEditBatch（LLM 结构化输出，不落库）
 ├─ schemas/      # 表实体与持久化模型：块 / 记忆 / 消息 / Agent 状态
-├─ storage/      # SQLite 持久化（库、表结构、增量迁移）
+├─ storage/      # MySQL 持久化（连接池、表结构、增量迁移、命名锁）
 ├─ common/       # 领域异常（并发写冲突、块字符上限、整合指令校验失败、编号定位失败）
 └─ services/     # 四个职责模块：blocks（块存储与编辑语义，在 block_manager.py）
                  #   + session 管理器（message/agent_manager.py）+ compaction.py + consolidation.py

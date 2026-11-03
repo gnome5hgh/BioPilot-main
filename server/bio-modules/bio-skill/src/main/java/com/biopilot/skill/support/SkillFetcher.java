@@ -1,6 +1,7 @@
 package com.biopilot.skill.support;
 
 import com.biopilot.common.core.exception.ServiceException;
+import com.biopilot.common.net.UrlGuard;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -158,8 +159,17 @@ public class SkillFetcher {
         if (SHORTHAND.matcher(value).matches() && !value.contains("://")) {
             return "https://github.com/" + value + ".git";
         }
-        if (value.startsWith("http://") || value.startsWith("https://")
-                || value.startsWith("ssh://") || value.startsWith("git@")) {
+        if (value.startsWith("http://") || value.startsWith("https://")) {
+            // 安装源由任意登录用户提交，是典型的 SSRF 入口：必须走公网校验，
+            // 否则可以借它探测回环/内网/云元数据地址。
+            try {
+                UrlGuard.validateExternal(value);
+            } catch (IllegalArgumentException e) {
+                throw new ServiceException(422, "安装源不可访问: " + e.getMessage());
+            }
+            return value;
+        }
+        if (value.startsWith("ssh://") || value.startsWith("git@")) {
             return value;
         }
         throw new ServiceException(422, "无法识别的安装源（支持 git URL 或 owner/repo）: " + value);

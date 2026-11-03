@@ -36,7 +36,8 @@ RUN pip install --no-cache-dir \
         openpyxl \
         pypdf
 
-# 容器以非 root 用户运行（启动参数里的 --user sandbox 对应这里）。
+# 镜像内预建非 root 用户；实际启动时由沙箱代码用宿主 uid:gid 覆盖 --user，
+# 既保持非 root，又保证挂载的临时目录对容器进程可写。
 RUN useradd --create-home --shell /usr/sbin/nologin sandbox
 
 # 容器根文件系统只读、只给 /tmp 一个内存文件系统：把 HOME 与各类缓存都指到 /tmp，

@@ -14,6 +14,7 @@ closed**：宁可拒绝执行，也绝不退回进程内裸跑。这条没有开
 本模块不读配置：政策由调用方（工具）组装好传进来，保持与配置解耦。
 """
 
+import os
 import shutil
 import subprocess
 import time
@@ -27,8 +28,22 @@ _WORKDIR = "/work"
 _SCRIPT_NAME = "_run.py"
 _SCRIPT_IN_CONTAINER = f"{_WORKDIR}/{_SCRIPT_NAME}"
 
-#: 容器内运行代码的用户名（镜像里建的非 root 用户）
+#: 容器内运行代码的用户（镜像里建的非 root 用户，非 POSIX 平台的回退值）
 _SANDBOX_USER = "sandbox"
+
+
+def _container_user() -> str:
+    """返回容器内运行用户。
+
+    优先用宿主进程的 uid:gid：临时目录由宿主创建，容器内换用另一个固定 uid
+    会在宿主 uid 不同（Linux 部署、root 进程）时因目录属主不符而不可写，整次
+    执行以 PermissionError 收场。沿用宿主 uid 还能让产物文件直接归调用者所有。
+    """
+    getuid = getattr(os, "getuid", None)
+    getgid = getattr(os, "getgid", None)
+    if getuid is None or getgid is None:
+        return _SANDBOX_USER
+    return f"{getuid()}:{getgid()}"
 
 
 @dataclass(frozen=True)
@@ -137,8 +152,8 @@ def build_docker_argv(policy: SandboxPolicy, container_name: str) -> list[str]:
     argv += ["--memory", policy.memory, "--cpus", str(policy.cpus),
              "--pids-limit", str(policy.pids_limit)]
 
-    # 非 root：镜像里建了 sandbox 用户，代码不以 root 落地。
-    argv += ["--user", _SANDBOX_USER]
+    # 非 root：用宿主 uid:gid 落地，既不以 root 运行，也保证挂载目录可写。
+    argv += ["--user", _container_user(), "-e", "HOME=/tmp", "-e", "USER=sandbox"]
 
     # 只读挂载：宿主目录接进容器后不可写。
     for host_path, container_path in policy.read_mounts:

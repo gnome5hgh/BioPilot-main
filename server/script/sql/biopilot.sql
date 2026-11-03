@@ -169,3 +169,27 @@ CREATE TABLE IF NOT EXISTS bio_skill (
     UNIQUE KEY uk_skill_user_name (user_id, name),
     KEY idx_skill_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户技能表';
+
+-- 引用库表：每个用户一份，代理导出 .bib 与勾选加入。
+-- 容器首启由 docker/mysql-init/06-citation-table.sql 建同名表，两份必须保持等价。
+CREATE TABLE IF NOT EXISTS bio_citation (
+    id           VARCHAR(64)  NOT NULL COMMENT '主键',
+    user_id      VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
+    cite_key     VARCHAR(64)  NOT NULL COMMENT '引用键（用户内唯一）',
+    entry_type   VARCHAR(32)  NOT NULL DEFAULT 'article' COMMENT 'BibTeX 条目类型',
+    title        VARCHAR(500) NOT NULL COMMENT '标题',
+    authors      VARCHAR(1000) NOT NULL DEFAULT '' COMMENT '作者',
+    year         VARCHAR(10)  NOT NULL DEFAULT '' COMMENT '年份',
+    journal      VARCHAR(300) NOT NULL DEFAULT '' COMMENT '期刊',
+    volume       VARCHAR(40)  NULL COMMENT '卷',
+    pages        VARCHAR(60)  NULL COMMENT '页码',
+    doi          VARCHAR(200) NULL COMMENT 'DOI',
+    fields_json  MEDIUMTEXT   NULL COMMENT '其余 BibTeX 字段（JSON）',
+    source       VARCHAR(20)  NOT NULL COMMENT '来源（manual/agent）',
+    created_at   VARCHAR(40)  NOT NULL COMMENT '创建时间（ISO）',
+    seq          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '插入序',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_citation_seq (seq),
+    UNIQUE KEY uk_citation_user_key (user_id, cite_key),
+    KEY idx_citation_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='引用库';

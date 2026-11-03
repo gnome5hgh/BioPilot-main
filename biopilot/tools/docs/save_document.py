@@ -40,7 +40,9 @@ class SaveDocumentTool(Tool):
         },
         "required": ["name", "content"],
     }
-    risk_level = "low"
+    # 写平台文档（同名覆盖）：写类工具一律至少 medium，默认确认档下会弹一次确认，
+    # 避免静默覆盖用户已有文档
+    risk_level = "medium"
     side_effects = ["network", "write_file"]
 
     def __init__(self):

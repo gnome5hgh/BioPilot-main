@@ -136,8 +136,7 @@ class WriteFileTool(Tool):
         atomic_write(p, content)
         if _run_state is not None:
             _run_state.artifacts[str(p)] = "write_file"
-        # 索引不在这里做：写盘成功后由调用方派发 rag-agent 入库。工具只提示这件事，
-        # 因为「忘记入库」不会有任何报错，提醒要落在动作发生的那一刻。
+        # 本地文件不进检索库：知识库只索引平台论文，rag-agent 也不再扫描目录。
         return ToolResult(
-            text=f"已写入 {p}（尚未建立索引，请派发 rag-agent）",
+            text=f"已写入 {p}",
             completion=f"File written: {p}")

@@ -242,6 +242,8 @@ const mcpSaving = ref(false)
 const mcpForm = reactive({
   open: false, id: '', name: '', transport: 'http', url: '', command: '',
   allowedTools: 'search_papers', enabled: true,
+  // 编辑时原样带回：表单不展示这些字段，但漏传会被服务端按默认值覆盖
+  disabledTools: [], connectTimeoutMs: null, callTimeoutMs: null,
 })
 
 const visibleGroups = computed(() => {
@@ -339,7 +341,9 @@ function collectPatches() {
     for (const section of group.sections) {
       for (const field of section.fields) {
         if (!field.editable || sources.value[field.path] === 'env') continue
-        if (field.secret) {
+        // 按控件类型判断，而不是 secret 标记：runtime.models 是密钥载体但控件是
+        // JSON 数组编辑器，按 secret 走会把数组当口令字符串提交（422）。
+        if (field.widget === 'password') {
           if (secretCleared.value[field.path]) {
             patches.push({ path: field.path, unset: true })
           } else if (secretInput.value[field.path]) {
@@ -488,6 +492,9 @@ function editMcp(server) {
     command: server.command || '',
     allowedTools: (server.allowedTools || []).join(', '),
     enabled: Boolean(server.enabled),
+    disabledTools: server.disabledTools || [],
+    connectTimeoutMs: server.connectTimeoutMs ?? null,
+    callTimeoutMs: server.callTimeoutMs ?? null,
   })
 }
 
@@ -519,9 +526,13 @@ async function saveMcp() {
     command: mcpForm.transport === 'stdio' ? mcpForm.command.trim() : '',
     adapter: 'paper_search',
     allowedTools: mcpForm.allowedTools.split(',').map((item) => item.trim()).filter(Boolean),
-    disabledTools: [],
+    // 编辑时不暴露这两个字段，但必须原样回传：写空数组/默认值等于把用户配置抹掉
+    disabledTools: mcpForm.disabledTools || [],
     enabled: mcpForm.enabled,
   }
+  // 超时字段在服务端是 int：新建时不传（走默认），编辑时原样带回
+  if (mcpForm.connectTimeoutMs != null) body.connectTimeoutMs = mcpForm.connectTimeoutMs
+  if (mcpForm.callTimeoutMs != null) body.callTimeoutMs = mcpForm.callTimeoutMs
   mcpSaving.value = true
   try {
     if (mcpForm.id) {
@@ -563,7 +574,14 @@ async function toggleMcp(server) {
 }
 
 async function removeMcp(server) {
-  if (!window.confirm(`删除检索源 ${server.name}？`)) return
+  const ok = await confirmDialog({
+    title: '删除检索源',
+    message: `删除检索源「${server.name}」？`,
+    detail: '删除后，文献检索与 agent 都不再使用该来源。',
+    confirmText: '删除',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await http.delete(`/admin/literature/sources/${server.id}`)
     await Promise.all([loadMcp(), loadMcpStatus()])

@@ -61,7 +61,7 @@ security/
 
 1. 先判断是「拦错了」还是「没拦住」：前者看对应中间件的判据，后者看策略引擎的升级因合并。
 2. 路径问题看 `middleware/workspace.py`；内容问题看内容防护；命令问题看 `command_guard` 与 `services/command.py`。
-3. 审计字段与格式看 `middleware/audit.py`；审计的实际落点是运行数据根下的 `security/audit/`（按天轮转的 JSONL）。
+3. 审计字段与格式看 `middleware/audit.py`；审计真相源是 MySQL 的 `bio_security_audit_event` 表（insert-only，payload 存全量取证）。
 4. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands

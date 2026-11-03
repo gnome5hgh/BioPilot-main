@@ -59,9 +59,6 @@ public final class SafeHttpFetcher {
         HttpResponse<InputStream> response = null;
         int hops = 0;
         while (true) {
-            if (hops > maxRedirects) {
-                throw new IllegalStateException("重定向超过 " + maxRedirects + " 跳: " + url);
-            }
             response = send(request(current, remaining(deadline)));
             int status = response.statusCode();
             if (status >= 300 && status < 400) {
@@ -69,6 +66,10 @@ public final class SafeHttpFetcher {
                 closeQuietly(response);
                 if (location.isBlank()) {
                     throw new IllegalStateException("重定向缺 Location 头: " + current);
+                }
+                // 在跟随处判上限：hops 是已跟随的跳数，允许恰好 maxRedirects 跳
+                if (hops >= maxRedirects) {
+                    throw new IllegalStateException("重定向超过 " + maxRedirects + " 跳: " + url);
                 }
                 current = validator.apply(current.resolve(location).toString());
                 hops++;
@@ -80,7 +81,7 @@ public final class SafeHttpFetcher {
             if (response.statusCode() >= 400) {
                 throw new IllegalStateException("下载失败: HTTP " + response.statusCode());
             }
-            return readBody(response, url);
+            return readBody(response, url, deadline);
         } finally {
             closeQuietly(response);
         }
@@ -111,8 +112,14 @@ public final class SafeHttpFetcher {
         }
     }
 
-    /** Content-Length 超限先拒绝；流式读取中再兜底，绝不把超限响应整段读进内存。 */
-    private byte[] readBody(HttpResponse<InputStream> response, String url) {
+    /**
+     * Content-Length 超限先拒绝；流式读取中再兜底大小与总预算。
+     *
+     * <p>{@code HttpRequest.timeout} 只约束到响应头到达（用 ofInputStream 交付时），
+     * 响应体不受它保护。没有逐块 deadline 检查的话，恶意站点回完 200 头再慢慢吐字节
+     * 就能长期占住请求线程。</p>
+     */
+    private byte[] readBody(HttpResponse<InputStream> response, String url, long deadline) {
         long contentLength = response.headers().firstValueAsLong("content-length").orElse(-1);
         if (contentLength > maxBytes) {
             throw new IllegalArgumentException("响应超过大小上限 " + maxBytes + " 字节: " + url);
@@ -123,6 +130,9 @@ public final class SafeHttpFetcher {
             long total = 0;
             int n;
             while ((n = in.read(buffer)) != -1) {
+                if (System.nanoTime() - deadline > 0) {
+                    throw new IllegalStateException("下载超时: 总预算耗尽");
+                }
                 total += n;
                 if (total > maxBytes) {
                     throw new IllegalArgumentException("响应超过大小上限 " + maxBytes + " 字节: " + url);

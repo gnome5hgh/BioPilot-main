@@ -116,8 +116,8 @@ public class AgentRelay {
 
         if (upstreamResp.statusCode() != 200) {
             String errBody;
-            try {
-                errBody = new String(upstreamResp.body().readAllBytes(), StandardCharsets.UTF_8);
+            try (java.io.InputStream in = upstreamResp.body()) {
+                errBody = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             } catch (java.io.IOException e) {
                 errBody = "{\"code\":502,\"msg\":\"适配层响应读取失败\"}";
             }

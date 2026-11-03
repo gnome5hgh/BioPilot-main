@@ -109,8 +109,10 @@ class PlatformClient:
         Raises:
             PlatformError: 不存在、不属于该用户或平台不可用。
         """
+        # 路径段必须编码：业务 id 来自客户端，含 / 或 .. 时会把请求导向别的内部端点
         response = self._request(
-            "GET", f"/internal/attachments/{kind}/{obj_id}", user_id=user_id,
+            "GET", f"/internal/attachments/{quote(str(kind), safe='')}/"
+                   f"{quote(str(obj_id), safe='')}", user_id=user_id,
             timeout=self._transfer_timeout)
         meta = {
             "name": unquote(response.headers.get("X-File-Name", "") or ""),

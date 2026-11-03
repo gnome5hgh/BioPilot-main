@@ -39,7 +39,7 @@ class RunPythonTool(Tool):
 
     Attributes:
         name: str，工具名 "run_python"
-        description: str，工具描述（含沙箱语义：断网 / 论文库只读 / 产物在临时目录）
+        description: str，工具描述（含沙箱语义：断网 / 只读挂载 / 只有 /work 可写）
         parameters: dict，JSON Schema（code）
         risk_level: str，"medium"（默认免问档内；安全来自沙箱而非档位）
         side_effects: list[str]，["read_file", "write_file"]
@@ -48,12 +48,12 @@ class RunPythonTool(Tool):
 
     name = "run_python"
     description = (
-        "在隔离沙箱里运行一段 Python 代码并把结果取回来（分析论文数据、算统计、画图）。"
-        "隔离方式：一次性容器，**无网络**，论文库只读挂在 /corpus/pdf 下，"
-        "对话附件的数据文件只读挂在 /corpus/uploads 下（csv/xlsx/h5ad 等），"
-        "只有 /work 可写。如需读取 PDF，请用 /corpus/pdf 下的路径；"
-        "分析上传的数据文件，请读 /corpus/uploads 下的对应文件。"
-        "代码写到 /work 下即可产出文件——产出清单会随结果返回（含留存路径）。"
+        "在隔离沙箱里运行一段 Python 代码并把结果取回来（分析数据、算统计、画图）。"
+        "隔离方式：一次性容器，**无网络**；对话附件的数据文件只读挂在 "
+        "/corpus/uploads 下（csv/xlsx/h5ad 等），只有 /work 可写。"
+        "论文 PDF 不挂进沙箱——需要读全文时用 read_pdf 工具，或在代码里分析"
+        "对话附件里的数据文件。"
+        "代码写到 /work 下即可产出文件，产出会自动登记到文件管理。"
         "依赖库已预装：pandas、numpy、scipy、statsmodels、matplotlib、seaborn、"
         "scikit-learn、scanpy、anndata、biopython、lifelines、openpyxl、pypdf。"
     )
@@ -167,7 +167,8 @@ class RunPythonTool(Tool):
         }
 
     @staticmethod
-    def _format(res: sb.SandboxResult, scratch: str) -> str:
+    def _format(res: sb.SandboxResult, scratch: str,
+                files: list[dict] | None = None) -> str:
         """把结果整理成固定列文本：退出码 / stdout / stderr / 产出文件 / 说明。"""
         head = f"退出码: {res.exit_code}（耗时 {res.duration_ms}ms）"
         if res.timed_out:
@@ -180,14 +181,19 @@ class RunPythonTool(Tool):
             _clip(res.stderr.rstrip("\n")) or "(空)",
             "--- 产出文件 ---",
         ]
-        if res.files:
-            lines += [f"{Path(scratch) / f['name']} ({f['size']} B)" for f in res.files]
+        shown = files if files is not None else res.files
+        if shown:
+            for f in shown:
+                line = f"{Path(scratch) / f['name']} ({f['size']} B)"
+                if f.get("oss_key"):
+                    line += "（已登记到文件管理）"
+                lines.append(line)
         else:
             lines.append("(无)")
         lines += [
             "--- 说明 ---",
-            "本次在隔离容器中执行：无网络；论文库只读。产出文件在临时目录里，"
-            "如需留存请用 write_file 写到目标目录。",
+            "本次在隔离容器中执行：无网络，只有 /work 可写。"
+            "产出文件已自动登记到文件管理（登记失败时仍保留在临时目录）。",
         ]
         return "\n".join(lines)
 
@@ -217,15 +223,19 @@ class RunPythonTool(Tool):
         except sb.SandboxUnavailable as e:
             return ToolResult(text=f"沙箱不可用，代码未执行：{e}")
 
+        files = [
+            {"name": f["name"], "path": str(Path(policy.scratch) / f["name"]),
+             "size": f["size"]}
+            for f in res.files
+        ]
+        # 产物登记是落盘之后的收尾：失败只在 _persist_artifacts 内记日志，
+        # 不影响本次执行结果返回（本地路径仍可用）。
+        self._persist_artifacts(files)
         summary = {
             "exit_code": res.exit_code,
             "timed_out": res.timed_out,
             "duration_ms": res.duration_ms,
-            "files": [
-                {"name": f["name"], "path": str(Path(policy.scratch) / f["name"]),
-                 "size": f["size"]}
-                for f in res.files
-            ],
+            "files": files,
             "sandbox": self._policy_summary(policy),
         }
-        return ToolResult(text=self._format(res, policy.scratch), summary=summary)
+        return ToolResult(text=self._format(res, policy.scratch, files), summary=summary)

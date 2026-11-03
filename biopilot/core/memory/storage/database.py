@@ -296,11 +296,8 @@ class MemoryDB:
             except queue.Empty:
                 with self._create_lock:
                     if self._created < self._pool_size:
-                        try:
-                            conn = self._new_conn()
-                        except Exception:
-                            self._created -= 1   # 建连失败必须回退计数，否则池位永久漏掉
-                            raise
+                        # 建连失败直接上抛：计数只在成功后 +1，无需回退
+                        conn = self._new_conn()
                         self._created += 1
                         return conn
                 conn = self._pool.get(timeout=30)

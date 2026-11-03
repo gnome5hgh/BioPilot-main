@@ -322,6 +322,9 @@ function applyPendingPrompt() {
 onBeforeUnmount(() => {
   stopTicker()
   stopConfirmTimer()
+  // 离开对话页即取消本轮 run（与 SSE 契约一致：断开映射为取消），
+  // 否则流会在后台继续跑，running 状态也随组件销毁失联。
+  abortController?.abort()
 })
 
 watch(() => store.currentId, () => {
@@ -642,7 +645,8 @@ async function send() {
       let detail = `HTTP ${response.status}`
       try {
         const data = await response.json()
-        detail = data.msg || detail
+        // Java 透传的是 FastAPI 的 {"detail": ...}，也有统一体的 msg
+        detail = data.msg || data.detail || detail
       } catch { /* 非 JSON 错误体保留状态码 */ }
       assistant.error = `对话失败：${detail}`
       return
@@ -651,6 +655,7 @@ async function send() {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let sawDone = false
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
@@ -667,9 +672,17 @@ async function send() {
           } catch {
             continue
           }
+          if (event.type === 'done') sawDone = true
           handleEvent(event, assistant)
         }
       }
+    }
+    // done 帧恒发（含异常路径）；没收到说明连接被中途截断，不能把半截回答
+    // 当最终结果交付。用户主动中断的情况由下面的 AbortError 分支负责。
+    if (!sawDone && !abortController.signal.aborted && !assistant.error) {
+      assistant.error = assistant.text
+        ? '连接中断，回答可能不完整（未收到结束标记）'
+        : '连接中断，未收到回答'
     }
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -762,7 +775,7 @@ async function answerConfirm(approved) {
   stopConfirmTimer()
   if (!event) return
   try {
-    await fetch('/api/v1/chat/confirm', {
+    const response = await fetch('/api/v1/chat/confirm', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -774,6 +787,12 @@ async function answerConfirm(approved) {
         approved,
       }),
     })
+    // 确认已超时/已失效时服务端回 404：弹框虽关了，但用户必须知道决定没送达
+    if (!response.ok) {
+      toast(response.status === 404
+        ? '确认已超时或失效，服务端已按拒绝处理'
+        : `确认回传失败（HTTP ${response.status}）`, 'error')
+    }
   } catch (error) {
     toast(errText(error, '确认回传失败'), 'error')
   }

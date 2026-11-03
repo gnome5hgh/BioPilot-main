@@ -69,6 +69,10 @@ class NamedLock:
             self._name = name
             return True
         conn.close()
+        if got is None:
+            # NULL 不是「锁被占用」：它表示 GET_LOCK 自身出错（参数/权限/服务异常）。
+            # 当成竞争会把基础设施故障伪装成正常抢锁失败，让调用方静默跳过本轮工作。
+            raise RuntimeError(f"GET_LOCK 返回 NULL（{name}），无法判断锁状态")
         return False
 
     def release(self, name: str) -> None:

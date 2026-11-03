@@ -22,7 +22,30 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_DIR="${BIOPILOT_RUN_DIR:-$ROOT/.biopilot/run}"
 mkdir -p "$RUN_DIR"
 
-PY_BIN="$(command -v biopilot || echo /opt/miniconda3/envs/biopilot/bin/biopilot)"
+# .env 是部署引导的唯一入口：Python 侧自己会 load_dotenv，但 SpringBoot 与
+# 本脚本不会——不在这里导出的话，BIOPILOT_INTERNAL_TOKEN / 数据源口令只对
+# Python 生效，Java 侧读到空值（内部调用全部 403）。
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env"
+  set +a
+fi
+
+# Python 解释器：优先 PATH 里的 biopilot，其次当前 conda 安装根下的 biopilot 环境；
+# 都找不到就明确失败，绝不静默继续（否则后面会起一个不存在的服务）。
+PY_BIN="${BIOPILOT_PY_BIN:-$(command -v biopilot || true)}"
+if [ -z "$PY_BIN" ]; then
+  CONDA_BASE="$(conda info --base 2>/dev/null || true)"
+  if [ -n "$CONDA_BASE" ] && [ -x "$CONDA_BASE/envs/biopilot/bin/biopilot" ]; then
+    PY_BIN="$CONDA_BASE/envs/biopilot/bin/biopilot"
+  fi
+fi
+if [ -z "$PY_BIN" ] || [ ! -x "$PY_BIN" ]; then
+  printf '\033[2m[start]\033[0m %s\n' \
+    "找不到 biopilot 可执行文件：请先激活 conda 环境 biopilot，或设置 BIOPILOT_PY_BIN"
+  exit 1
+fi
 # 容器 MySQL 发布到 3307（3306 常被本机自装 MySQL 占用）；适配层 DSN 与
 # SpringBoot 的 datasource 都读这个变量，改端口只改一处。
 MYSQL_PORT="${BIOPILOT_MYSQL_PORT:-3307}"
@@ -77,24 +100,36 @@ else
 fi
 
 # ---- 5. 就绪探测 ----
+# -f：只把 2xx/3xx 当成功。不带 -f 的话 404/405/500 也会被判「就绪」，
+# 服务初始化失败时脚本仍会打印「已启动」。
 wait_url() {
   local name="$1" url="$2"
   for _ in $(seq 1 60); do
-    curl -s -o /dev/null -m 2 "$url" && { log "$name 就绪：$url"; return 0; }
+    curl -sf -o /dev/null -m 2 "$url" && { log "$name 就绪：$url"; return 0; }
     sleep 2
   done
   log "$name 60 秒内未就绪，看对应日志排查"; return 1
 }
-wait_url "适配层"  http://127.0.0.1:8300/health
-wait_url "服务端"  http://127.0.0.1:8080/api/v1/auth/login
-wait_url "前端"    http://localhost:5173/
+failures=0
+wait_url "适配层"  http://127.0.0.1:8300/health || failures=$((failures + 1))
+wait_url "服务端"  http://127.0.0.1:8080/health || failures=$((failures + 1))
+wait_url "前端"    http://localhost:5173/ || failures=$((failures + 1))
 
-cat <<'EOF'
+if [ "$failures" -eq 0 ]; then
+  cat <<'EOF'
 
   ✅ BioPilot 已启动：浏览器打开 http://localhost:5173
      停止：./stop.sh（容器与数据保留）
 
 EOF
+else
+  cat <<EOF
+
+  ❌ 有 $failures 个服务未在 60 秒内就绪，平台可能不可用
+     日志目录：$RUN_DIR（webapi.log / server.log / web.log）
+
+EOF
+fi
 
 # 跟随各服务日志（Ctrl-C 退出跟随，服务继续在后台跑）
 tail -n 20 -f "$RUN_DIR"/webapi.log "$RUN_DIR"/server.log "$RUN_DIR"/web.log 2>/dev/null

@@ -111,14 +111,18 @@ class AgentManager:
                                    (agent_id,)).fetchone()
         if existing is not None and existing["user_id"] != user_id:
             raise ValueError(f"会话 {agent_id} 已归属其他用户")
-        # project_id 经实例属性传递（REPLACE 需要它；None=未分组）
-        self._create_project_id = project_id
         self.db.execute(
             "REPLACE INTO bio_agent_state (agent_id, user_id, name, message_ids, created_at,"
             " project_id) VALUES (?,?,?,?,?,?)",
             (agent_id, user_id, name, json.dumps([]),
-             datetime.now(timezone.utc).isoformat(), self._create_project_id))
-        self._create_project_id = None
+             datetime.now(timezone.utc).isoformat(), project_id))
+        # 新会话从 0 开始消费：游标行必须显式写入，否则整合器会把「行不存在」
+        # 当成「历史已消费」而回填到当前消息数，导致第一轮内容永远不进长期记忆。
+        # 已有会话的行保持不动（回续语义）。
+        self.db.execute(
+            "INSERT IGNORE INTO bio_memory_consolidation_cursor"
+            " (agent_id, `cursor`, updated_at) VALUES (?,?,?)",
+            (agent_id, 0, datetime.now(timezone.utc).isoformat()))
         return self.get_agent(agent_id)
 
     def get_agent(self, agent_id: str, user_id: str | None = None) -> AgentState:

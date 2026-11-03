@@ -851,6 +851,10 @@ def _type_name(default: Any) -> str:
 
 def _widget(path: str, default: Any) -> str:
     """决定前端用哪种输入控件。"""
+    # 多模型清单虽是密钥载体（整份加密、条目里的 api_key 掩码），编辑控件仍是
+    # JSON 编辑器：它是数组，不是单个口令。前端按 widget 而不是 secret 选控件。
+    if path == "runtime.models":
+        return "json"
     if is_secret(path):
         return "password"
     if path in ENUM_OPTIONS:

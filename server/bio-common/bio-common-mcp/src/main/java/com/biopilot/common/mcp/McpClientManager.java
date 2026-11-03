@@ -186,8 +186,17 @@ public class McpClientManager {
         if (!managed.config().allowsTool(tool)) {
             throw new IllegalStateException("MCP 工具不在允许列表: " + server + "/" + tool);
         }
-        McpSchema.CallToolResult result = managed.client().callTool(
-                new McpSchema.CallToolRequest(tool, args == null ? Map.of() : args));
+        McpSchema.CallToolResult result;
+        try {
+            result = managed.client().callTool(
+                    new McpSchema.CallToolRequest(tool, args == null ? Map.of() : args));
+        } catch (RuntimeException e) {
+            // 传输层断开（stdio 子进程崩溃/HTTP 断连）不能继续宣称 CONNECTED：
+            // 状态是管理端唯一的可观测信号，必须如实反映失败。
+            statuses.put(server, new McpServerStatus(
+                    server, McpConnectionState.FAILED, managed.tools(), e.getMessage()));
+            throw e;
+        }
         StringBuilder text = new StringBuilder();
         if (result.content() != null) {
             for (McpSchema.Content content : result.content()) {

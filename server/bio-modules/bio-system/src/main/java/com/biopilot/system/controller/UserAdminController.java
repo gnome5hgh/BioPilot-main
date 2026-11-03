@@ -1,6 +1,7 @@
 package com.biopilot.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.stp.StpUtil;
 import com.biopilot.common.core.R;
 import com.biopilot.system.domain.LoginLog;
 import com.biopilot.system.mapper.LoginLogMapper;
@@ -84,6 +85,15 @@ public class UserAdminController {
             u.setNickName(body.get("nickName"));
         }
         userService.updateById(u);
+        // 停用必须同时踢掉已登录会话：登录态校验只看 token，不看 status，
+        // 不 kickout 的话被停用的学生可以拿着旧 token 一直用到过期。
+        if ("1".equals(body.get("status"))) {
+            try {
+                StpUtil.kickout(userId);
+            } catch (Exception ignored) {
+                // 目标本就不在线：kick 语义幂等
+            }
+        }
         return R.ok();
     }
 

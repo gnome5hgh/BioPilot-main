@@ -90,9 +90,15 @@ public class ScheduleDispatchServiceImpl implements ScheduleDispatchService {
                         id, row.get("user_id"));
                 continue;
             }
-            internal.runSchedule(userId, id, text(row.get("conversation_id")),
-                    text(row.get("task")), text(row.get("name")));
-            dispatched += 1;
+            try {
+                internal.runSchedule(userId, id, text(row.get("conversation_id")),
+                        text(row.get("task")), text(row.get("name")));
+                dispatched += 1;
+            } catch (RuntimeException e) {
+                // 进度已推进（不重试防雪崩），但投递失败必须留痕：
+                // 会话不属于该用户、适配层不可达等都会走到这里
+                log.warn("定时任务投递失败 id={} user={}: {}", id, userId, e.getMessage());
+            }
         }
         return dispatched;
     }

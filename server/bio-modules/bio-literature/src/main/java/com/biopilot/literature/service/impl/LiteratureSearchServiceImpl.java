@@ -116,8 +116,10 @@ public class LiteratureSearchServiceImpl implements LiteratureSearchService {
         if (notBlank(p.pmid())) {
             return "pmid:" + p.pmid();
         }
-        return "title:" + (p.title() == null ? "" : p.title().toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]", ""));
+        String raw = p.title() == null ? "" : p.title().toLowerCase(Locale.ROOT).trim();
+        String normalized = raw.replaceAll("[^a-z0-9]", "");
+        // 中文标题规范化后为空：不能把「空键」当去重键，否则多条结果只会剩第一条
+        return "title:" + (normalized.isEmpty() ? raw : normalized);
     }
 
     private static boolean notBlank(String value) {

@@ -54,7 +54,12 @@ public class SkillArchive {
         var buffer = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(buffer)) {
             for (Path file : files) {
-                zip.putNextEntry(new ZipEntry(dir.relativize(file).toString().replace('\\', '/')));
+                ZipEntry entry = new ZipEntry(
+                        dir.relativize(file).toString().replace('\\', '/'));
+                // 固定时间戳：默认写入当前时间会让同一份内容每次打包得到不同字节，
+                // content_sha 就不再是内容寻址，更新时会不断生成新对象键。
+                entry.setTime(0L);
+                zip.putNextEntry(entry);
                 Files.copy(file, zip);
                 zip.closeEntry();
             }

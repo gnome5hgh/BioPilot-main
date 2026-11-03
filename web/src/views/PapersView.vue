@@ -589,13 +589,26 @@ async function deleteSelected() {
   await load()
 }
 
-function newDoc() {
+async function newDoc() {
+  if (!(await confirmLeaveDoc())) return
   editing.value = { id: '', name: '新文档.md', content: '' }
   editingOrigin.value = { name: '', content: '' }
   docPreview.value = false
 }
 
+/** 切换文档前确认未保存改动；返回 false 表示用户取消。 */
+async function confirmLeaveDoc() {
+  if (!docDirty.value) return true
+  return await confirmDialog({
+    title: '放弃未保存的修改？',
+    message: '当前文档有未保存的改动，切换后这些改动会丢失。',
+    confirmText: '放弃修改',
+    danger: true,
+  })
+}
+
 async function openDoc(row) {
+  if (!(await confirmLeaveDoc())) return
   try {
     const { data } = await http.get(`/documents/${row.id}`)
     editing.value = { id: data.id, name: data.name, content: data.content || '' }
@@ -612,15 +625,7 @@ async function previewDoc(row) {
 }
 
 async function closeDoc() {
-  if (docDirty.value) {
-    const ok = await confirmDialog({
-      title: '放弃未保存的修改？',
-      message: '当前文档有未保存的改动。',
-      confirmText: '放弃修改',
-      danger: true,
-    })
-    if (!ok) return
-  }
+  if (!(await confirmLeaveDoc())) return
   editing.value = null
   docPreview.value = false
 }

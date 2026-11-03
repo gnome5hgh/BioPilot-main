@@ -89,14 +89,22 @@ public class KbPaperServiceImpl implements KbPaperService {
     /** 勾选与状态复位同一条 UPDATE：移出时把索引派生列一起清空。 */
     private int updateKb(long userId, List<String> ids, boolean enabled) {
         List<Object> args = new ArrayList<>();
-        args.add(enabled ? 1 : 0);
-        args.add(enabled ? "queued" : "not_added");
         args.add(String.valueOf(userId));
         args.addAll(ids);
+        if (!enabled) {
+            return jdbc.update(
+                    "UPDATE bio_paper SET kb_enabled=0, indexed=0, index_status='not_added',"
+                            + " index_error=NULL, indexed_at=NULL, chunk_count=0"
+                            + " WHERE user_id=? AND id IN (" + placeholders(ids.size()) + ")",
+                    args.toArray());
+        }
+        // 已在库里的论文重复勾选不重置状态：重置会把 ready 打回 queued，
+        // 白白触发一次全量重建。失败论文的重试走独立的 retry 端点。
         return jdbc.update(
-                "UPDATE bio_paper SET kb_enabled=?, indexed=0, index_status=?,"
+                "UPDATE bio_paper SET kb_enabled=1, indexed=0, index_status='queued',"
                         + " index_error=NULL, indexed_at=NULL, chunk_count=0"
-                        + " WHERE user_id=? AND id IN (" + placeholders(ids.size()) + ")",
+                        + " WHERE user_id=? AND kb_enabled=0 AND id IN ("
+                        + placeholders(ids.size()) + ")",
                 args.toArray());
     }
 

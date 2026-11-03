@@ -22,12 +22,11 @@ env/
 Thumbs.db
 
 # Runtime data：运行时数据根收在 .biopilot/ 下（记忆/审计/会话历史/Milvus 卷 .biopilot/infra/），
-# 只反选入库静态资产目录（技能包 skills/、意图知识库 intent/）与本目录自己的 manifest。
+# 只反选入库静态资产目录（意图知识库 intent/）与本目录自己的 manifest。
 # 注意：反选必须用 `.biopilot/*` 排除内容而非 `.biopilot/` 排除目录本身，
 # 否则 ! 规则对父目录被排除的子路径无效（与下面的 .claude/ 同一坑）。
 .biopilot/*
 !.biopilot/AGENTS.md
-!.biopilot/skills/
 !.biopilot/intent/
 
 # Documentation (not version controlled)；只忽略仓库根的设计文档，

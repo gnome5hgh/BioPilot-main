@@ -162,8 +162,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     llm_gate = asyncio.Semaphore(getattr(config, "llm_max_concurrency", 8))
     #: 单用户活跃 run 计数（防单用户占满并发）
     user_runs: dict[str, int] = {}
-    #: agent 最后使用时刻（idle 驱逐依据）
-    agent_last_used: dict[tuple[str, str], float] = {}
+    #: agent 最后使用时刻（idle 驱逐依据）；键与 agents 一致：(用户, 会话, 模型)
+    agent_last_used: dict[tuple[str, str, str | None], float] = {}
 
     def _invalidate_agents() -> None:
         """丢弃全部缓存的 Agent：设置保存后下一轮按新配置重新装配。"""
@@ -229,7 +229,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     @app.on_event("shutdown")
     async def _flush_consolidations() -> None:
         """停服时 flush 整合队列，并结束所有网页终端 shell。"""
-        for q in _queues:
+        for q in list(_queues.values()):
             try:
                 await q.flush()
             except Exception as e:      # pragma: no cover
@@ -463,7 +463,11 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         gone = db.execute("DELETE FROM bio_agent_state WHERE agent_id=? AND user_id=?",
                           (conversation_id, x_user_id))
         agents.pop((x_user_id, conversation_id, user_models.get(x_user_id)), None)
-        agent_last_used.pop((x_user_id, conversation_id), None)
+        # 键含模型名（会话内可切换模型），按用户+会话整体清，避免残留旧模型的条目
+        for stale in [k for k in agent_last_used
+                      if k[0] == x_user_id and k[1] == conversation_id]:
+            agent_last_used.pop(stale, None)
+        _queues.pop((x_user_id, conversation_id), None)
         if gone == 0:
             raise HTTPException(status_code=404, detail="会话不存在")
         return {"status": "ok"}
@@ -545,6 +549,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             if now - last > getattr(config, "agent_idle_evict_seconds", 1800.0) and stale_key in agents:
                 agents.pop(stale_key, None)
                 agent_last_used.pop(stale_key, None)
+                # 队列随 agent 一起丢弃：已死会话的队列留着只会在长跑进程里无限堆积
+                _queues.pop((stale_key[0], stale_key[1]), None)
 
         # 附件：落本地副本 + 生成清单（元数据行注入任务文本；沙箱挂目录读数据）
         attachments = _resolve_attachments(
@@ -837,8 +843,59 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 db.execute(f"DELETE FROM {table} WHERE user_id=?", (target_id,))
             except Exception:
                 logger.warning("删户清理跳过 %s（表不存在或不可达）", table)
+        # 整合游标按 agent_id 存、没有 user_id：必须在删 agent_state 前先清，
+        # 否则这些行失去归属后再也找不到。
+        try:
+            db.execute(
+                "DELETE c FROM bio_memory_consolidation_cursor c"
+                " JOIN bio_agent_state a ON c.agent_id=a.agent_id"
+                " WHERE a.user_id=? OR a.user_id LIKE CONCAT('deleting:', ?)",
+                (target_id, target_id))
+        except Exception:
+            logger.warning("删户清理跳过 bio_memory_consolidation_cursor")
+        try:
+            db.execute("DELETE FROM bio_rag_index_state WHERE user_domain=?",
+                       (target_id,))
+        except Exception:
+            logger.warning("删户清理跳过 bio_rag_index_state（表不存在或不可达）")
         db.execute("DELETE FROM bio_agent_state WHERE user_id=?"
                    " OR user_id LIKE CONCAT('deleting:', ?)", (target_id, target_id))
+
+        # 向量库按用户域独立 collection：不清会让重建后的同 id 账号检索到旧数据。
+        # Milvus 是软依赖，故障只记日志，不阻塞删户。
+        try:
+            from biopilot.config import BioPilotConfig
+            from pymilvus import MilvusClient
+            cfg = BioPilotConfig.from_env()
+            collection = f"{cfg.rag.storage.collection}_{target_id}"
+            client = MilvusClient(uri=cfg.rag.storage.uri)
+            try:
+                if client.has_collection(collection):
+                    client.drop_collection(collection)
+            finally:
+                client.close()
+        except Exception as exc:
+            logger.warning("删户清理向量库失败（跳过）：%r", exc)
+
+        # 用户派生缓存（附件副本、技能物化）：不属于平台表，但同样含用户数据
+        try:
+            import shutil
+
+            from biopilot.config import BioPilotConfig, user_cache_root
+            cache_dir = Path(user_cache_root(BioPilotConfig.from_env())) / target_id
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        except Exception as exc:
+            logger.warning("删户清理用户缓存失败（跳过）：%r", exc)
+
+        # 进程内缓存同步丢弃：删户后不应再复用旧会话的 Agent/队列/模型选择
+        for key in [k for k in agents if k[0] == target_id]:
+            agents.pop(key, None)
+            agent_last_used.pop(key, None)
+        for key in [k for k in _queues if k[0] == target_id]:
+            _queues.pop(key, None)
+        user_models.pop(target_id, None)
+        user_runs.pop(target_id, None)
+        usage_baseline.clear()
         return {"status": "purged", "user_id": target_id}
 
     # 终端：按用户持久化的宿主 shell（面板关闭/切换会话不杀进程）。
@@ -1019,12 +1076,12 @@ async def _default_agent_factory(user_id: str, conversation_id: str,
     # 整合队列两处挂账：agent 实例上（每轮收尾 enqueue）+ 全局集合（停服 flush；
     # 游标推进走 DB 锁，多进程安全）
     session.agent._consolidation_queue = session.consolidation_queue
-    _queues.append(session.consolidation_queue)
+    _queues[(user_id, conversation_id)] = session.consolidation_queue
     return session.agent
 
 
-#: 全部活跃会话的整合队列（on_shutdown 时统一 flush）
-_queues: list = []
+#: 全部活跃会话的整合队列（键=用户+会话；on_shutdown 时统一 flush）
+_queues: dict[tuple[str, str], object] = {}
 #: 会话级模型选择（user -> model 名；None 用默认主模型）
 user_models: dict[str, str | None] = {}
 

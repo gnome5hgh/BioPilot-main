@@ -43,9 +43,9 @@ public class PlatformUserDataServiceImpl implements PlatformUserDataService {
         objects.addAll(ossKeys("bio_paper", "oss_key", userId));
         objects.addAll(ossKeys("bio_document", "oss_key", userId));
 
-        // 先删行：引用库 → 论文/文档/文件 → 项目/定时任务
+        // 先删行：引用库 → 论文/文档/文件 → 技能 → 项目/定时任务
         for (String table : List.of("bio_citation", "bio_paper", "bio_document",
-                "bio_file_upload", "bio_project", "bio_schedule_task")) {
+                "bio_file_upload", "bio_skill", "bio_project", "bio_schedule_task")) {
             try {
                 jdbc.update("DELETE FROM " + table + " WHERE user_id=?", userId);
             } catch (RuntimeException e) {
@@ -63,6 +63,13 @@ public class PlatformUserDataServiceImpl implements PlatformUserDataService {
             } catch (RuntimeException e) {
                 log.warn("删户对象清理失败（留孤儿） {}: {}", key, e.getMessage());
             }
+        }
+        // 行里没登记的对象（技能包、历史遗留产物）按用户前缀兜底清理
+        try {
+            int removed = minio.removePrefix("users/" + userId + "/");
+            log.info("删户对象前缀清理完成 user={} 对象数={}", userId, removed);
+        } catch (RuntimeException e) {
+            log.warn("删户对象前缀清理失败（留孤儿） user={}: {}", userId, e.getMessage());
         }
     }
 

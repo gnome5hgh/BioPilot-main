@@ -14,6 +14,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /** 定时任务定义维护：任务行与调度进度全部由 Java 写。
@@ -28,10 +31,14 @@ public class ScheduleServiceImpl implements ScheduleService {
     private static final DateTimeFormatter TS =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSxxx");
 
-    private final BioScheduleTaskMapper mapper;
+    private static final Logger log = LoggerFactory.getLogger(ScheduleServiceImpl.class);
 
-    public ScheduleServiceImpl(BioScheduleTaskMapper mapper) {
+    private final BioScheduleTaskMapper mapper;
+    private final JdbcTemplate jdbc;
+
+    public ScheduleServiceImpl(BioScheduleTaskMapper mapper, JdbcTemplate jdbc) {
         this.mapper = mapper;
+        this.jdbc = jdbc;
     }
 
     public List<ScheduleView> list() {
@@ -50,6 +57,7 @@ public class ScheduleServiceImpl implements ScheduleService {
             throw new ServiceException(422,
                     "name/task/conversation_id 必填，interval_minutes ≥ 5");
         }
+        assertConversationOwned(userId, conversationId);
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         BioScheduleTask row = new BioScheduleTask();
         row.setId(UUID.randomUUID().toString().replace("-", ""));
@@ -63,6 +71,32 @@ public class ScheduleServiceImpl implements ScheduleService {
         row.setCreatedAt(now.format(TS));
         mapper.insert(row);
         return Map.of("status", "ok");
+    }
+
+    /**
+     * 校验会话归属：定时任务会以任务发起人的身份驱动该会话，填别人的会话 id
+     * 会让 Python 侧归属校验失败、任务每轮静默报错却照常推进时间。
+     */
+    private void assertConversationOwned(String userId, String conversationId) {
+        List<String> owners;
+        try {
+            owners = jdbc.queryForList(
+                    "SELECT user_id FROM bio_agent_state WHERE agent_id=?", String.class,
+                    conversationId);
+        } catch (RuntimeException e) {
+            // 引擎尚未建表（全新部署先起了 Java）：无从校验，放行并留痕
+            log.warn("会话归属校验跳过（bio_agent_state 不可读）: {}", e.getMessage());
+            return;
+        }
+        if (owners.isEmpty()) {
+            // 会话尚未落库（例如先建任务、首次 run 时才创建会话）：没有可被侵占
+            // 的归属，放行；真正越权发生在「目标会话已属于别人」的分支。
+            return;
+        }
+        String owner = owners.get(0);
+        if (owner == null || !owner.equals(userId) || owner.startsWith("deleting:")) {
+            throw new ServiceException(403, "会话不属于当前用户");
+        }
     }
 
     /** 暂停/恢复：不动已排队的 next_run_at，恢复后照常到期执行。 */
@@ -79,8 +113,11 @@ public class ScheduleServiceImpl implements ScheduleService {
         if (row == null) {
             throw new ServiceException(404, "定时任务不存在");
         }
+        // 暂停中的任务也要能「立即执行」：不清 paused 的话 next_run_at 再近，
+        // 调度器的 paused=0 过滤也会把它跳过，用户只会看到 queued 却永远不跑。
         mapper.update(null, new LambdaUpdateWrapper<BioScheduleTask>()
                 .eq(BioScheduleTask::getId, taskId)
+                .set(BioScheduleTask::getPaused, 0)
                 .set(BioScheduleTask::getNextRunAt,
                         OffsetDateTime.now(ZoneOffset.UTC).format(TS)));
         return Map.of("status", "queued");

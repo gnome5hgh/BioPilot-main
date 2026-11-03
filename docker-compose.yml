@@ -141,9 +141,11 @@ services:
       BIOPILOT_MEMORY_MYSQL_DSN: mysql://root@mysql:3306/biopilot
       BIOPILOT_RAG_STORAGE_URI: http://standalone:19530
       BIOPILOT_RAG_STORAGE_MINIO_ENDPOINT: minio:9000
-      # agent 调平台的内部端点（文献检索等）；与 Java 侧入站校验共用 token
+      # agent 调平台的内部端点（文献检索等）；与 Java 侧入站校验共用 token。
+      # 默认值只是让 full profile 开箱可用（/internal 不对外发布）；生产部署
+      # 必须在 .env 覆盖成随机值：python -c "import secrets;print(secrets.token_urlsafe(32))"
       BIOPILOT_PLATFORM_BASE_URL: http://server:8080
-      BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}
+      BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-change-me-internal-token}
       # 容器内统一用挂载点；宿主侧的 workspace 可另行重定向（见 volumes 第一行）
       BIOPILOT_RUNTIME_WORKSPACE: /app/.biopilot
       # 容器内没有旧 config.yaml 可导入；产物路径统一落在挂载卷里
@@ -163,6 +165,7 @@ services:
         condition: service_healthy
       standalone:
         condition: service_healthy
+    restart: unless-stopped
 
   server:
     build: { context: ., dockerfile: docker/server.Dockerfile }
@@ -179,12 +182,14 @@ services:
       BIOPILOT_MINIO_BUCKET: ${BIOPILOT_MINIO_BUCKET:-biopilot}
       # 容器内用服务名；空库首次启动时据此种入默认检索源
       BIOPILOT_PAPER_SEARCH_URL: http://paper-search-mcp:8000/mcp
-      BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-}
+      # 与 webapi 侧同源；生产必须在 .env 覆盖（见上）
+      BIOPILOT_INTERNAL_TOKEN: ${BIOPILOT_INTERNAL_TOKEN:-change-me-internal-token}
     depends_on:
       mysql:
         condition: service_healthy
       paper-search-mcp:
         condition: service_started
+    restart: unless-stopped
 
   web:
     build: { context: ., dockerfile: docker/web.Dockerfile }
@@ -194,6 +199,7 @@ services:
       - "80:80"
     depends_on:
       - server
+    restart: unless-stopped
 
 networks:
   default:

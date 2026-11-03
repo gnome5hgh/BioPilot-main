@@ -11,7 +11,6 @@ from biopilot.tools import (
     ReadFileTool, ReadPdfTool, FormatCheckTool, SubmitReviewTool, GlobTool, GrepTool,
     ReadReferenceTool,
 )
-from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
 from biopilot.tools.recall import get_recall_tools
 
 _REFERENCES = Path(__file__).resolve().parent / "references"
@@ -21,6 +20,5 @@ TOOLS = make_tools(BioPilotConfig.from_env(), [
     ReadReferenceTool(_REFERENCES),
     FormatCheckTool(template_path=_REFERENCES / "paper_note.md"),
     SubmitReviewTool, GlobTool, GrepTool,
-    SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
-                   max_turns=BioPilotConfig.from_env().agents.max_turns),
 ]) + get_recall_tools()
+# 叶子角色（allowed_spawns: []）：不装 spawn 工具——框架会拒绝，工具只会误导模型。

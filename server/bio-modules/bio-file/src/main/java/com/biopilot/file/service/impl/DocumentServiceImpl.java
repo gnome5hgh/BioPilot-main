@@ -82,18 +82,25 @@ public class DocumentServiceImpl implements DocumentService {
         if (name != null && !name.isEmpty() && !name.equals(doc.getName())) {
             catalog.assertNameAvailable(name, "document", docId);
         }
-        String ossKey = doc.getOssKey();
-        if (ossKey == null || ossKey.isBlank()) {
-            ossKey = ossKey(userId, name == null || name.isEmpty() ? doc.getName() : name);
-        }
+        String finalName = name == null || name.isEmpty() ? doc.getName() : name;
+        String oldKey = doc.getOssKey();
+        String ossKey = ossKey(userId, finalName);
+        boolean moved = oldKey != null && !oldKey.isBlank() && !oldKey.equals(ossKey);
+        // 对象先落、行后写：改名时写到新键，行更新成功后再删旧对象。
+        // 沿用旧键会让「把 A 改名成 B，再新建 A」写进同一个对象，覆盖 A 的正文。
         minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
         doc.setContent(content);
         doc.setOssKey(ossKey);
-        if (name != null && !name.isEmpty()) {
-            doc.setName(name);
-        }
+        doc.setName(finalName);
         doc.setUpdatedAt(now());
         documentMapper.updateById(doc);
+        if (moved) {
+            try {
+                minio.removeObject(oldKey);
+            } catch (RuntimeException ignored) {
+                // 删旧对象失败只留孤儿，可由后台对账清扫
+            }
+        }
         return Map.of("status", "ok");
     }
 

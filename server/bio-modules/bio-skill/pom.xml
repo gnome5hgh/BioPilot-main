@@ -33,6 +33,11 @@
       <groupId>com.biopilot</groupId>
       <artifactId>bio-common-oss</artifactId>
     </dependency>
+    <!-- 用户提交的 git 安装源属于外部 URL：复用统一的出网校验（SSRF/元数据端点） -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-common-net</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
