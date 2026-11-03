@@ -197,6 +197,30 @@ class UserFileCatalogTest {
     }
 
     @Test
+    void accent_and_case_folding_are_not_collapsed_by_db_collation() {
+        String token = tokenFor("catalog-accent");
+        assertThat(createDocument(token, "café.md", "1").getStatusCode().value()).isEqualTo(200);
+        // name_key 用二进制排序规则：cafe.md 与 café.md 是两个名字
+        assertThat(createDocument(token, "cafe.md", "2").getStatusCode().value()).isEqualTo(200);
+        assertThat(countWhere("bio_user_file", "kind='document'")).isEqualTo(2);
+    }
+
+    @Test
+    void internal_save_releases_dangling_registry_row_without_login() {
+        // 模拟「登记行在、文档行已删」：内部路径必须先释放再回 409，且不能 500
+        jdbc.update("INSERT INTO bio_user_file"
+                        + " (user_id, kind, name_key, name, ref_id, created_at)"
+                        + " VALUES ('4242','document','ghost.md','ghost.md','missing-doc',"
+                        + "'2026-01-01T00:00:00+00:00')");
+
+        ResponseEntity<Map> response = internalSave("4242",
+                Map.of("name", "ghost.md", "content", "x"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(409);
+        assertThat(countWhere("bio_user_file", "ref_id='missing-doc'")).isZero();
+    }
+
+    @Test
     void backfill_registers_existing_rows_and_renames_duplicates() {
         jdbc.update("INSERT INTO bio_paper (id, user_id, title, file_name, oss_key, created_at)"
                 + " VALUES ('bp1','42','t1','dup.pdf','users/42/papers/bp1/dup.pdf',"
@@ -204,18 +228,37 @@ class UserFileCatalogTest {
         jdbc.update("INSERT INTO bio_paper (id, user_id, title, file_name, oss_key, created_at)"
                 + " VALUES ('bp2','42','t2','dup.pdf','users/42/papers/bp2/dup.pdf',"
                 + "'2026-01-02T00:00:00+00:00')");
+        // 展示名缺失：按列表页口径取 OSS 键末段登记，不能漏进无约束状态
+        jdbc.update("INSERT INTO bio_paper (id, user_id, title, file_name, oss_key, created_at)"
+                + " VALUES ('bp3','42','t3',NULL,'users/42/papers/bp3/fallback.pdf',"
+                + "'2026-01-03T00:00:00+00:00')");
         // 分析产物不参与同名登记
         jdbc.update("INSERT INTO bio_file_upload (id, user_id, name, oss_key, source, created_at)"
                 + " VALUES ('f1','42','volcano.png','users/42/files/analysis/r1/volcano.png',"
-                + "'artifact','2026-01-03T00:00:00+00:00')");
+                + "'artifact','2026-01-04T00:00:00+00:00')");
+        // 文档列宽 200：替名不能越过列宽（否则整轮回填被异常打断）
+        String longName = "x".repeat(196) + ".md";     // 199 字符
+        jdbc.update("INSERT INTO bio_document (id, user_id, name, content, oss_key, updated_at)"
+                + " VALUES ('d1','42',?, 'a','users/42/files/documents/d1.md',"
+                + "'2026-01-05T00:00:00+00:00')", longName);
+        jdbc.update("INSERT INTO bio_document (id, user_id, name, content, oss_key, updated_at)"
+                + " VALUES ('d2','42',?, 'b','users/42/files/documents/d2.md',"
+                + "'2026-01-06T00:00:00+00:00')", longName);
 
         backfillRunner.run(null);
 
-        assertThat(countWhere("bio_user_file", "kind='paper'")).isEqualTo(2);
+        assertThat(countWhere("bio_user_file", "kind='paper'")).isEqualTo(3);
         assertThat(countWhere("bio_user_file", "kind='file'")).isZero();
+        assertThat(countWhere("bio_user_file",
+                "ref_id='bp3' AND name_key='fallback.pdf'")).isEqualTo(1);
         String renamed = jdbc.queryForObject(
                 "SELECT file_name FROM bio_paper WHERE id='bp2'", String.class);
         assertThat(renamed).isEqualTo("dup (2).pdf");
+
+        List<String> docNames = jdbc.queryForList(
+                "SELECT name FROM bio_document ORDER BY id", String.class);
+        assertThat(docNames).hasSize(2).doesNotHaveDuplicates();
+        assertThat(docNames).allMatch(name -> name.length() <= 200);
     }
 
     // ---- helpers ----
@@ -310,7 +353,7 @@ class UserFileCatalogTest {
                 + "UNIQUE KEY uk_documents_seq (seq), KEY idx_documents_user (user_id))");
         jdbc.execute("CREATE TABLE bio_user_file ("
                 + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
-                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) NOT NULL,"
+                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,"
                 + "name VARCHAR(255) NOT NULL, ref_id VARCHAR(64) NOT NULL,"
                 + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
                 + "UNIQUE KEY uk_user_file_name (user_id, name_key),"

@@ -71,7 +71,7 @@ public class UploadedFileServiceImpl implements UploadedFileService {
         row.setOssKey(ossKey);
         row.setSizeBytes((long) data.length);
         row.setContentType(contentType);
-        row.setSource("upload");
+        row.setSource(UploadedFile.SOURCE_UPLOAD);
         row.setCreatedAt(now());
         try {
             // 占名与业务行同事务：并发上传同名只有一个能落库
@@ -161,7 +161,7 @@ public class UploadedFileServiceImpl implements UploadedFileService {
         row.setSizeBytes((long) data.length);
         row.setContentType(contentType);
         // 分析产物不占名：同一张图跨 run 重名是正常现象
-        row.setSource("artifact");
+        row.setSource(UploadedFile.SOURCE_ARTIFACT);
         row.setCreatedAt(now());
         try {
             fileMapper.insert(row);
@@ -180,7 +180,7 @@ public class UploadedFileServiceImpl implements UploadedFileService {
         UploadedFile row = get(fileId);
         // 上传承诺了名字才需要释放；分析产物没有登记行，release 是幂等空操作
         transaction.executeWithoutResult(status -> {
-            catalog.release(UserFileKind.FILE.code(), fileId);
+            catalog.release(String.valueOf(userId), UserFileKind.FILE.code(), fileId);
             fileMapper.deleteById(fileId);
         });
         try {

@@ -55,16 +55,10 @@ public class FileCatalogServiceImpl implements FileCatalogService {
     }
 
     @Override
-    public Reservation reserve(String userId, String kind, String name, String refId) {
+    public void reserve(String userId, String kind, String name, String refId) {
         String display = trimmed(name);
         String key = nameKey(display);
-        BioUserFile row = new BioUserFile();
-        row.setUserId(userId);
-        row.setKind(kind);
-        row.setNameKey(key);
-        row.setName(display);
-        row.setRefId(refId);
-        row.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC).toString());
+        BioUserFile row = newRow(userId, kind, key, display, refId);
         // 不能依赖 affected rows：Connector/J 默认 CLIENT_FOUND_ROWS，
         // ON DUPLICATE KEY UPDATE 命中已有行时也返回 1。以「插完再读」为准：
         // 读到的 ref 是自己 → 占名成功（或幂等重试）；是别人 → 冲突。
@@ -72,7 +66,7 @@ public class FileCatalogServiceImpl implements FileCatalogService {
         BioUserFile current = mapper.selectByNameKeyForUser(userId, key);
         if (current != null && kind.equals(current.getKind())
                 && refId.equals(current.getRefId())) {
-            return new Reservation(kind, refId, current.getName());
+            return;     // 本次插入成功，或同一对象幂等重试
         }
         throw FileCatalogService.conflict(display, current == null ? "" : current.getKind());
     }
@@ -102,14 +96,7 @@ public class FileCatalogServiceImpl implements FileCatalogService {
         }
         if (updated == 0) {
             // 存量行可能尚未回填（启动修复失败/旧进程写入）：在改名处补登记一次
-            BioUserFile row = new BioUserFile();
-            row.setUserId(userId);
-            row.setKind(kind);
-            row.setNameKey(key);
-            row.setName(display);
-            row.setRefId(refId);
-            row.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC).toString());
-            mapper.insertIgnore(row);
+            mapper.insertIgnore(newRow(userId, kind, key, display, refId));
             BioUserFile current = mapper.selectByNameKeyForUser(userId, key);
             if (current == null || !kind.equals(current.getKind())
                     || !refId.equals(current.getRefId())) {
@@ -120,10 +107,9 @@ public class FileCatalogServiceImpl implements FileCatalogService {
     }
 
     @Override
-    public void release(String kind, String refId) {
-        mapper.delete(new LambdaQueryWrapper<BioUserFile>()
-                .eq(BioUserFile::getKind, kind)
-                .eq(BioUserFile::getRefId, refId));
+    public void release(String userId, String kind, String refId) {
+        // 显式 user_id：agent 成稿更新没有登录态，不能依赖租户插件
+        mapper.deleteByUserAndRef(userId, kind, refId);
     }
 
     @Override
@@ -136,6 +122,12 @@ public class FileCatalogServiceImpl implements FileCatalogService {
                     + MAX_NAME_LENGTH + " 字符）");
         }
         return key;
+    }
+
+    private BioUserFile newRow(String userId, String kind, String key, String display,
+                               String refId) {
+        return BioUserFile.of(userId, kind, key, display, refId,
+                OffsetDateTime.now(ZoneOffset.UTC).toString());
     }
 
     private String trimmed(String name) {

@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS bio_user_file (
     id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     user_id    VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
     kind       VARCHAR(16)  NOT NULL COMMENT '类型（paper/file/document）',
-    name_key   VARCHAR(255) NOT NULL COMMENT '归一化名（NFC+trim+lower，唯一键依据）',
+    name_key   VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL COMMENT '归一化名（NFC+trim+lower，唯一键依据）',
     name       VARCHAR(255) NOT NULL COMMENT '展示用原始名',
     ref_id     VARCHAR(64)  NOT NULL COMMENT '业务表主键',
     created_at VARCHAR(40)  NOT NULL COMMENT '占名时间',
@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS bio_user_file (
     UNIQUE KEY uk_user_file_ref (kind, ref_id),
     KEY idx_user_file_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户文件同名登记表';
+
+-- name_key 必须二进制比较：表默认的 ai_ci 是重音/大小写不敏感，
+-- 会让 café.md 与 cafe.md 在唯一键与查询里被当成同一个名字。
+-- （重复执行是幂等的：目标定义相同。）
+ALTER TABLE bio_user_file
+    MODIFY name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL
+    COMMENT '归一化名（NFC+trim+lower，唯一键依据）';
 
 -- bio_file_upload 增加来源列：分析产物不参与同名约束（跨 run 重名是正常现象）。
 SET @col_exists := (

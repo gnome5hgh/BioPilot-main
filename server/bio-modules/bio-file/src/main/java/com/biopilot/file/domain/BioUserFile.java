@@ -22,6 +22,19 @@ public class BioUserFile {
     private String refId;
     private String createdAt;
 
+    /** 构造一行待登记记录（id 由数据库自增）。 */
+    public static BioUserFile of(String userId, String kind, String nameKey, String name,
+                                 String refId, String createdAt) {
+        BioUserFile row = new BioUserFile();
+        row.setUserId(userId);
+        row.setKind(kind);
+        row.setNameKey(nameKey);
+        row.setName(name);
+        row.setRefId(refId);
+        row.setCreatedAt(createdAt);
+        return row;
+    }
+
     public Long getId() {
         return id;
     }

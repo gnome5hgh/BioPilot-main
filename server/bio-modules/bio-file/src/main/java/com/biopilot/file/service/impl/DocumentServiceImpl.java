@@ -18,14 +18,23 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.biopilot.file.service.FileCatalogService;
 
-/** 文档编辑器：bio_document 元数据 + OSS 正文。 */
+/**
+ * 文档编辑器：bio_document 元数据 + OSS 正文。
+ *
+ * <p>读取以行内 {@code content} 为准（每次保存同步写行，OSS 故障不会让读者看到旧正文）；
+ * OSS 保存同一份正文，供迁移与遗留行（{@code content} 为 NULL）回退读取。</p>
+ */
 @Service
 public class DocumentServiceImpl implements DocumentService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentServiceImpl.class);
 
     private final BioDocumentMapper documentMapper;
     private final FileCatalogService catalog;
@@ -77,15 +86,18 @@ public class DocumentServiceImpl implements DocumentService {
 
     public DocumentView get(long userId, String docId) {
         BioDocument doc = find(docId);
+        // 行内 content 是读取真相：每次保存都同步写行，OSS 写失败也不会让读者看到旧正文。
+        // 只有遗留行 content 为 NULL 时才回退读对象。
         String content = doc.getContent();
-        if (doc.getOssKey() != null && !doc.getOssKey().isBlank()) {
+        if (content == null && doc.getOssKey() != null && !doc.getOssKey().isBlank()) {
             try {
                 content = new String(minio.getObject(doc.getOssKey()), StandardCharsets.UTF_8);
             } catch (RuntimeException ignored) {
-                // OSS 不可达时回退行内 content（遗留行兜底）
+                // 对象也读不到：按空文档返回，不抛异常
             }
         }
-        return new DocumentView(doc.getId(), doc.getName(), content, doc.getUpdatedAt());
+        return new DocumentView(doc.getId(), doc.getName(),
+                content == null ? "" : content, doc.getUpdatedAt());
     }
 
     public Map<String, Object> save(long userId, String docId, Map<String, Object> body) {
@@ -101,33 +113,27 @@ public class DocumentServiceImpl implements DocumentService {
         }
         String oldKey = doc.getOssKey();
         String ossKey = FileObjectKeys.document(user, docId);
-        // 对象先落、行后写：文档键按 id 生成，改名不再搬对象，
-        // 也避免「A 改名 B 后新建 A」写进同一个对象覆盖正文。
-        minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
         doc.setContent(content);
         doc.setOssKey(ossKey);
         doc.setName(finalName);
         doc.setUpdatedAt(now());
-        try {
-            transaction.executeWithoutResult(status -> {
-                if (renamed) {
-                    catalog.rename(user, UserFileKind.DOCUMENT.code(), docId, finalName);
-                }
-                documentMapper.updateById(doc);
-            });
-        } catch (RuntimeException e) {
-            if (!ossKey.equals(oldKey)) {
-                // 新键是本次懒迁移写出的；同键覆盖无法回滚，行内 content 仍可兜底
-                quietRemove(ossKey);
+        // 更新走「先改库、再写对象」：改名撞键在写对象前回 409，
+        // 不会出现「请求被拒但 OSS 已被新内容覆盖」；正文同时写进行内
+        // （读取真相），对象写失败只记日志，下一次保存再补。
+        transaction.executeWithoutResult(status -> {
+            if (renamed) {
+                catalog.rename(user, UserFileKind.DOCUMENT.code(), docId, finalName);
             }
-            throw e;
-        }
+            documentMapper.updateById(doc);
+        });
+        writeDocumentObject(ossKey, content, docId);
         removeLegacyKey(user, oldKey, ossKey);
         return Map.of("status", "ok");
     }
 
     /**
-     * agent 成稿入库：按 (user_id, 归一化名) upsert，内容先落 OSS、后写行。
+     * agent 成稿入库：按 (user_id, 归一化名) upsert。新建时对象先落；更新时先写库
+     * 再写对象（行内 content 是读取真相）。
      *
      * <p>引擎内部调用没有浏览器登录态，名字登记走显式 user_id 的查询与占名。
      * 同名目标若是论文/数据文件，返回冲突而不是覆盖。</p>
@@ -172,13 +178,13 @@ public class DocumentServiceImpl implements DocumentService {
 
     public void delete(long userId, String docId) {
         BioDocument doc = find(docId);
+        String user = String.valueOf(userId);
         transaction.executeWithoutResult(status -> {
-            catalog.release(UserFileKind.DOCUMENT.code(), docId);
+            catalog.release(user, UserFileKind.DOCUMENT.code(), docId);
             documentMapper.deleteById(docId);
         });
-        if (doc.getOssKey() != null && !doc.getOssKey().isBlank()) {
-            quietRemove(doc.getOssKey());
-        }
+        // 行已删；对象只在没有其他行引用时删除（历史同名文档可能共用名字基键）
+        removeLegacyKey(user, doc.getOssKey(), null);
     }
 
     /** 更新已有文档的正文；对象键按 id 生成，旧的名字基键在成功后清理。 */
@@ -187,13 +193,14 @@ public class DocumentServiceImpl implements DocumentService {
         BioDocument existing = documentMapper.selectByIdForAgent(user, docId);
         if (existing == null) {
             // 登记行指向的文档已不存在：清掉悬空登记，让本次调用按新建重来
-            catalog.release(UserFileKind.DOCUMENT.code(), docId);
+            catalog.release(user, UserFileKind.DOCUMENT.code(), docId);
             throw new ServiceException(409, "文档登记已失效，请重试");
         }
         String ossKey = FileObjectKeys.document(user, docId);
-        minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
+        // 与 save 同序：先写库（失败不会污染对象），再写对象（读取始终以行内 content 为准）
         transaction.executeWithoutResult(status ->
                 documentMapper.updateForAgent(docId, user, content, ossKey, now()));
+        writeDocumentObject(ossKey, content, docId);
         removeLegacyKey(user, existing.getOssKey(), ossKey);
         return Map.of("status", "ok", "id", docId, "name", name, "created", false);
     }
@@ -233,6 +240,18 @@ public class DocumentServiceImpl implements DocumentService {
             }
         } catch (RuntimeException e) {
             // 计数失败时宁可留孤儿，也不能误删另一行的正文
+        }
+    }
+
+    /**
+     * 写正文对象；失败只记日志（行内 content 是读取真相，下一次保存会重试对象）。
+     */
+    private void writeDocumentObject(String ossKey, String content, String docId) {
+        try {
+            minio.putObject(ossKey, content.getBytes(StandardCharsets.UTF_8), "text/markdown");
+        } catch (RuntimeException e) {
+            log.warn("文档正文写 OSS 失败（行内 content 仍可读） id={}: {}",
+                    docId, e.getMessage());
         }
     }
 

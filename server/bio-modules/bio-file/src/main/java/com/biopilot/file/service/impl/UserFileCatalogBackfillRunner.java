@@ -96,42 +96,55 @@ public class UserFileCatalogBackfillRunner implements ApplicationRunner {
 
     private void registerPapers(Set<String> registered) {
         for (BioPaper paper : paperMapper.selectAllForCatalogBackfill()) {
-            String name = paper.getFileName();
-            if (name == null || name.isBlank()) {
-                continue;   // 没有展示名就没有可占的名字
+            // 展示名缺失时按列表页同一口径取 OSS 键末段，避免这条落进无约束状态
+            String name = displayName(paper.getFileName(), paper.getOssKey());
+            if (name == null) {
+                continue;
             }
             String ref = key(UserFileKind.PAPER.code(), paper.getId());
             if (registered.contains(ref)) {
                 continue;
             }
-            // 占名与改名同事务：半途失败会留下一半登记一半旧名
-            transaction.executeWithoutResult(status -> {
-                String finalName = reserve(paper.getUserId(), UserFileKind.PAPER.code(),
-                        name, paper.getId(), ref, registered);
-                if (!finalName.equals(name)) {
-                    paperMapper.updateFileNameForCatalogBackfill(paper.getId(), finalName);
-                }
-            });
+            try {
+                // 占名与改名同事务：半途失败会留下一半登记一半旧名
+                transaction.executeWithoutResult(status -> {
+                    String finalName = reserve(paper.getUserId(), UserFileKind.PAPER.code(),
+                            name, paper.getId());
+                    if (!finalName.equals(name)) {
+                        paperMapper.updateFileNameForCatalogBackfill(paper.getId(), finalName);
+                    }
+                });
+                // 只在事务提交后记入已登记：回滚的行下次还能重试
+                registered.add(ref);
+            } catch (RuntimeException e) {
+                // 单行失败不阻断后续回填；下次启动会重试
+                log.warn("论文登记失败，跳过 id={}: {}", paper.getId(), e.getMessage());
+            }
         }
     }
 
     private void registerFiles(Set<String> registered) {
         for (UploadedFile file : fileMapper.selectAllForCatalogBackfill()) {
-            String name = file.getName();
-            if (name == null || name.isBlank()) {
+            String name = displayName(file.getName(), file.getOssKey());
+            if (name == null) {
                 continue;
             }
             String ref = key(UserFileKind.FILE.code(), file.getId());
             if (registered.contains(ref)) {
                 continue;
             }
-            transaction.executeWithoutResult(status -> {
-                String finalName = reserve(file.getUserId(), UserFileKind.FILE.code(),
-                        name, file.getId(), ref, registered);
-                if (!finalName.equals(name)) {
-                    fileMapper.updateNameForCatalogBackfill(file.getId(), finalName);
-                }
-            });
+            try {
+                transaction.executeWithoutResult(status -> {
+                    String finalName = reserve(file.getUserId(), UserFileKind.FILE.code(),
+                            name, file.getId());
+                    if (!finalName.equals(name)) {
+                        fileMapper.updateNameForCatalogBackfill(file.getId(), finalName);
+                    }
+                });
+                registered.add(ref);
+            } catch (RuntimeException e) {
+                log.warn("数据文件登记失败，跳过 id={}: {}", file.getId(), e.getMessage());
+            }
         }
     }
 
@@ -162,20 +175,26 @@ public class UserFileCatalogBackfillRunner implements ApplicationRunner {
                 }
             }
             final String finalKey = targetKey;
-            transaction.executeWithoutResult(status -> {
-                String finalName = registered.contains(ref) ? name
-                        : reserve(user, UserFileKind.DOCUMENT.code(), name,
-                                doc.getId(), ref, registered);
-                if (!finalName.equals(name)) {
-                    log.warn("文档同名冲突，已改名为 {}（原 {}，ref={}）",
-                            finalName, name, doc.getId());
-                }
-                if (!java.util.Objects.equals(finalKey, oldKey) || !finalName.equals(name)) {
-                    documentMapper.updateForCatalogBackfill(
-                            doc.getId(), finalName, finalKey, now());
-                    // 旧键可能仍被尚未迁移的同名行共用，这里不删，留给后台对账
-                }
-            });
+            final boolean alreadyRegistered = registered.contains(ref);
+            try {
+                transaction.executeWithoutResult(status -> {
+                    String finalName = alreadyRegistered ? name
+                            : reserve(user, UserFileKind.DOCUMENT.code(), name,
+                                    doc.getId());
+                    if (!finalName.equals(name)) {
+                        log.warn("文档同名冲突，已改名为 {}（原 {}，ref={}）",
+                                finalName, name, doc.getId());
+                    }
+                    if (!java.util.Objects.equals(finalKey, oldKey) || !finalName.equals(name)) {
+                        documentMapper.updateForCatalogBackfill(
+                                doc.getId(), finalName, finalKey, now());
+                        // 旧键可能仍被尚未迁移的同名行共用，这里不删，留给后台对账
+                    }
+                });
+                registered.add(ref);
+            } catch (RuntimeException e) {
+                log.warn("文档登记失败，跳过 id={}: {}", doc.getId(), e.getMessage());
+            }
         }
     }
 
@@ -184,23 +203,21 @@ public class UserFileCatalogBackfillRunner implements ApplicationRunner {
      *
      * @return 最终使用的名字（可能与入参不同）
      */
-    private String reserve(String userId, String kind, String name, String refId,
-                           String ref, Set<String> registered) {
+    private String reserve(String userId, String kind, String name, String refId) {
         if (catalogMapper.insertIgnore(registryRow(userId, kind, name, refId)) == 1) {
-            registered.add(ref);
             return name;
         }
+        int maxLen = maxNameLength(kind);
         int dot = name.lastIndexOf('.');
         String stem = dot > 0 ? name.substring(0, dot) : name;
         String ext = dot > 0 ? name.substring(dot) : "";
         for (int n = 2; n <= MAX_SUFFIX; n++) {
             String suffix = " (" + n + ")" + ext;
-            int maxStem = 255 - suffix.length();
+            int maxStem = maxLen - suffix.length();
             String safeStem = stem.length() > maxStem && maxStem > 0
                     ? stem.substring(0, maxStem) : stem;
             String candidate = safeStem + suffix;
             if (catalogMapper.insertIgnore(registryRow(userId, kind, candidate, refId)) == 1) {
-                registered.add(ref);
                 log.warn("{} 文件名重复，已改名为 {}（原 {}，ref={}）",
                         UserFileKind.labelOf(kind), candidate, name, refId);
                 return candidate;
@@ -224,15 +241,25 @@ public class UserFileCatalogBackfillRunner implements ApplicationRunner {
         }
     }
 
+    /** 展示名缺失时按列表页同一口径取 OSS 键末段；都取不到返回 null。 */
+    private static String displayName(String name, String ossKey) {
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        if (ossKey == null || ossKey.isBlank()) {
+            return null;
+        }
+        String last = ossKey.substring(ossKey.lastIndexOf('/') + 1);
+        return last.isBlank() ? null : last;
+    }
+
+    /** 各业务表 name 列宽：文档 200，论文/数据文件 255。 */
+    private static int maxNameLength(String kind) {
+        return UserFileKind.DOCUMENT.code().equals(kind) ? 200 : 255;
+    }
+
     private BioUserFile registryRow(String userId, String kind, String name, String refId) {
-        BioUserFile row = new BioUserFile();
-        row.setUserId(userId);
-        row.setKind(kind);
-        row.setNameKey(catalog.nameKey(name));
-        row.setName(name);
-        row.setRefId(refId);
-        row.setCreatedAt(now());
-        return row;
+        return BioUserFile.of(userId, kind, catalog.nameKey(name), name, refId, now());
     }
 
     private static String key(String kind, String refId) {

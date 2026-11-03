@@ -335,7 +335,7 @@ public class PaperServiceImpl implements PaperService {
         // 行删除与引用库清理同一事务；OSS 与索引通知留在事务外（先删行、再删对象）
         transaction.executeWithoutResult(status -> {
             // 名字与业务行同事务释放：先删登记再删行，任一失败整体回滚
-            catalog.release(UserFileKind.PAPER.code(), paperId);
+            catalog.release(String.valueOf(userId), UserFileKind.PAPER.code(), paperId);
             deletionHooks.ifAvailable(hook ->
                     hook.onPaperDeleted(userId, paperId, paper.getCitationId()));
             paperMapper.deleteById(paperId);

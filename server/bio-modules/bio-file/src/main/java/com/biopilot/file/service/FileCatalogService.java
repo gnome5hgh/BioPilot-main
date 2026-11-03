@@ -35,9 +35,8 @@ public interface FileCatalogService {
      * @param kind   文件类型（{@link com.biopilot.file.domain.UserFileKind} 的 code）
      * @param name   展示名（内部会做 NFC + trim + lower 归一化）
      * @param refId  业务表主键
-     * @return 占名结果
      */
-    Reservation reserve(String userId, String kind, String name, String refId);
+    void reserve(String userId, String kind, String name, String refId);
 
     /** 按用户 + 归一化名查登记；不存在返回 null（内部路径同样可用）。 */
     Reservation find(String userId, String name);
@@ -52,8 +51,14 @@ public interface FileCatalogService {
      */
     void rename(String userId, String kind, String refId, String newName);
 
-    /** 释放名字（浏览器路径）；业务行删除必须在同一事务里。 */
-    void release(String kind, String refId);
+    /**
+     * 释放名字；业务行删除必须在同一事务里。
+     *
+     * @param userId 归属用户（内部路径没有登录态，显式传）
+     * @param kind   文件类型
+     * @param refId  业务表主键
+     */
+    void release(String userId, String kind, String refId);
 
     /** 归一化键：NFC + trim + lower(Locale.ROOT)，也是唯一键的内容。 */
     String nameKey(String name);

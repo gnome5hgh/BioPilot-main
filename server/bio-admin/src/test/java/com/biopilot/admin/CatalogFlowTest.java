@@ -87,7 +87,7 @@ class CatalogFlowTest {
                 + "UNIQUE KEY uk_documents_seq (seq), KEY idx_documents_user (user_id))");
         jdbc.execute("CREATE TABLE IF NOT EXISTS bio_user_file ("
                 + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
-                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) NOT NULL,"
+                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL,"
                 + "name VARCHAR(255) NOT NULL, ref_id VARCHAR(64) NOT NULL,"
                 + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
                 + "UNIQUE KEY uk_user_file_name (user_id, name_key),"
@@ -204,7 +204,8 @@ class CatalogFlowTest {
         ResponseEntity<Map> fetched = rest.exchange("/api/v1/documents/" + docId,
                 HttpMethod.GET, new HttpEntity<>(headers), Map.class);
         assertThat(fetched.getBody().get("name")).isEqualTo("笔记.md");
-        assertThat(fetched.getBody().get("content")).isEqualTo("正文");
+        // 读取以行内 content 为准（OSS 是同一份正文的持久副本）
+        assertThat(fetched.getBody().get("content")).isEqualTo("初始内容");
 
         ResponseEntity<Map> saved = rest.exchange("/api/v1/documents/" + docId, HttpMethod.PUT,
                 new HttpEntity<>(Map.of("content", "改后的内容"), headers), Map.class);

@@ -25,7 +25,7 @@ public interface UploadedFileMapper extends BaseMapper<UploadedFile> {
     /** 启动回填：只读用户上传的文件；分析产物可跨 run 重名，不参与同名登记。 */
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT id, user_id, name, oss_key, source, created_at FROM bio_file_upload"
-            + " WHERE source = 'upload' ORDER BY created_at, seq")
+            + " WHERE source = '" + UploadedFile.SOURCE_UPLOAD + "' ORDER BY created_at, id")
     List<UploadedFile> selectAllForCatalogBackfill();
 
     /** 回填时给同名落败者改名。 */

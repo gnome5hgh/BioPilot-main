@@ -8,6 +8,11 @@ import com.baomidou.mybatisplus.annotation.TableName;
 @TableName("bio_file_upload")
 public class UploadedFile {
 
+    /** 用户上传：参与同名约束。 */
+    public static final String SOURCE_UPLOAD = "upload";
+    /** agent 分析产物：跨 run 重名是正常现象，不参与同名约束。 */
+    public static final String SOURCE_ARTIFACT = "artifact";
+
     @TableId(type = IdType.INPUT)
     private String id;
     private String userId;

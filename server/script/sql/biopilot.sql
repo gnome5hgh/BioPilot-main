@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS bio_user_file (
     id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     user_id    VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
     kind       VARCHAR(16)  NOT NULL COMMENT '类型（paper/file/document）',
-    name_key   VARCHAR(255) NOT NULL COMMENT '归一化名（NFC+trim+lower，唯一键依据）',
+    name_key   VARCHAR(255) COLLATE utf8mb4_0900_bin NOT NULL COMMENT '归一化名（NFC+trim+lower，唯一键依据）',
     name       VARCHAR(255) NOT NULL COMMENT '展示用原始名',
     ref_id     VARCHAR(64)  NOT NULL COMMENT '业务表主键',
     created_at VARCHAR(40)  NOT NULL COMMENT '占名时间',

@@ -52,7 +52,7 @@ server/
 - **`bio_paper` 按列分写者**：`bio-file` 写身份/文件/书目/`citation_id` 列（含上传登记时的 `kb_enabled` 初值），并在「标题变更且论文在库」时把该篇置回 `queued`（与书目字段同一条 UPDATE，保证原子）；`bio-kb` 写 `kb_enabled` 的状态迁移与 `indexed/index_status/index_error/indexed_at/chunk_count` 列。两边都不碰对方的列。
 - **标题与书目提取归本侧**：`bio-common-pdf` 是平台论文标题/作者/年份/期刊的唯一来源；Python 的 RAG 索引只从 `bio_paper.title` 读取，不再自行推导。
 - **读取引擎表只读**：`bio_agent_state`、`bio_message`、`bio_security_audit_event` 等由 Python 写入；Java 只读，除项目删除时清 `bio_agent_state.project_id` 外不得写。租户插件豁免表必须显式按 `user_id` 过滤；新增跨栈读取要在本文件登记。
-- **同名登记的内部路径例外**：`bio_user_file` 的占名与按名字查同时服务没有登录态的引擎内部调用（成稿入库、文献登记、启动回填），这些 Mapper 方法显式带 `user_id` 并 `@InterceptorIgnore`（与各业务 Mapper 的 `*ForAgent` 同一受控例外）；浏览器侧的改名/释放仍走 Wrapper，由租户插件注入。
+- **同名登记的内部路径例外**：`bio_user_file` 的占名、按名字查与释放同时服务没有登录态的引擎内部调用（成稿入库、文献登记、启动回填），这些 Mapper 方法显式带 `user_id` 并 `@InterceptorIgnore`（与各业务 Mapper 的 `*ForAgent` 同一受控例外）；改名与浏览器预检仍走 Wrapper，由租户插件注入。
 - **内部调用双向**：Java 调 Python `/internal/*`、Python 调 Java `/internal/*`，两个方向都必须带 `X-Internal-Token` 与 `X-User-Id`；`/internal/**` 从 Sa-Token 登录过滤中排除，由 `InternalTokenFilter` 单独把关，内部端点只绑回环/内网。
 - **内部端点清单**：Java→Python 为 `/internal/kb/sync`、`/internal/kb/runtime`、`/internal/schedule/run`、`/internal/users/*`；Python→Java 为 `/internal/literature/search`、`/internal/literature/fetch-pdf`、`/internal/documents/save`、`/internal/attachments/{kind}/{id}`、`/internal/files/artifacts`、`/internal/kb/{normalize,indexing,requeue-all,result}`、`/internal/skills/{name}/package`。
 - **HTTP 客户端锁死 HTTP/1.1**：Java HttpClient 默认的 h2c 升级头（`Upgrade: h2c`）会被 uvicorn 按协议升级处理并**吞掉请求体**——所有浏览器透传共用 `bio-gateway` 的 `AgentRelay` 单一 client，不得改回默认或另建 client。

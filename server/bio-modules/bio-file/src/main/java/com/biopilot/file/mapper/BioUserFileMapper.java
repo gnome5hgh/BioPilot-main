@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.biopilot.file.domain.BioUserFile;
 import java.util.List;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -47,6 +48,14 @@ public interface BioUserFileMapper extends BaseMapper<BioUserFile> {
             + " LIMIT 1")
     BioUserFile selectByNameKeyForUser(@Param("userId") String userId,
                                        @Param("nameKey") String nameKey);
+
+    /** 释放名字；显式 user_id（删除与 agent 成稿更新都可能没有登录态）。 */
+    @InterceptorIgnore(tenantLine = "true")
+    @Delete("DELETE FROM bio_user_file WHERE user_id=#{userId} AND kind=#{kind}"
+            + " AND ref_id=#{refId}")
+    int deleteByUserAndRef(@Param("userId") String userId,
+                           @Param("kind") String kind,
+                           @Param("refId") String refId);
 
     /** 启动回填：全量读出已登记对象（量级=用户文件数，实验室规模可接受）。 */
     @InterceptorIgnore(tenantLine = "true")

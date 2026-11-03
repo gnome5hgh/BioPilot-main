@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS bio_file_upload (
     oss_key      VARCHAR(500) NOT NULL COMMENT 'OSS 对象键',
     size_bytes   BIGINT       NOT NULL DEFAULT 0 COMMENT '字节数',
     content_type VARCHAR(120) NULL COMMENT 'MIME',
+    source       VARCHAR(16)  NOT NULL DEFAULT 'upload' COMMENT '来源（upload=用户上传 / artifact=分析产物）',
     created_at   VARCHAR(40)  NOT NULL COMMENT '创建时间',
     PRIMARY KEY (id),
     KEY idx_upload_user (user_id)
