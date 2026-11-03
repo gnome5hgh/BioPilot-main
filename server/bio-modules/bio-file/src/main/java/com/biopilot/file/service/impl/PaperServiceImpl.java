@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.biopilot.file.domain.BioPaper;
+import com.biopilot.file.domain.FileObjectKeys;
+import com.biopilot.file.domain.UserFileKind;
 import com.biopilot.file.dto.AgentFileData;
 import com.biopilot.file.dto.DownloadData;
 import com.biopilot.file.dto.PaperView;
@@ -119,13 +121,12 @@ public class PaperServiceImpl implements PaperService {
             throw new ServiceException(413, "文件超过大小上限");
         }
         String name = sanitizeName(fileName);
-        catalog.assertNameAvailable(name);
         String resolvedTitle = title == null ? "" : title.trim();
         if (resolvedTitle.isEmpty()) {
             resolvedTitle = metadata.extractTitle(data);
         }
         String paperId = UUID.randomUUID().toString().replace("-", "");
-        String ossKey = "users/" + userId + "/papers/" + paperId + "/" + name;
+        String ossKey = FileObjectKeys.paper(String.valueOf(userId), paperId, name);
         minio.putObject(ossKey, data, contentType);
         BioPaper paper = new BioPaper();
         paper.setId(paperId);
@@ -143,7 +144,11 @@ public class PaperServiceImpl implements PaperService {
         paper.setChunkCount(0);
         paper.setCreatedAt(now());
         try {
-            paperMapper.insert(paper);
+            // 占名与业务行同事务：唯一键冲突即整体回滚，不会留下半条记录
+            transaction.executeWithoutResult(status -> {
+                catalog.reserve(String.valueOf(userId), UserFileKind.PAPER.code(), name, paperId);
+                paperMapper.insert(paper);
+            });
         } catch (RuntimeException e) {
             // 行没落成功就别留孤儿对象；对象删除失败也只留孤儿，可后台对账
             try {
@@ -169,11 +174,9 @@ public class PaperServiceImpl implements PaperService {
         if (!ossKey.startsWith("users/" + userId + "/")) {
             throw new ServiceException(422, "oss_key 必须以 users/<本人>/ 开头");
         }
-        String name = String.valueOf(body.getOrDefault("file_name", "")).trim();
-        if (name.isEmpty()) {
-            name = ossKey.substring(ossKey.lastIndexOf('/') + 1);
-        }
-        catalog.assertNameAvailable(name);
+        String rawName = String.valueOf(body.getOrDefault("file_name", "")).trim();
+        String name = rawName.isEmpty()
+                ? ossKey.substring(ossKey.lastIndexOf('/') + 1) : rawName;
         boolean addToKb = Boolean.parseBoolean(String.valueOf(body.getOrDefault("add_to_kb", "false")));
         String title = String.valueOf(body.getOrDefault("title", "")).trim();
         if (title.isEmpty() && addToKb) {
@@ -199,7 +202,11 @@ public class PaperServiceImpl implements PaperService {
         paper.setIndexed(0);
         paper.setChunkCount(0);
         paper.setCreatedAt(now());
-        paperMapper.insert(paper);
+        // 文献导入/引擎登记：占名与写行同事务；对象已由调用方落到 OSS
+        transaction.executeWithoutResult(status -> {
+            catalog.reserve(String.valueOf(userId), UserFileKind.PAPER.code(), name, paperId);
+            paperMapper.insert(paper);
+        });
         if (addToKb) {
             internal.kbSync(userId);
         }
@@ -327,6 +334,8 @@ public class PaperServiceImpl implements PaperService {
         BioPaper paper = get(userId, paperId);
         // 行删除与引用库清理同一事务；OSS 与索引通知留在事务外（先删行、再删对象）
         transaction.executeWithoutResult(status -> {
+            // 名字与业务行同事务释放：先删登记再删行，任一失败整体回滚
+            catalog.release(UserFileKind.PAPER.code(), paperId);
             deletionHooks.ifAvailable(hook ->
                     hook.onPaperDeleted(userId, paperId, paper.getCitationId()));
             paperMapper.deleteById(paperId);

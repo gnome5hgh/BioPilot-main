@@ -53,6 +53,15 @@ class CitationFlowTest {
     void ensureTables() {
         jdbc.execute("DROP TABLE IF EXISTS bio_citation");
         jdbc.execute("DROP TABLE IF EXISTS bio_paper");
+        jdbc.execute("DROP TABLE IF EXISTS bio_user_file");
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_user_file ("
+                + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
+                + "kind VARCHAR(16) NOT NULL, name_key VARCHAR(255) NOT NULL,"
+                + "name VARCHAR(255) NOT NULL, ref_id VARCHAR(64) NOT NULL,"
+                + "created_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
+                + "UNIQUE KEY uk_user_file_name (user_id, name_key),"
+                + "UNIQUE KEY uk_user_file_ref (kind, ref_id),"
+                + "KEY idx_user_file_user (user_id))");
         jdbc.execute("CREATE TABLE IF NOT EXISTS bio_citation ("
                 + "id VARCHAR(64) NOT NULL, user_id VARCHAR(191) NOT NULL,"
                 + "cite_key VARCHAR(64) NOT NULL, entry_type VARCHAR(32) NOT NULL DEFAULT 'article',"
@@ -84,6 +93,7 @@ class CitationFlowTest {
     void clean() {
         jdbc.execute("DROP TABLE IF EXISTS bio_citation");
         jdbc.execute("DROP TABLE IF EXISTS bio_paper");
+        jdbc.execute("DROP TABLE IF EXISTS bio_user_file");
         jdbc.execute("TRUNCATE TABLE sys_user");
         jdbc.execute("TRUNCATE TABLE sys_login_log");
         jdbc.execute("TRUNCATE TABLE sys_user_role");

@@ -94,11 +94,11 @@ BioPilot/
   - `bio_config`、`bio_config_secret`、`bio_config_history`：Python 独占（运行时配置、加密密钥、保存历史）；Java 只经 `/admin/settings` 代理，不直连这三张表。
   - `bio_paper`：Java 独占（身份/文件列、`kb_enabled`、书目字段、`citation_id`，以及 `indexed/index_status/index_error/indexed_at/chunk_count` 索引状态列）；Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位，状态落盘一律由 Java 完成。
   - `bio_citation`：Java 独占（引用库行）；Python 不读写。
-  - `bio_file_upload`：Java 写（用户上传与 agent 分析产物都经 Java 登记）。
+  - `bio_file_upload`：Java 写（用户上传与 agent 分析产物都经 Java 登记，`source` 区分 `upload`/`artifact`）。
   - `bio_schedule_task`：Java 独占（任务定义与 `last_run_at` / `next_run_at` 进度列都由 Java 写）；Python 只接收 `/internal/schedule/run` 触发后执行 agent。
   - `bio_skill`：Java 独占写（用户技能安装记录，带 `user_id`）；Python 只读 `enabled/content_sha`，用于把技能包物化成本地缓存。
   - `bio_document`：Java 写 HTTP CRUD 与 `/internal/documents/save`；Python 的 `save_document` 只转发内部端点，不直接写表或 OSS。
-  - `bio_user_file`（同名约束表）：Java/Python 都通过数据库唯一键写入，**禁止应用层「先查再插」**。
+  - `bio_user_file`：Java 独占（用户文件同名登记：论文/数据文件/文档共用一个名字空间）。唯一键 `(user_id, name_key)` 是权威约束，创建走「同一事务内先占名再写业务行」，**禁止应用层「先查再插」**；分析产物（`bio_file_upload.source='artifact'`）不参与。Python 不读写。
   - `sys_*`、`bio_project`、`bio_literature_mcp_server`：Java 独占。
 - **表命名规范**：系统表 `sys_<entity>`；BioPilot 业务表 `bio_<domain>_<entity>`，域内用单数实体名（如 `bio_paper`、`bio_file_upload`、`bio_schedule_task`）。平台表 DDL 只在 `server/script/sql/` 与 `docker/mysql-init/` 维护；Python 的 `_SCHEMA` 只建引擎自己的表。
 - **禁止事项**：Java 不实现 agent 编排/记忆/检索/切块/嵌入；Python 不新增平台 CRUD（新增前先判断是否属于 agent 运行时），不自建文献检索/MCP 客户端/调度循环/外部 URL 抓取，也不直连 OSS 取平台文件——检索调 `/internal/literature/search`、PDF 下载调 `/internal/literature/fetch-pdf`（SSRF 与 `%PDF` 校验在 Java `bio-common-net`）、文件字节调 `/internal/attachments/*`、产物登记调 `/internal/files/artifacts`、定时任务只接收 `/internal/schedule/run`；Web 不直连 8300，全部经 `/api` → Java。

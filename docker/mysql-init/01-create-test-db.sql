@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS bio_file_upload (
     oss_key      VARCHAR(500) NOT NULL,
     size_bytes   BIGINT       NOT NULL DEFAULT 0,
     content_type VARCHAR(120) NULL,
+    source       VARCHAR(16)  NOT NULL DEFAULT 'upload',
     created_at   VARCHAR(40)  NOT NULL,
     PRIMARY KEY (id),
     KEY idx_upload_user (user_id)
@@ -96,6 +97,20 @@ CREATE TABLE IF NOT EXISTS bio_document (
     UNIQUE KEY uk_documents_seq (seq),
     KEY idx_documents_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档表';
+-- 用户文件同名登记表：论文/数据文件/文档共用一个名字空间
+CREATE TABLE IF NOT EXISTS bio_user_file (
+    id         BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id    VARCHAR(191) NOT NULL,
+    kind       VARCHAR(16)  NOT NULL,
+    name_key   VARCHAR(255) NOT NULL,
+    name       VARCHAR(255) NOT NULL,
+    ref_id     VARCHAR(64)  NOT NULL,
+    created_at VARCHAR(40)  NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_user_file_name (user_id, name_key),
+    UNIQUE KEY uk_user_file_ref (kind, ref_id),
+    KEY idx_user_file_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户文件同名登记表';
 -- 文献检索 MCP 配置表：测试库也建一份，避免服务启动时缺表
 CREATE TABLE IF NOT EXISTS bio_literature_mcp_server (
     id                  VARCHAR(64)  NOT NULL,

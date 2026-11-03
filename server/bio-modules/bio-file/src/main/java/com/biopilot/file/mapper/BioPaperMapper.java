@@ -3,9 +3,11 @@ package com.biopilot.file.mapper;
 import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.biopilot.file.domain.BioPaper;
+import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 /** bio_paper 的 CRUD。
  *
@@ -20,4 +22,15 @@ public interface BioPaperMapper extends BaseMapper<BioPaper> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT * FROM bio_paper WHERE id=#{id} AND user_id=#{userId} LIMIT 1")
     BioPaper selectForAgent(@Param("userId") String userId, @Param("id") String id);
+
+    /** 启动回填：按创建顺序读出全部论文的身份/文件名/对象键。 */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT id, user_id, file_name, oss_key, created_at FROM bio_paper"
+            + " ORDER BY created_at, seq")
+    List<BioPaper> selectAllForCatalogBackfill();
+
+    /** 回填时给同名落败者改名（没有登录态，显式按主键更新）。 */
+    @InterceptorIgnore(tenantLine = "true")
+    @Update("UPDATE bio_paper SET file_name=#{name} WHERE id=#{id}")
+    int updateFileNameForCatalogBackfill(@Param("id") String id, @Param("name") String name);
 }

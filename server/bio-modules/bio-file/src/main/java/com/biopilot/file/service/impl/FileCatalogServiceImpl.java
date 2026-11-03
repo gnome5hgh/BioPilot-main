@@ -3,82 +3,149 @@ package com.biopilot.file.service.impl;
 import com.biopilot.file.service.FileCatalogService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.biopilot.file.domain.BioDocument;
-import com.biopilot.file.domain.BioPaper;
-import com.biopilot.file.domain.UploadedFile;
-import com.biopilot.file.mapper.BioDocumentMapper;
-import com.biopilot.file.mapper.BioPaperMapper;
-import com.biopilot.file.mapper.UploadedFileMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.biopilot.common.core.exception.ServiceException;
+import com.biopilot.file.domain.BioUserFile;
+import com.biopilot.file.mapper.BioUserFileMapper;
+import java.text.Normalizer;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Locale;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
-/** 用户文件同名约束：论文 / 数据文件 / 文档三类共用一个名字空间。
-
-    过渡实现按三张表逐一比对（大小写不敏感）；后续引入 `bio_user_file` 唯一键后，
-    这里改为「插入冲突即 409」，不再应用层先查再插。
-*/
+/**
+ * 用户文件同名约束：以 {@code bio_user_file} 的唯一键为准。
+ *
+ * <p>创建路径「先占名再写业务行」，两者由调用方放在同一事务里；冲突时由数据库
+ * 唯一键拒绝，应用层不再逐表扫描比对，也不会因为并发先查后插产生重复行。</p>
+ */
 @Service
 public class FileCatalogServiceImpl implements FileCatalogService {
 
-    private final BioPaperMapper paperMapper;
-    private final UploadedFileMapper fileMapper;
-    private final BioDocumentMapper documentMapper;
+    /** 与 DDL 的 name_key / name 列宽一致。 */
+    private static final int MAX_NAME_LENGTH = 255;
 
-    public FileCatalogServiceImpl(BioPaperMapper paperMapper, UploadedFileMapper fileMapper,
-                              BioDocumentMapper documentMapper) {
-        this.paperMapper = paperMapper;
-        this.fileMapper = fileMapper;
-        this.documentMapper = documentMapper;
+    private final BioUserFileMapper mapper;
+
+    public FileCatalogServiceImpl(BioUserFileMapper mapper) {
+        this.mapper = mapper;
     }
 
-    /** 命中同名即抛 ServiceException；三种类型分别给用户可读文案。 */
+    @Override
     public void assertNameAvailable(String name) {
         assertNameAvailable(name, null, null);
     }
 
-    /** 更新场景：跳过当前业务对象自身（按 kind + id），其余同名仍拒绝。 */
-    public void assertNameAvailable(String name, String excludeKind, String excludeId) {
-        String target = (name == null ? "" : name).trim().toLowerCase();
-        if (target.isEmpty()) {
+    @Override
+    public void assertNameAvailable(String name, String excludeKind, String excludeRefId) {
+        String key = nameKey(name);
+        BioUserFile existing = mapper.selectOne(new LambdaQueryWrapper<BioUserFile>()
+                .eq(BioUserFile::getNameKey, key)
+                .last("LIMIT 1"));
+        if (existing == null) {
             return;
         }
-        for (BioPaper p : paperMapper.selectList(new LambdaQueryWrapper<BioPaper>()
-                .select(BioPaper::getId, BioPaper::getFileName, BioPaper::getOssKey))) {
-            if ("paper".equals(excludeKind) && p.getId().equals(excludeId)) {
-                continue;
-            }
-            String existing = p.getFileName();
-            if (existing == null || existing.isBlank()) {
-                existing = lastSegment(p.getOssKey());
-            }
-            if (existing != null && existing.trim().toLowerCase().equals(target)) {
-                throw new ServiceException(409, "已存在同名文件「" + name + "」（论文），请改名后再上传");
-            }
+        boolean self = excludeKind != null && excludeRefId != null
+                && excludeKind.equals(existing.getKind())
+                && excludeRefId.equals(existing.getRefId());
+        if (!self) {
+            throw FileCatalogService.conflict(name.trim(), existing.getKind());
         }
-        for (UploadedFile f : fileMapper.selectList(new LambdaQueryWrapper<UploadedFile>()
-                .select(UploadedFile::getId, UploadedFile::getName))) {
-            if ("file".equals(excludeKind) && f.getId().equals(excludeId)) {
-                continue;
-            }
-            if (f.getName() != null && f.getName().trim().toLowerCase().equals(target)) {
-                throw new ServiceException(409, "已存在同名文件「" + name + "」（数据文件），请改名后再上传");
-            }
+    }
+
+    @Override
+    public Reservation reserve(String userId, String kind, String name, String refId) {
+        String display = trimmed(name);
+        String key = nameKey(display);
+        BioUserFile row = new BioUserFile();
+        row.setUserId(userId);
+        row.setKind(kind);
+        row.setNameKey(key);
+        row.setName(display);
+        row.setRefId(refId);
+        row.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC).toString());
+        // 不能依赖 affected rows：Connector/J 默认 CLIENT_FOUND_ROWS，
+        // ON DUPLICATE KEY UPDATE 命中已有行时也返回 1。以「插完再读」为准：
+        // 读到的 ref 是自己 → 占名成功（或幂等重试）；是别人 → 冲突。
+        mapper.tryReserve(row);
+        BioUserFile current = mapper.selectByNameKeyForUser(userId, key);
+        if (current != null && kind.equals(current.getKind())
+                && refId.equals(current.getRefId())) {
+            return new Reservation(kind, refId, current.getName());
         }
-        for (BioDocument d : documentMapper.selectList(new LambdaQueryWrapper<BioDocument>()
-                .select(BioDocument::getId, BioDocument::getName))) {
-            if ("document".equals(excludeKind) && d.getId().equals(excludeId)) {
-                continue;
-            }
-            if (d.getName() != null && d.getName().trim().toLowerCase().equals(target)) {
-                throw new ServiceException(409, "已存在同名文件「" + name + "」（文档），请改名后再上传");
+        throw FileCatalogService.conflict(display, current == null ? "" : current.getKind());
+    }
+
+    @Override
+    public Reservation find(String userId, String name) {
+        BioUserFile row = mapper.selectByNameKeyForUser(userId, nameKey(name));
+        return row == null ? null : new Reservation(row.getKind(), row.getRefId(), row.getName());
+    }
+
+    @Override
+    public void rename(String userId, String kind, String refId, String newName) {
+        String display = trimmed(newName);
+        String key = nameKey(display);
+        int updated;
+        try {
+            updated = mapper.update(null, new LambdaUpdateWrapper<BioUserFile>()
+                    .eq(BioUserFile::getKind, kind)
+                    .eq(BioUserFile::getRefId, refId)
+                    .set(BioUserFile::getNameKey, key)
+                    .set(BioUserFile::getName, display));
+        } catch (DuplicateKeyException e) {
+            // 唯一键是最终裁决：并发改名撞上同一个名字时，后到者回 409
+            BioUserFile existing = mapper.selectByNameKeyForUser(userId, key);
+            throw FileCatalogService.conflict(
+                    display, existing == null ? "" : existing.getKind());
+        }
+        if (updated == 0) {
+            // 存量行可能尚未回填（启动修复失败/旧进程写入）：在改名处补登记一次
+            BioUserFile row = new BioUserFile();
+            row.setUserId(userId);
+            row.setKind(kind);
+            row.setNameKey(key);
+            row.setName(display);
+            row.setRefId(refId);
+            row.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC).toString());
+            mapper.insertIgnore(row);
+            BioUserFile current = mapper.selectByNameKeyForUser(userId, key);
+            if (current == null || !kind.equals(current.getKind())
+                    || !refId.equals(current.getRefId())) {
+                throw FileCatalogService.conflict(
+                        display, current == null ? "" : current.getKind());
             }
         }
     }
 
-    private String lastSegment(String key) {
-        if (key == null || key.isBlank()) {
-            return "";
+    @Override
+    public void release(String kind, String refId) {
+        mapper.delete(new LambdaQueryWrapper<BioUserFile>()
+                .eq(BioUserFile::getKind, kind)
+                .eq(BioUserFile::getRefId, refId));
+    }
+
+    @Override
+    public String nameKey(String name) {
+        String text = trimmed(name);
+        String key = Normalizer.normalize(text, Normalizer.Form.NFC).toLowerCase(Locale.ROOT);
+        if (key.length() > MAX_NAME_LENGTH) {
+            // 大小写折叠/组合字符可能比原串更长，归一化后仍需落在列宽内
+            throw new ServiceException(422, "文件名归一化后超过长度上限（"
+                    + MAX_NAME_LENGTH + " 字符）");
         }
-        return key.substring(key.lastIndexOf('/') + 1);
+        return key;
+    }
+
+    private String trimmed(String name) {
+        String text = name == null ? "" : name.trim();
+        if (text.isEmpty()) {
+            throw new ServiceException(422, "文件名不能为空");
+        }
+        if (text.length() > MAX_NAME_LENGTH) {
+            throw new ServiceException(422, "文件名超过长度上限（" + MAX_NAME_LENGTH + " 字符）");
+        }
+        return text;
     }
 }

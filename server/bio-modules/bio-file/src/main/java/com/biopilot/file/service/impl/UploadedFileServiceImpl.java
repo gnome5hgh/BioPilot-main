@@ -4,7 +4,9 @@ import com.biopilot.file.service.UploadedFileService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.biopilot.file.domain.FileObjectKeys;
 import com.biopilot.file.domain.UploadedFile;
+import com.biopilot.file.domain.UserFileKind;
 import com.biopilot.file.dto.AgentFileData;
 import com.biopilot.file.dto.DownloadData;
 import com.biopilot.file.dto.FileListItem;
@@ -18,6 +20,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import com.biopilot.file.service.FileCatalogService;
 
@@ -30,12 +34,15 @@ public class UploadedFileServiceImpl implements UploadedFileService {
     private final UploadedFileMapper fileMapper;
     private final FileCatalogService catalog;
     private final MinioTemplate minio;
+    private final TransactionTemplate transaction;
 
     public UploadedFileServiceImpl(UploadedFileMapper fileMapper, FileCatalogService catalog,
-                               MinioTemplate minio) {
+                               MinioTemplate minio,
+                               PlatformTransactionManager transactionManager) {
         this.fileMapper = fileMapper;
         this.catalog = catalog;
         this.minio = minio;
+        this.transaction = new TransactionTemplate(transactionManager);
     }
 
     public FileView upload(long userId, MultipartFile file) {
@@ -46,7 +53,6 @@ public class UploadedFileServiceImpl implements UploadedFileService {
             throw new ServiceException(413, "文件超过大小上限");
         }
         String name = sanitizeName(file.getOriginalFilename());
-        catalog.assertNameAvailable(name);
         byte[] data;
         try {
             data = file.getBytes();
@@ -54,7 +60,7 @@ public class UploadedFileServiceImpl implements UploadedFileService {
             throw new ServiceException(502, "读取上传内容失败");
         }
         String fileId = UUID.randomUUID().toString().replace("-", "");
-        String ossKey = "users/" + userId + "/files/uploads/" + fileId + "/" + name;
+        String ossKey = FileObjectKeys.upload(String.valueOf(userId), fileId, name);
         String contentType = file.getContentType() == null
                 ? "application/octet-stream" : file.getContentType();
         minio.putObject(ossKey, data, contentType);
@@ -65,9 +71,14 @@ public class UploadedFileServiceImpl implements UploadedFileService {
         row.setOssKey(ossKey);
         row.setSizeBytes((long) data.length);
         row.setContentType(contentType);
+        row.setSource("upload");
         row.setCreatedAt(now());
         try {
-            fileMapper.insert(row);
+            // 占名与业务行同事务：并发上传同名只有一个能落库
+            transaction.executeWithoutResult(status -> {
+                catalog.reserve(String.valueOf(userId), UserFileKind.FILE.code(), name, fileId);
+                fileMapper.insert(row);
+            });
         } catch (RuntimeException e) {
             try {
                 minio.removeObject(ossKey);
@@ -140,7 +151,7 @@ public class UploadedFileServiceImpl implements UploadedFileService {
         String contentType = file.getContentType() == null
                 ? "application/octet-stream" : file.getContentType();
         String fileId = UUID.randomUUID().toString().replace("-", "");
-        String ossKey = "users/" + userId + "/files/analysis/" + run + "/" + name;
+        String ossKey = FileObjectKeys.artifact(String.valueOf(userId), run, name);
         minio.putObject(ossKey, data, contentType);
         UploadedFile row = new UploadedFile();
         row.setId(fileId);
@@ -149,6 +160,8 @@ public class UploadedFileServiceImpl implements UploadedFileService {
         row.setOssKey(ossKey);
         row.setSizeBytes((long) data.length);
         row.setContentType(contentType);
+        // 分析产物不占名：同一张图跨 run 重名是正常现象
+        row.setSource("artifact");
         row.setCreatedAt(now());
         try {
             fileMapper.insert(row);
@@ -165,7 +178,11 @@ public class UploadedFileServiceImpl implements UploadedFileService {
 
     public void delete(long userId, String fileId) {
         UploadedFile row = get(fileId);
-        fileMapper.deleteById(fileId);
+        // 上传承诺了名字才需要释放；分析产物没有登记行，release 是幂等空操作
+        transaction.executeWithoutResult(status -> {
+            catalog.release(UserFileKind.FILE.code(), fileId);
+            fileMapper.deleteById(fileId);
+        });
         try {
             minio.removeObject(row.getOssKey());
         } catch (RuntimeException ignored) {

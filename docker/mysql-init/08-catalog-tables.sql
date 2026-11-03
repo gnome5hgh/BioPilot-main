@@ -7,10 +7,27 @@ CREATE TABLE IF NOT EXISTS bio_file_upload (
     oss_key      VARCHAR(500) NOT NULL COMMENT 'OSS 对象键',
     size_bytes   BIGINT       NOT NULL DEFAULT 0 COMMENT '字节数',
     content_type VARCHAR(120) NULL COMMENT 'MIME',
+    source       VARCHAR(16)  NOT NULL DEFAULT 'upload' COMMENT '来源（upload=用户上传 / artifact=分析产物）',
     created_at   VARCHAR(40)  NOT NULL COMMENT '创建时间',
     PRIMARY KEY (id),
     KEY idx_upload_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据文件表';
+
+-- 用户文件同名登记：论文/数据文件/文档共用一个名字空间。
+-- 唯一键是权威约束（先占名再写业务行），分析产物不登记（可跨 run 重名）。
+CREATE TABLE IF NOT EXISTS bio_user_file (
+    id         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    user_id    VARCHAR(191) NOT NULL COMMENT '归属用户（租户列）',
+    kind       VARCHAR(16)  NOT NULL COMMENT '类型（paper/file/document）',
+    name_key   VARCHAR(255) NOT NULL COMMENT '归一化名（NFC+trim+lower，唯一键依据）',
+    name       VARCHAR(255) NOT NULL COMMENT '展示用原始名',
+    ref_id     VARCHAR(64)  NOT NULL COMMENT '业务表主键',
+    created_at VARCHAR(40)  NOT NULL COMMENT '占名时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_user_file_name (user_id, name_key),
+    UNIQUE KEY uk_user_file_ref (kind, ref_id),
+    KEY idx_user_file_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户文件同名登记表';
 
 CREATE TABLE IF NOT EXISTS bio_paper (
     id             VARCHAR(64)  NOT NULL COMMENT '论文ID',

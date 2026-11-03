@@ -15,6 +15,8 @@ public class UploadedFile {
     private String ossKey;
     private Long sizeBytes;
     private String contentType;
+    /** 来源：upload=用户上传（参与同名约束）/ artifact=分析产物（可重名）。 */
+    private String source;
     private String createdAt;
 
     public String getId() {
@@ -63,6 +65,14 @@ public class UploadedFile {
 
     public void setContentType(String contentType) {
         this.contentType = contentType;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
     }
 
     public String getCreatedAt() {
