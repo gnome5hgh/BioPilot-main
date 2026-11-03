@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 停掉 start.sh 拉起的三个应用进程（依赖容器与数据保留）。
 set -uo pipefail
-# 与 start.sh 同一默认值：运行期 pid/日志在仓库外，可用 BIOPILOT_RUN_DIR 覆盖。
-RUN_DIR="${BIOPILOT_RUN_DIR:-$HOME/biopilot-runtime/run}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 与 start.sh 同一默认值：pid/日志在仓库内运行数据根下，可用 BIOPILOT_RUN_DIR 覆盖。
+RUN_DIR="${BIOPILOT_RUN_DIR:-$ROOT/.biopilot/run}"
 
 for name in web server webapi; do
   pid_file="$RUN_DIR/$name.pid"
