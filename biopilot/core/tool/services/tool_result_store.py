@@ -199,7 +199,7 @@ class ToolResultStore:
             return None
 
     def _local_path(self, user_id: str, session_id: str, tool_call_id: str) -> Path:
-        """返回本地回退路径（与对象键同构的 users/<uid>/ 命名空间）。
+        """返回本地回退路径（按 ``<uid>/<session>/`` 分域，对应对象键的 ``users/<uid>/`` 前缀）。
 
         Args:
             user_id: 归属用户（本地回退同样按用户分域）。

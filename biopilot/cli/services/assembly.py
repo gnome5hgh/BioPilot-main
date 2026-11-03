@@ -518,12 +518,10 @@ def main(argv: list[str] | None = None) -> int | None:
     )
     set_memory_context(memory_ctx)
 
-    # 安全管道：四中间件（经验记忆中间件已移除——工具调用经验不再注入 prompt，
+    # 安全管道：五个中间件（经验记忆中间件已移除——工具调用经验不再注入 prompt，
     # 改由 MemoryConsolidator 后台整合进核心记忆块）。
     middlewares = [
-        # 审计目录从 workspace 派生：默认按 cwd 相对定位会让
-        # BIOPILOT_RUNTIME_WORKSPACE 重定向时审计仍写进仓库 .biopilot/security/audit，与其他会话的审计混写；
-        # 且 cwd 下的 .biopilot/security/audit 落在 WorkspacePolicy 的 ws/security 保护约定之外)
+        # 审计事件 insert-only 落 MySQL（bio_security_audit_event），不依赖工作区目录
         AuditMiddleware(db=db),
         # write_roots = 已声明的产物根 + 工作区：写目标落在其外时升级确认
         WorkspacePolicyMiddleware(workspace=config.runtime.workspace,
@@ -535,9 +533,6 @@ def main(argv: list[str] | None = None) -> int | None:
         PolicyEngineMiddleware(confirm_above=config.runtime.confirm_above),
     ]
 
-    # 意图识别装配（可选预处理层）：关时整段跳过——不装载知识库、不构造适配器，
-    # supervisor 走纯 ReAct。启用的前提是知识库能装载：类别缺条目、规则指向未知
-    # 类别这类问题在这里就炸掉（fail-closed），不许跑到某一轮才静默走偏。
     # 意图识别装配（可选预处理层）：关时整段跳过——不装载知识库、不探测判定服务，
     # supervisor 走纯 ReAct。开启要过两道：① 知识库能装载（类别缺条目、规则指向未知
     # 类别这类问题在这里就炸掉，fail-closed）；② 判定服务可达（网关是托管 API，

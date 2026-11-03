@@ -3,7 +3,7 @@
 它挂在 `AssistantMessage.meta` 上，但本身不是一种消息——`messages/` 只放消息类型，
 信封与 `Usage` 作为层间载体（客户端产出、Agent、审计与持久化消费）留在这里。
 
-信封**随 assistant 消息落盘**（messages 表一列 JSON），所以本模块同时持它的
+信封**随 assistant 消息落盘**（bio_message 表一列 JSON），所以本模块同时持它的
 dict 往返：落盘方只调这里的函数，不自己拼键名——将来端点多报一个字段，只改这一处。
 """
 from dataclasses import asdict, dataclass, fields
@@ -23,9 +23,9 @@ class ResponseMeta:
     到底由哪个模型快照产出）。
 
     **不上 wire**：出站序列化只取正文与 tool_calls。它以 JSON 一列随 assistant
-    消息落盘到 messages 表（见 ``response_meta_to_dict``），回读的唯一出口是持久化
+    消息落盘到 bio_message 表（见 ``response_meta_to_dict``），回读的唯一出口是持久化
     消息 ``StoredMessage.meta``；审计的 telemetry 元数据也从同一个信封派生，是另一条
-    并行通道（JSONL、按天轮转、不绑消息身份）。
+    并行通道（落 MySQL 审计表、不绑消息身份）。
 
     Attributes:
         id: 端点给的补全 id

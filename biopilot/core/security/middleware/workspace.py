@@ -5,8 +5,8 @@
 从工具参数声明中提取 ``format="path"`` 的参数，做两道检查：
 ① 相对路径直接拒绝（``workspace_boundary``）——工作区为外部绝对路径，
    相对路径无法可靠映射，直接判越界并给出可行动报错；
-② 敏感路径黑名单（``denied_path``）——审计目录、依赖服务数据卷、.git/.claude/.zcode、
-   密钥与凭证文件、shell 配置、系统目录前缀，命中即拒绝。
+② 敏感路径黑名单（``denied_path``）——历史审计目录、依赖服务数据卷、
+   .git/.claude/.zcode、密钥与凭证文件、shell 配置、系统目录前缀，命中即拒绝。
 
 检查通过后，参数**就地归一化为解析后的绝对路径**——写盘/读盘复用的正是这里检查过
 的那一份结果，「检查的路径」与「用的路径」是同一个对象，中途替换软链的窗口因此不存在。
@@ -68,12 +68,13 @@ def is_denied_path(resolved: Path, workspace: str) -> bool:
     """敏感路径黑名单：硬拦截——命中即拒绝。
 
     分六段：
-    ① 系统运行时数据：workspace/security（审计日志防篡改）、workspace/infra
-       （Milvus 依赖服务数据卷防绕过/防写坏）——按工作区根下的模块前缀
-       精确匹配，工作区里同名文件夹（如笔记 "security"）不误伤。约定审计目录
-       = workspace/security/audit、服务卷 = workspace/infra/*；若将来改为
-       自定义目录，此派生需同步。另按安装根额外保护 `<仓库>/.biopilot/infra`：
-       运行数据根重定向到仓库外后，compose 数据卷仍在仓库里。
+    ① 系统运行时数据：workspace/security（历史审计目录——审计已迁 MySQL，
+       旧部署可能仍留有含全量原文的 JSONL，继续按敏感目录保护）、
+       workspace/infra（Milvus 等依赖服务数据卷，防绕过/防写坏）——按工作区
+       根下的模块前缀精确匹配，工作区里同名文件夹（如笔记 "security"）不误伤。
+       服务卷约定 = workspace/infra/*；另按安装根额外保护
+       `<仓库>/.biopilot/infra`：运行数据根重定向到仓库外后，compose 数据卷
+       仍在仓库里。
     ② 仓库内部段（任何位置）：.git / .claude / .zcode（settings 可能含
        API key）。
     ③ 密钥文件名（任何位置）：config.yaml（含迁移备份 config.yaml.bak）/ .env / .env.local。
@@ -100,8 +101,8 @@ def is_denied_path(resolved: Path, workspace: str) -> bool:
     ws = Path(workspace).resolve()      # 允许访问的工作空间根目录
 
     # ----- 第一段：系统运行时数据目录（前缀匹配，大小写不敏感） -----
-    # 前缀判断 resolved 是否落在 ws/security 或 ws/infra 之下：审计目录与依赖
-    # 服务数据卷按模块归位到这两个前缀。
+    # 前缀判断 resolved 是否落在 ws/security 或 ws/infra 之下：历史审计目录与
+    # 依赖服务数据卷按模块归位到这两个前缀。
     # 大小写不敏感：APFS 上 workspace/SECURITY 与 workspace/security 同目录（防绕过）。
     if _is_relative_to_ci(resolved, ws / "security"):
         return True

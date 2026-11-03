@@ -133,14 +133,16 @@ class RuntimeConfig:
     """运行时基础设施：工作区、agent 插件目录、会话免问上限档。
 
     Attributes:
-        workspace: str，运行时数据根目录（会话历史等；索引状态在 MySQL，论文原文不落盘）
+        workspace: str，运行时数据根目录（产物根、工具结果本地回退等；会话与记忆在
+            MySQL，论文原文不落盘）
         user_cache_dir: str，按用户隔离的派生缓存根（附件副本、技能物化）
         agents_dir: str，Agent 插件扫描目录
         confirm_above: str，会话免问上限档（风险档高于它的工具执行前需用户确认）
         allow_host_shell: bool，是否允许网页终端启动宿主 shell（拥有服务账号权限）
     """
 
-    #: 运行时数据根目录，存放会话历史等运行期数据（RAG 索引状态在 MySQL，论文原文不落盘）
+    #: 运行时数据根目录，存放产物根与工具结果本地回退等运行期数据（会话、记忆与
+    #: RAG 索引状态都在 MySQL，论文原文不落盘）
     workspace: str = ".biopilot"
     #: 按用户隔离的派生缓存根：附件本地副本与用户技能物化目录。
     #: 空串 = <workspace>/user-cache；相对路径按仓库安装根解析（便于把缓存固定在

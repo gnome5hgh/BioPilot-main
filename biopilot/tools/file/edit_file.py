@@ -1,10 +1,11 @@
 # biopilot/tools/file/edit_file.py
-"""EditFileTool：定向修改既有笔记(search-replace,小范围改动)。
+"""EditFileTool：定向修改既有文本文件(search-replace,小范围改动)。
 
 LLM 只需输出变更部分(省 token),且不误伤无关内容。安全边界由中间件强制:path 可为
-任意绝对路径,敏感路径黑名单(workspace/audit、.git 等)由 WorkspacePolicyMiddleware
-拦截。风险为 medium(与 write_file 对齐),需用户确认。写盘与入库解耦:本工具只负责
-落盘 + 登记产物,入库由调用方改完后派发 rag-agent 完成。
+任意绝对路径,敏感路径黑名单(workspace/security、workspace/infra、.git 等)由
+WorkspacePolicyMiddleware 拦截。风险为 high(与 write_file 对齐),高于默认免问档,
+执行前确认。本工具只负责落盘 + 登记产物,不做索引入库——论文索引归 rag-agent,
+笔记类产物不参与检索。
 """
 from pathlib import Path
 
@@ -14,13 +15,13 @@ from biopilot.common.storage.atomic import atomic_write
 
 
 class EditFileTool(Tool):
-    """定向修改既有笔记的工具（search-replace，小范围改动）。
+    """定向修改既有文本文件的工具（search-replace，小范围改动）。
 
     Attributes:
         name: str，工具名 "edit_file"
         description: str，工具描述
         parameters: dict，JSON Schema（path/old_text/new_text）
-        risk_level: str，"medium"（与 write_file 对齐）
+        risk_level: str，"high"（与 write_file 对齐，高于默认免问档 → 执行前确认）
         root_hints: list[str]，WRITE_HINTS（产物类根名）
         side_effects: list[str]，["write_file"]
         wants_run_state: bool，True（写盘后登记产物账本）

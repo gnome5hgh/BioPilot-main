@@ -1,8 +1,9 @@
-"""MessageManager：完整对话落盘（Recall）+ 检索。
+"""MessageManager：完整对话落盘与按会话读取。
 
-wire 消息（`biopilot.core.llm` 的 Message）→ StoredMessage（补 id/created_at）→ messages 表。
-add_message 是全部消息持久化的唯一漏斗：在此清洗 surrogateescape 残留（content 与响应
-信封里的思维链/拒答一视同仁）。检索为纯 SQL LIKE，不做语义检索。
+wire 消息（`biopilot.core.llm` 的 Message）→ StoredMessage（补 id/created_at）→
+bio_message 表。add_message 是全部消息持久化的唯一漏斗：在此清洗 surrogateescape
+残留（content 与响应信封里的思维链/拒答一视同仁）。本层不做会话检索——跨会话知识
+只走记忆块，历史消息仅供窗口回放与审计/排障。
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 def _sanitize_response_meta(meta: ResponseMeta) -> ResponseMeta:
     """清洗信封里的文本字段（思维链与拒答是模型自由文本，同样可能带未配对代理）。
 
-    messages 表严格 UTF-8，代理码点写入会炸——信封与 content 进同一张表，故共用同一道
+    bio_message 表严格 UTF-8，代理码点写入会炸——信封与 content 进同一张表，故共用同一道
     清洗。不清的后果不是丢一个字符，而是整条消息落盘失败（INSERT 抛 UnicodeEncodeError）。
 
     Args:
@@ -101,7 +102,7 @@ class MessageManager:
     """对话消息的落盘与查询单点：负责清洗、记录与 in-context 回放。
 
     Attributes:
-        db: MemoryDB，messages 表的连接
+        db: MemoryDB，bio_message 表的连接
         agent_manager: AgentManager | None，用于读取 AgentState.message_ids 确定 in-context 窗口
     """
 
@@ -121,7 +122,7 @@ class MessageManager:
                     user_id: str | None = None) -> StoredMessage:
         """落盘一条消息并返回持久化版本（全部消息持久化的唯一漏斗）。
 
-        信任边界：清洗代理码点（surrogateescape 残留）——messages 表严格 UTF-8
+        信任边界：清洗代理码点（surrogateescape 残留）——bio_message 表严格 UTF-8
         写入，代理会炸。落盘的消息来自多个来源（用户输入、工具结果、合成消息、模型
         自由文本），add_message 是它们共同必经的单点，在此堵漏最稳（replace 生成
         副本，不改调用方 wire）。信封里的思维链与拒答同样是模型自由文本，走同一道清洗。
@@ -169,7 +170,7 @@ class MessageManager:
 
         有 agent_manager 且 message_ids 非空时按 id 返回（压缩后的窗口：摘要 + 保留
         尾部）；message_ids 为空（首轮/未压缩）返回全部持久化消息——兼容。被驱逐的
-        旧消息只移出窗口，不删 SQL 行（Recall 完整可追溯）。
+        旧消息只移出窗口，不删 SQL 行（历史仍留在库中供审计/排障）。
 
         Args:
             agent_id: agent 标识。

@@ -39,7 +39,7 @@ def semantic_roots(config: BioPilotConfig) -> dict[str, str]:
 def declared_roots(config: BioPilotConfig) -> list[str]:
     """已声明的产物根（写围栏的允许集合）：语义根 + 工作区本身。
 
-    工作区也算在内——记忆块、scratch、引用库、审计都在它下面，agent 在自己
+    工作区也算在内——记忆块、scratch 等运行期目录都在它下面，agent 在自己
     数据根里的写入属「声明内」，不该平白弹一次确认。返回值全部解析为绝对路径、
     保持顺序并去重，供 WorkspacePolicyMiddleware 判定「写目标在不在声明内」。
 

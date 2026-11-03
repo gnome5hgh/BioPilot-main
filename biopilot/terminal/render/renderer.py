@@ -129,7 +129,7 @@ class StreamRenderer:
 
         清空 shown 缓冲、block_text、活动流状态（_started_tools/_pending/_changed），
         重置 last_segment 和 last_render，取消 cancelled 标记，并启动 spinner 显示
-        空闲指示。（异常/澄清路径不消费 should_print，因此每轮必须重置）
+        空闲指示。（异常早退路径不消费 should_print，因此每轮必须重置）
         """
         with self._lock:
             self._shown_buffer.clear()
@@ -426,13 +426,13 @@ class StreamRenderer:
         弹输入框/确认框前调用：终态渲染当前块、停 live。
 
         确保输入提示不会绘制在未完成的 live 块之上，避免混淆。
-        该方法可能被工作线程调用（如意图层的同步澄清经 ask 回调），内部持锁保证线程安全。
+        该方法可能由工作线程调用，内部持锁保证线程安全。
         """
         with self._lock:
             self._end_block()
 
     def print(self, text: str, *, style=None) -> None:
-        """终态行输出（banner/错误/澄清/run-guard 提示）。
+        """终态行输出（banner/错误/run-guard 提示）。
 
         若当前有 live 块活动，先终态渲染再打印新行；活动流模式下先落屏聚合中的活动行。
 
@@ -515,7 +515,7 @@ class StreamRenderer:
 
         逻辑（三态，两模式共用；缓冲为「真正渲染过的 root content」）：
             - 若 _shown_buffer 为空（无流式 content），说明结果未经过流式展示
-              （如澄清早退、纯工具轮），需要原样打印 result。
+              （如异常早退、纯工具轮），需要原样打印 result。
             - 若流式内容与 result 完全相等，说明已逐字展示过，只需补换行（返回空串）。
             - 若流式内容与 result 不相等（被中间件 on_finish 改写，或工具轮后
               内容静默），则补打最终版（前面加换行分隔）。
@@ -528,7 +528,7 @@ class StreamRenderer:
         """
         streamed = "".join(self._shown_buffer)
         if not streamed:
-            return result               # 没流式（澄清早退/纯工具轮）→ 维持现状
+            return result               # 没流式（异常早退/纯工具轮）→ 维持现状
         if streamed == result:
             return ""                   # 已逐字展示 → print("") 只补换行
         return "\n" + result            # 最终回答被改写 → 补打最终版

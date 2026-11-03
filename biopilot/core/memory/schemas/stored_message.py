@@ -1,7 +1,7 @@
-"""Recall 持久化消息模型：StoredMessage / MessageRole。
+"""持久化消息模型：StoredMessage / MessageRole。
 
 与 `biopilot.core.llm` 的 wire 消息家族（Message 及其各角色子类）区分：本类型是
-落盘到 messages 表的持久化消息，由 MessageManager 从 wire 消息转换生成，补上
+落盘到 bio_message 表的持久化消息，由 MessageManager 从 wire 消息转换生成，补上
 id / created_at 等存储字段。content 恒为字符串（str | None），对它落盘与回放都
 不做 JSON 类型猜测；meta 不适用这条——它是显式类型化的响应信封，按自己的
 dict 往返还原（见 `response_meta_to_dict` / `response_meta_from_dict`）。
@@ -21,19 +21,19 @@ __all__ = ["StoredMessage"]
 
 
 class StoredMessage(BaseModel):
-    """持久化消息：含 Recall 检索所需的全部字段。
+    """持久化消息：含窗口回放与审计所需的全部字段。
 
     tool_calls / tool_call_id 记录工具调用轨迹；step_id / run_id / otid 是
     审计与轨迹追踪的关联键；meta 是被落盘的响应信封。
 
     与 wire 消息（`biopilot.core.llm` 的 Message 家族）的区别：
         - wire 格式的 content 可以是 str、list 或 dict（多模态或结构化内容），
-          而本模型 content 保证为 str | None，便于 SQLite 存储与统一检索。
+          而本模型 content 保证为 str | None，便于统一落库与回放。
         - 本模型增加了持久化辅助字段：id、created_at，以及追踪字段 step_id 等。
         - 转换由 MessageManager._wire_to_schema 完成，确保类型安全。
 
     Attributes:
-        id: str，唯一标识（"message-<hex>" 自动生成，messages 表主键）
+        id: str，唯一标识（"message-<hex>" 自动生成，bio_message 表主键）
         session_id: str | None，会话分组（同一会话的 supervisor 与子 agent 共享）
         role: MessageRole，消息角色
         content: str | None，消息文本（多模态/结构化内容已拍平为字符串）

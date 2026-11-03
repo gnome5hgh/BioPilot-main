@@ -12,7 +12,7 @@ from biopilot.core.tool.constants import SEARCH_HINTS
 
 
 class GlobTool(Tool):
-    """按 glob 模式在语料库内定位文件的只读工具。
+    """按 glob 模式在指定目录内定位文件的只读工具。
 
     Attributes:
         name: str，工具名 "glob"
@@ -57,7 +57,7 @@ class GlobTool(Tool):
             # （`../../**/*` 等命中照常返回），仅黑名单过滤防通配符枚举敏感路径。
             hits: list[str] = []
             for p in base.glob(pattern):
-                # 敏感路径黑名单：命中 workspace/audit、.git 等直接跳过（防通配符枚举）
+                # 敏感路径黑名单：命中 workspace/security、workspace/infra、.git 等直接跳过（防通配符枚举）
                 if cfg is not None and is_denied_path(p.resolve(), cfg.runtime.workspace):
                     continue
                 hits.append(str(p))

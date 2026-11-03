@@ -2,7 +2,7 @@
 
 记录 agent 的元信息、当前记忆块容器与 in-context 窗口的消息 id 列表。
 message_ids 是「当前窗口」的持久化——压缩后被驱逐的旧消息只移出该列表、
-不删 bio_message 表行，Recall 完整可追溯。
+不删 bio_message 表行：历史仍完整留在库中供审计/排障，但不再提供会话检索回溯。
 """
 from __future__ import annotations
 
@@ -23,7 +23,8 @@ class AgentState(BaseModel):
         1. `memory` 字段不持久化到 bio_agent_state 表——每次通过 AgentManager.get_agent()
            从 block_manager 动态构建，保证始终反映块表最新状态。
         2. `message_ids` 持久化到数据库，是「当前 in-context 窗口」的显式记录；
-           压缩时只从该列表移除旧 id，不物理删除 bio_message 表行（Recall 可追溯全部历史）。
+           压缩时只从该列表移除旧 id，不物理删除 bio_message 表行（历史仍可审计，
+           但不提供会话检索回溯）。
 
     Attributes:
         agent_id: str，唯一标识符（bio_agent_state 表主键）

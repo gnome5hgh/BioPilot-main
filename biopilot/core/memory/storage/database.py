@@ -6,7 +6,7 @@
 正确性由 InnoDB 行锁承担：块管理器的读-改-写在事务内用 SELECT ... FOR UPDATE
 锁行，CAS（WHERE version=?）兜底防绕过入口的写者。
 
-适配约定（让 ORM 层的 SQLite 血统 SQL 少改）：
+适配约定（兼容沿用自本地 SQLite 时代的 SQL 写法）：
     - execute/executemany 把 `?` 占位符透明转换为 PyMySQL 的 `%s`。
     - 连接用 DictCursor，查询结果是 dict，`row["col"]` 与 `dict(row)` 都成立。
     - 插入顺序用每表自增 `seq` 列表达（MySQL 没有 rowid）。
@@ -449,7 +449,7 @@ class MemoryDB:
     # ------------------------------------------------------------------ 执行
     @staticmethod
     def _to_mysql(sql: str) -> str:
-        """把 SQLite 血统的 `?` 占位符转换为 PyMySQL 的 `%s`。
+        """把 `?` 占位符转换为 PyMySQL 的 `%s`。
 
         约定：本仓 SQL 全部由代码拼装、字符串字面量不含 `?`，整体替换安全。
 

@@ -2,7 +2,7 @@
 
 作用于 agent 的 in-context 窗口：保留冻结的历史摘要段、追加一份新摘要与
 一条任务快照，再按 keep 配置保留近期尾部。只改窗口，绝不删 SQL 原始消息
-（Recall 完整保留可追溯）。
+（历史仍完整留在库中供审计/排障，但不再提供会话检索回溯）。
 
 摘要固定 8 节，全部由模型生成；用户原话不进摘要——硬约束、截止时间等
 边界信息由任务快照逐字保留，其余原话不作回溯。
@@ -255,7 +255,7 @@ async def run_compaction(messages: list[Message], settings: CompactionSettings,
     降级都在这里完成；调用方只负责决定何时触发、把返回的新窗口写回。
     摘要文本可由调用方传入（测试/已有 summary），否则由 StructuredOutput
     生成。压缩只改 in-context 窗口；SQL 原始消息由 MessageManager 保留
-    （Recall 可追溯）。
+    （供审计/排障，不提供会话检索回溯）。
 
     Args:
         messages: 当前 in-context 消息列表（将被子集替换）。

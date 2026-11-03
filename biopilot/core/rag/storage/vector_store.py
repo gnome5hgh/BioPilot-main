@@ -1,4 +1,4 @@
-"""向量库封装（基于 Milvus）：单一 collection，text 字段存块的正文，其余字段存块元数据。
+"""向量库封装（基于 Milvus）：一个实例对应一个 collection，text 字段存块的正文，其余字段存块元数据。
 
 同一个 ``MilvusClient`` 类覆盖两种部署：``uri`` 传本地文件路径即 Milvus Lite
 （内嵌、单测用，无需常驻服务），传 ``http://host:19530`` 即连 Milvus Standalone

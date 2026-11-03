@@ -415,7 +415,6 @@ function prettyTool(name) {
     save_document: '保存文档',
     run_python: '执行分析代码',
     fetch_pdf: '下载论文',
-    add_citation: '登记引用',
     glob: '查找文件',
     grep: '搜索文件内容',
     spawn_sub_agent: '派发子任务',

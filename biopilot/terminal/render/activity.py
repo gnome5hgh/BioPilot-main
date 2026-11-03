@@ -100,8 +100,6 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "glob": ("🔍 检索", "次"),
     "rag_retrieve": ("📚 检索", "次"),
     "view_image": ("🖼️ 看图", "次"),   # 取检索到的图表原图交模型看（与「解析」区分：那是从 PDF 提图）
-    "index_paths": ("🗂️ 入库", "次"),
-    "reindex_all": ("🔄 收敛", "次"),
     "index_status": ("🩺 体检", "次"),
     "search_literature": ("📚 检索", "次"),
     "fetch_pdf": ("📥 下载", "次"),
@@ -110,13 +108,6 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "write_file": ("✏️ 写入", "文件"),
     "edit_file": ("✏️ 编辑", "文件"),
     "delete_file": ("🗑️ 删除", "文件"),
-    # ── 引用 ──
-    "lookup_citation": ("📎 查引", "次"),
-    "add_citation": ("📎 引用", "次"),
-    "list_citations": ("📎 列引", "次"),
-    "format_citations": ("📎 排版", "次"),
-    "remove_citation": ("📎 删引", "次"),
-    "sync_citations": ("📎 同步", "次"),
     # ── 视觉 ──
     "analyze_figures": ("🖼️ 解析", "次"),   # 视觉解析 PDF 插图（note-agent 高频、耗时数秒）
     # ── 记忆与笔记 ──

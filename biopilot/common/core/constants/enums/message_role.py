@@ -1,7 +1,7 @@
 """对话消息的角色。
 
 被两条链共同消费：LLM 的 wire 消息家族（各角色子类用它固定自己的 role）与记忆层
-的持久化消息（messages 表的 role 列存的就是它的值）。没有单一子包归属，故住
+的持久化消息（bio_message 表的 role 列存的就是它的值）。没有单一子包归属，故住
 `biopilot/common/core/constants`。
 """
 

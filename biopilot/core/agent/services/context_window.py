@@ -1,7 +1,7 @@
 """in-context 窗口：本会话「这次要发给模型的那批消息」及其持久化 id 追踪。
 
 窗口有两个视图，必须一起维护：``messages``（wire 消息，发给模型）与 ``ids``
-（这些消息在 messages 表里的主键，跨轮回放与压缩映射靠它）。两者此前是 Agent 上
+（这些消息在 bio_message 表里的主键，跨轮回放与压缩映射靠它）。两者此前是 Agent 上
 两个手对齐的列表，追加与落盘是分开的两句——漏写一句就出现「有消息没 id」或
 「有 id 没消息」。收进这个对象后，动作只有四类，每类自己保证两边一致：
 
@@ -37,10 +37,10 @@ CANCELLED_TOOL_MSG = (
 
 
 def _schema_to_wire(m) -> Message:
-    """StoredMessage（Recall 持久化视图）→ wire 消息（回放进 in-context 窗口）。
+    """StoredMessage（持久化视图）→ wire 消息（回放进 in-context 窗口）。
 
     Args:
-        m: StoredMessage，Recall 持久化视图
+        m: StoredMessage，持久化视图
 
     Returns:
         对应角色的 wire 消息（空 content 归一为空串）。

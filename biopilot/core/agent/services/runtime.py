@@ -190,16 +190,16 @@ class Agent:
             agent_type: Agent 类型标识符（对应 agents/<agent_type>/ 目录）
             security_middleware: 安全中间件列表，按顺序执行 before / 逆序执行 after；每轮 run 结束时顺序执行 on_finish
             confirm_callback: async 确认回调，接收 ConfirmRequired，返回 bool；None 时使用 fail-safe 的 _default_confirm（始终拒绝）
-            intent_service: 意图识别集成适配器（可选预处理层）。提供时 ReAct 循环在
-                开头调 begin、收尾调 finish；None 时整套意图层不存在
-                （纯 ReAct，无 INTENT 块、无澄清、无追问继承）。
+            intent_service: 意图识别集成适配器（可选预处理层）。提供时每轮开头调
+                begin 注入 INTENT 块；None 时整套意图层不存在
+                （纯 ReAct，无 INTENT 块、无追问继承）。
             session_id: 会话标识,跨多次 run 保持一致,便于审计聚合;None 时 自动生成 8 位 hex
             conversation_id: 具体对话标识（消息落盘与窗口追踪用）；None 时回退为 session_id。
                 子 agent 共享父 session_id，但各自持有独立 conversation_id，互不污染窗口。
             memory: Memory 实例(可选),compile() 输出 system 记忆块注入 head (每轮重建);None 时跳过
             agent_manager: AgentManager 实例(可选),当前仅持有供上层(CLI)取用
             block_manager: BlockManager 实例(可选),记忆块 CRUD 的服务句柄 (记忆工具经它读写核心记忆)
-            message_manager: MessageManager 实例(可选),对话落盘(Recall) + in-context 跨轮回放;None 时记忆相关路径零开销跳过
+            message_manager: MessageManager 实例(可选),对话落盘 + in-context 跨轮回放;None 时记忆相关路径零开销跳过
             compaction: CompactionSettings 实例(可选),触发时只压缩 in-context 窗口(驱逐旧对话 + 插摘要),不删 SQL 原始消息
             structured: StructuredOutput 实例(可选),compaction 摘要生成路径 消费;None 时压缩不触发(降级,CLI 接线后恢复)
             summary_structured: StructuredOutput 实例(可选),摘要专用模型;None 时沿用 structured
@@ -294,7 +294,7 @@ class Agent:
         #: 本轮发送前的本地估算，供返回后用真实用量校准（0 表示本轮还没算过）。
         self._last_sent_estimate = 0
 
-        #: in-context 窗口：本会话要发给模型的那批消息 + 它们在 messages 表里的 id。
+        #: in-context 窗口：本会话要发给模型的那批消息 + 它们在 bio_message 表里的 id。
         #: run() 每轮经它从 MessageManager 重新加载（跨轮消息经 SQL 回放，不在内存里
         #: 跨 run 累积）；消息与 id 的一致性由它内部保证，见 ContextWindow。
         self.user_id = user_id
@@ -378,9 +378,11 @@ class Agent:
         if self.memory is None:
             return None
 
-        # BlockManager，负责读写 SQLite 数据库里 blocks 表的管理器。list_blocks() 就是去查库，把当前所有块读出来，返回 list[Block]（每个 Block 是 pydantic 模型，含 label/value/版本号等）
-        # 每轮都从 BlockManager 重新读 blocks 重建 memory 对象——这就是「记忆会话内即时生效」的机制
-        # 注意：这里构建的是记忆块（blocks 表）——不是历史会话。历史会话在 messages 表，由 MessageManager 管
+        # BlockManager 负责读写 MySQL 里的 bio_memory_block 表。list_blocks() 直接查库，
+        # 返回 list[Block]（每个 Block 是 pydantic 模型，含 label/value/版本号等）
+        # 每轮都从 BlockManager 重新读块重建 memory 对象——这就是「记忆会话内即时生效」的机制
+        # 注意：这里构建的是记忆块（bio_memory_block）——不是历史会话。历史会话在
+        # bio_message 表，由 MessageManager 管
         if self.block_manager is not None:
             from biopilot.core.memory.schemas.memory import Memory
             # 把「缓存的记忆对象」扔掉，从数据库重新读出所有块，拼一个新的 Memory 实例
@@ -435,9 +437,7 @@ class Agent:
                非派发意图的处理说明，INTENT 块是路由先验）
             6. 末尾追加 user task。
 
-        意图层的澄清：装配意图服务时由 begin 内部**同步**调 ask 回调（不经 supervisor
-        的 LLM 转手——「要问」由代码强制、不靠提示词自觉），答案在代码层落地为意图后
-        ReAct 直接以正确意图启动，无跨轮挂起。
+        意图层只产出一条 INTENT 块：不修改任务文本、不阻塞本轮，也不持有跨轮状态。
 
         Args:
             task: 本轮用户输入文本（原始任务）。
@@ -469,7 +469,7 @@ class Agent:
         # ====== 第4层：意图识别（可选预处理层）======
         # 未装配意图服务时整块零开销跳过。装配时：先注入规则块（字段语义与
         # 非派发意图的处理说明，由意图层产出而非写死在 AGENT.md），再跑前置
-        # 预处理拿 INTENT 块与可能被澄清答案附录过的任务文本。
+        # 预处理拿 INTENT 块与任务文本。
         if self.intent_service is not None:
             if self.intent_service.rules_block:
                 head.append(SystemMessage(content=self.intent_service.rules_block))
@@ -479,7 +479,7 @@ class Agent:
                 head.append(SystemMessage(content=turn.head_block))
 
         # ====== 第5层：用户任务 ======
-        # 最后将当前用户输入作为 user 消息追加（含澄清答案附录，见 IntentService.begin）。
+        # 最后将当前用户输入作为 user 消息追加。
         head.append(UserMessage(content=task))
         return head
 
@@ -679,7 +679,7 @@ class Agent:
                SkillRegistry 且有可见 skill）→ ③ 可派发子 agent 清单块（本 agent
                有权派发的目标）→ ④ Memory.compile()（system/ 记忆块，若有）→ ⑤ 意图
                规则块与 INTENT 块（装配意图服务时）→ user_task。
-               意图层的澄清在本步内同步问用户并代码级落地意图
+               意图层只注入一条 INTENT 块，不修改任务文本
             3. 从 MessageManager 加载该会话的 in-context 消息（跨轮回放），当前
                user task 落盘；消息归属 self.window（in-context 窗口）
             4. 调用 LLM 前检查压缩（compaction.should_compress → run_compaction
@@ -712,9 +712,9 @@ class Agent:
         self.window.load()
 
         # head:① AGENT ② SKILLS ③ 可派发子 agent 清单 ④ Memory ⑤ 意图规则块+INTENT 块,每轮重建
-        # 不进累积;末尾 user task。意图层澄清在 _build_head 内(经 begin)同步问用户并落地。
+        # 不进累积;末尾 user task。意图层只在 _build_head 内注入 INTENT 块。
         head = await self._build_head(task)
-        #: 当前 user task 落盘(Recall),下轮经窗口回放；它排在 head 末尾参与每次
+        #: 当前 user task 落盘(供窗口回放),下轮经窗口回放；它排在 head 末尾参与每次
         # 请求,不进消息缓冲,故只落盘记账。
         self.window.persist(head[-1])
 
@@ -734,7 +734,7 @@ class Agent:
             messages = list(head[:-1]) + self.window.messages + [head[-1]]
 
             # 压缩检查:只改 in-context 窗口(驱逐旧对话 + 插摘要 + 追加任务快照),
-            # SQL 原始消息由 MessageManager 保留(Recall 可追溯)。取用户原话、
+            # SQL 原始消息由 MessageManager 保留(供审计/排障)。取用户原话、
             # 生成摘要与快照、失败降级全部在 run_compaction 内部完成。
             # structured 未注入(摘要生成器缺失) 时压缩不触发,避免无谓的失败重试。
             if self._needs_compaction(messages) and self.structured is not None:
@@ -747,7 +747,7 @@ class Agent:
                     summary_structured=self.summary_structured)
                 # 整体替换窗口：摘要与快照先落盘、id 列表更新为「摘要 + 保留尾部 +
                 # 快照」——压缩产物跨轮持久，下轮回放摘要、不回放被驱逐旧消息
-                # (SQL 原始消息仍全量保留，Recall 完整)。「认领旧 id」与「替换」的
+                # (SQL 原始消息仍全量保留，供审计/排障)。「认领旧 id」与「替换」的
                 # 先后关系封在 replace 内。摘要失败时的确定性降级已在
                 # run_compaction 内部处理，这里只负责把结果写回。
                 if new_window is not None:
@@ -811,7 +811,7 @@ class Agent:
 
                 # 最终回答(经 on_finish 改写——回放给下轮的是"用户看到的事实",
                 # 内容防护追加的安全声明跨轮保留)落盘 + 进 in-context,供下轮回放。
-                # 信封随之落盘:token 用量/结束原因/模型快照进 Recall,可事后按会话核算;
+                # 信封随之落盘:token 用量/结束原因/模型快照随消息入库,可事后按会话核算;
                 # 续写场景下 content 由「半截 + 续写」拼接,信封只覆盖最后一段调用——
                 # 各半截的用量已随各自的消息落盘,此处不累计。response 可能是不带信封的
                 # 替身对象,故用 getattr 取。
@@ -917,7 +917,7 @@ class Agent:
             # 本轮工具调用处理完毕，循环继续（回到开头，将新的上下文送交 LLM 进行下一轮推理）。
 
         # 安全阀触发：LLM 陷入了无法在限定轮数内退出的循环。
-        # 失败残渣随消息逐条落盘（Recall 保留原始记录含失败轮）；MaxTurnsExceeded
+        # 失败残渣随消息逐条落盘（原始记录含失败轮仍留在库中）；MaxTurnsExceeded
         # 只中断本轮回放，不回滚已落盘消息。下轮 window.load() 会看到失败残渣，
         # 由调用方（CLI）决定是否重试。
         raise MaxTurnsExceeded(

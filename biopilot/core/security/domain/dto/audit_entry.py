@@ -1,9 +1,9 @@
-"""一条审计事件的可序列化快照：各类事件共用同一结构，写盘时序列化为一行 JSONL。
+"""一条审计事件的可序列化快照：各类事件共用同一结构，落库时序列化为 payload JSON。
 
 字段名对齐业界标准词汇（W3C Trace Context / OTel GenAI / OpenInference）：
 标识三元组按 W3C 宽度（trace 32-hex / span 16-hex）；LLM 调用属性用
 ``gen_ai.*``；数据类字段（input/output）取 OpenInference 的语义。dataclass
-属性名用 Python 标识符，落盘时经 ``to_json_dict()`` 映射为标准 JSON 键
+属性名用 Python 标识符，落库时经 ``to_json_dict()`` 映射为标准 JSON 键
 （含点号），因此消费方读到的就是标准名。
 """
 from dataclasses import dataclass
@@ -13,11 +13,11 @@ from typing import Any, ClassVar
 @dataclass
 class AuditEntry:
     """一条审计事件的可序列化快照。事件类型由 ``event_type`` 判别（履行
-    OpenInference ``span.kind`` 的职责），按类型取用不同字段组。写盘时整体
-    经 ``to_json_dict()`` 序列化为一行 JSONL。
+    OpenInference ``span.kind`` 的职责），按类型取用不同字段组。落库时整体
+    经 ``to_json_dict()`` 序列化为 payload 列的一份 JSON。
 
     事件类型：
-    - ``tool_started`` / ``tool_ended``：工具调用的 span 起止（成对落盘，
+    - ``tool_started`` / ``tool_ended``：工具调用的 span 起止（成对落库，
       started 无配对 ended 即中断——崩溃检测不变式）；
     - ``approval_requested`` / ``approval_decided``：审批请求与决策两条独立
       事件，decided 经 ``causation_id`` 回溯 requested（请求 ≠ 决策）；
@@ -88,8 +88,8 @@ class AuditEntry:
     #: 事件结束时间的 ISO 格式时间戳。
     ended_at: str | None = None
     #: 策略引擎的最终决策。由 _derive_decision 推导，取值为
-    #: `ToolDecision`（auto_allowed / user_confirmed / policy_denied /
-    #: security_blocked / user_denied / error）。
+    #: `ToolDecision`（auto_allowed / user_confirmed / user_denied /
+    #: auto_denied / security_blocked / error；policy_denied 为保留值）。
     policy_decision: str = ""
     #: 工具执行的结果状态。由 _result_status 推导，取值为
     #: `ToolResultStatus`（success / policy_blocked / security_blocked /
@@ -141,8 +141,8 @@ class AuditEntry:
     #: 各工具的安全元数据。仅 agent_started 事件使用——判断「行为异常是不是配置刚变过」。
     agent_version: str | None = None
 
-    #: dataclass 属性名 → 落盘 JSON 键的映射。需要换成业界标准词（带点号的
-    #: OTel 属性名）的字段在此登记，其余键同名落盘。
+    #: dataclass 属性名 → 落库 JSON 键的映射。需要换成业界标准词（带点号的
+    #: OTel 属性名）的字段在此登记，其余键同名落库。
     _JSON_KEY_MAP: ClassVar[dict[str, str]] = {
         "request_model": "gen_ai.request.model",
         "response_model": "gen_ai.response.model",
@@ -152,10 +152,10 @@ class AuditEntry:
     }
 
     def to_json_dict(self) -> dict:
-        """序列化为落盘用 dict：属性名映射为标准 JSON 键，全部字段恒在。
+        """序列化为落库用 dict：属性名映射为标准 JSON 键，全部字段恒在。
 
         每行键集固定（与事件类型无关）是刻意的：消费方按固定 schema 读行，
-        不用对每个键做「可能不存在」防御；跨事件类型用不到的字段以 null 落盘。
+        不用对每个键做「可能不存在」防御；跨事件类型用不到的字段以 null 落库。
 
         Returns:
             dict，键为标准审计字段名（含 gen_ai.* 点号形式），值为该事件的字段值。

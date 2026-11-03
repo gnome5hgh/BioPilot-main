@@ -34,7 +34,7 @@ class ResumeReplay:
     """一次会话恢复的回放载荷（纯数据，terminal 层不依赖 memory schema）。
 
     Attributes:
-        session_id: 会话标识（= messages 表的 agent_id）。
+        session_id: 会话标识（= bio_message 表的 agent_id）。
         entries: 按显示顺序排列的 ``(role, text)``；text 已清洗未配对代理。
         total: in-context 窗口的消息总数（含被 limit 截掉、被角色过滤掉的那些）。
         omitted: 因 limit 未参与回放的消息数（0 表示回放了整个窗口）。
@@ -55,7 +55,7 @@ def build_resume_replay(message_manager, session_id: str, *,
     Args:
         message_manager: MessageManager。须已回填 ``agent_manager``，否则
             ``get_in_context_messages`` 降级为全量查询，窗口与模型不一致。
-        session_id: 会话标识（即 messages 表的 agent_id）。
+        session_id: 会话标识（即 bio_message 表的 agent_id）。
         limit: 只回放窗口末尾 N 条；<=0 表示回放整个窗口。
         created_at: 会话创建时间（展示用）。
 

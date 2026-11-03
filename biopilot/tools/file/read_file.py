@@ -1,7 +1,8 @@
-"""ReadFileTool：读取资料库内各类根目录下的文本文件。
+"""ReadFileTool：读取指定绝对路径的文本文件。
 
-安全边界由中间件强制:path 须为绝对路径且不在敏感路径黑名单(workspace/audit、
-.git 等),读取外部内容会打"未经安全校验"横幅。工具自身不重复校验——声明元数据即可。
+安全边界由中间件强制:path 须为绝对路径且不在敏感路径黑名单(workspace/security、
+workspace/infra、.git 等),读取外部内容会打"未经安全校验"横幅。工具自身不重复
+校验——声明元数据即可。
 """
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from biopilot.core.tool.constants import READ_HINTS
 
 
 class ReadFileTool(Tool):
-    """读取语料库内文本文件的只读工具。
+    """读取指定路径文本文件的只读工具。
 
     Attributes:
         name: str，工具名 "read_file"

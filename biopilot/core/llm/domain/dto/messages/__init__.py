@@ -36,7 +36,7 @@ _ROLE_TYPES: dict[MessageRole, type] = {
 def message_from_role(role, *, content="", tool_calls=None, tool_call_id=None):
     """按角色重建一条消息——持久化层的 role 是枚举，回放时在这里还原成具体类型。
 
-    从 SQL 回放 in-context 窗口时只有角色字符串可用（messages 表按行存 role），
+    从 SQL 回放 in-context 窗口时只有角色字符串可用（bio_message 表按行存 role），
     这里是把「角色」还原成「类型」的唯一漏斗。不传本角色没有的字段（tool_calls
     只给 assistant、tool_call_id 只给 tool），避免造出「形状对了但语义不成立」的消息。
 

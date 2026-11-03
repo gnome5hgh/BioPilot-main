@@ -1,11 +1,11 @@
 # biopilot/core/security/middleware/audit.py
 """
-审计中间件：把所有可追溯事件写进当天的 JSONL 日志文件。
+审计中间件：把所有可追溯事件 insert-only 写入 MySQL 审计表。
 
-记录五种事件，统一追加写入 ``audit_YYYYMMDD.jsonl``：
+记录六类事件，统一落 ``bio_security_audit_event``（核心列单提 + payload 全量 JSON）：
 
 - ``tool_started``：工具调用开始（span 建立）——携带工具名/风险等级/入参/
-  开始时间。在任何子事件写盘前先落盘，保证父链上每个 span 都有起始事件，
+  开始时间。在任何子事件落库前先写入，保证父链上每个 span 都有起始事件，
   中断时不会产生孤儿子树；
 - ``tool_ended``：工具调用结束（span 收口）——同 span 携带决策、结果状态、
   耗时、错误详情、策略依据、审批结果与因果链。``tool_started`` 无配对
@@ -19,18 +19,18 @@
 写入前的处理：
 - 脱敏（``_sanitize``）：只遮蔽凭证类键值（api_key/token/password/secret →
   ``"***"``），路径类键保留原值，**内容不再隐藏**——入参与返回都是全量原文，
-  供事后取证回放（审计目录在防篡改黑名单内、且从不回灌模型，不构成注入面）；
+  供事后取证回放（审计表只读展示、从不回灌模型，不构成注入面）；
 - 决策推导（``_derive_decision``）：根据调用结果推导出 ``ToolDecision``
-  （auto_allowed / user_confirmed / policy_denied / security_blocked / user_denied）；
+  （auto_allowed / user_confirmed / user_denied / auto_denied /
+  security_blocked / error；policy_denied 为保留值）；
 - 状态推导（``_result_status``）：根据异常类型推导出 ``ToolResultStatus``
   （success / security_blocked / user_denied / error）。
 
 调用链通过 contextvar 维护：``before`` 写 start 事件后压栈，``after`` 写 end
 事件后弹栈；子 agent 在 to_thread + asyncio.run 里自动继承父链，各并发任务持
-独立的 context 副本，互不串扰。每天一个文件、追加写入，写盘时按当天解析文件名，
-长驻进程跨零点也能写对文件。等待用户确认（``ConfirmRequired``）的调用统一
-记为 ``user_denied``——只有最终被确认放行（user_confirmed）的调用才视为
-允许，未确认即未发生。
+独立的 context 副本，互不串扰。写库失败只向 stderr 告警，不中断工具结果返回。
+等待用户确认（``ConfirmRequired``）的调用统一记为 ``user_denied``——只有最终
+被确认放行（user_confirmed）的调用才视为允许，未确认即未发生。
 """
 
 import contextvars
@@ -244,7 +244,7 @@ class AuditMiddleware(SecurityMiddleware):
         to_json_dict（固定键集，取证原文），核心列单提出来供管理端按维度查询。
 
         Args:
-            entry: AuditEntry，待落盘的审计事件
+            entry: AuditEntry，待写入的审计事件
 
         Returns:
             无返回值；写库失败降级为 stderr 告警，不抛异常。
@@ -284,7 +284,7 @@ class AuditMiddleware(SecurityMiddleware):
         return [json.loads(r["payload"]) for r in rows]
 
     async def before(self, ctx: ToolContext) -> None:
-        """工具执行前：为本次调用建立审计 span 并落盘 tool_started 起始事件。
+        """工具执行前：为本次调用建立审计 span 并写入 tool_started 起始事件。
 
         只观察不拦截，是管道里最先执行的一层——后续任何中间件拦截，调用已留痕。
 
@@ -300,8 +300,8 @@ class AuditMiddleware(SecurityMiddleware):
         ctx.span_id = span_id
         ctx.parent_span_id = span["span_id"] if span else None
 
-        # 3. 立即落盘 tool_started 事件（在任何子事件发生之前）
-        #    这是保证父链完整的关键：即使后续子工具写盘，父 start 已存在，不会出现孤儿
+        # 3. 立即写入 tool_started 事件（在任何子事件发生之前）
+        #    这是保证父链完整的关键：即使后续子工具写入，父 start 已存在，不会出现孤儿
         self._write_event(AuditEntry(
             event_type="tool_started",
             span_id=span_id,
@@ -321,7 +321,7 @@ class AuditMiddleware(SecurityMiddleware):
         ctx._audit_token = _span_ctx.set({"span_id": span_id})
 
     async def after(self, ctx: ToolContext) -> None:
-        """工具执行后：收口当前 span 并落盘 tool_ended 收尾事件。
+        """工具执行后：收口当前 span 并写入 tool_ended 收尾事件。
 
         before 正常执行过则弹栈；early-return 路径（JSON 解析失败 / 未知工具）
         只走 after，此处防御性补建 span 并补写 tool_started，保住「每个 span
@@ -358,7 +358,7 @@ class AuditMiddleware(SecurityMiddleware):
             # before 已正常执行：从 contextvar 中弹出当前 span
             _span_ctx.reset(getattr(ctx, "_audit_token", None))
 
-        # ---- 计算耗时并落盘 tool_ended ----
+        # ---- 计算耗时并写入 tool_ended ----
         duration = int((time.monotonic() - (ctx.started_at or 0.0)) * 1000)
         result_output, result_summary = _result_fields(ctx.result)
         self._write_event(AuditEntry(
@@ -388,7 +388,7 @@ class AuditMiddleware(SecurityMiddleware):
         ))
 
     async def on_approval(self, ctx: ToolContext, phase: str, approval_outcome: str | None = None) -> None:
-        """审批生命周期回调：requested 与 decided 各落盘一条独立审计事件。
+        """审批生命周期回调：requested 与 decided 各写入一条独立审计事件。
 
         请求与决策是两条事件，decided 通过 causation_id 回溯到 requested
         （合规要求：请求 ≠ 决策）。

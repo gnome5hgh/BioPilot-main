@@ -19,7 +19,7 @@ class IndexStatusTool(Tool):
         description: str，工具描述
         parameters: dict，JSON Schema（无参数）
         risk_level: str，"low"（只读）
-        side_effects: list[str]，["read_file"]（读索引状态与语料目录元数据）
+        side_effects: list[str]，["read_file"]（读索引状态与向量库元数据）
     """
 
     name = "index_status"

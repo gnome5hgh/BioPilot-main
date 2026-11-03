@@ -1,6 +1,6 @@
 """FetchPdfTool：从检索结果中的 PDF 链接下载 PDF 到指定路径（独立下载工具）。
 
-下载职责独立成工具，让搜索工具保持纯只读：写盘副作用集中在本工具，审计日志里
+下载职责独立成工具，让搜索工具保持纯只读：写盘副作用集中在本工具，审计事件里
 「写盘」动作归于 fetch_pdf，不藏在名为 search 的工具下。
 
 下载一律经 Java `/internal/literature/fetch-pdf`：外部 URL 的 SSRF 逐跳校验与
@@ -105,12 +105,12 @@ class FetchPdfTool(Tool):
         1. 本任务内已按 URL 或规范化标题下载过 → 成功性短路；
         2. 目标文件已存在 → 跳过下载。
         负缓存（现状语义不变）：同 URL 本任务内 4xx 永久失败即拒绝重试。
-        download_to 必填，没有默认 PDF 语料根。
+        download_to 必填，没有默认 PDF 落盘根。
 
         Args:
             url: str，PDF 下载地址
-            download_to: str | None，保存绝对路径（缺省落 pdf 根）
-            title: str | None，论文标题（用于语料库查重）
+            download_to: str | None，保存绝对路径（必填，没有默认落盘根）
+            title: str | None，论文标题（用于文件级查重）
             _run_state: RunState | None，本次 run 的状态容器（负缓存与成功短路）
 
         Returns:

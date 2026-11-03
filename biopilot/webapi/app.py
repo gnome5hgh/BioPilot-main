@@ -271,7 +271,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         元数据。body 里的 oss_key/name/size 一律忽略——它们来自浏览器，不能作为
         归属依据（否则可以把别人的 oss_key 塞进来读走别人的文件）。
 
-        本地副本落到 ``users/<uid>/uploads/<会话>/``，沙箱按会话挂载该目录；
+        本地副本落到 ``<用户缓存根>/<uid>/uploads/<会话>/``，沙箱按会话挂载该目录；
         路径片段先归一化，防客户端传入 ``..`` 写出上传目录。
 
         Args:
@@ -345,7 +345,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
         用户消息由引擎在 run 内落盘，适配层拿不到它的 id；这里按「会话 + 归属 +
         role=user + 落盘正文的前缀」定位最近一行回填。匹配用注入块前缀而不是全文：
-        意图层可能给任务追加澄清附录，正文与送进引擎的文本不必逐字相同。同一会话的
+        任务文本含附件清单注入，正文与送进引擎的文本不一定逐字相同。同一会话的
         run 由运行锁串行化，前缀又含本轮附件清单，定位不会串到别的轮次。回填失败
         只丢卡片，不影响本轮回答（错误一律降级为文本）。
 

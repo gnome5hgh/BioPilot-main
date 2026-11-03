@@ -7,7 +7,7 @@ cli.py 保留装配组合根（main），本模块承载每轮交互。与 termi
 `biopilot.terminal`（见 terminal/__init__.py）。
 
 每轮:读 stdin → 斜杠命令分发（注册表命中则就地处理）→ supervisor.run(query)
-→ 打印结果。澄清由 runtime 在本轮内同步问用户，REPL 不再持有跨轮澄清状态。
+→ 打印结果。REPL 不持有意图层状态，每轮直接驱动 supervisor。
 
 嵌套关系：
 进程

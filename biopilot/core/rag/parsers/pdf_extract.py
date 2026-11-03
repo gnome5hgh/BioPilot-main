@@ -358,8 +358,8 @@ def _extract_doc(doc, title: str) -> PdfText:
 def _extract(path: str, title: str = "") -> PdfText:
     """打开并抽取一个本地 PDF（不走缓存）。
 
-    标题由调用方提供：平台论文从 `bio_paper.title` 取，语料文件为空——本模块
-    不再从版面推导标题。传入的标题只用于章节识别时剔除正文里的标题行。
+    标题由调用方提供：平台论文从 `bio_paper.title` 取，本地文件路径入口为空——
+    本模块不再从版面推导标题。传入的标题只用于章节识别时剔除正文里的标题行。
 
     Args:
         path: PDF 文件绝对路径。

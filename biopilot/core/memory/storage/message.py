@@ -1,4 +1,4 @@
-"""bio_message 表操作：对话消息的落盘与查询（Recall 的数据源）。
+"""bio_message 表操作：对话消息的落盘与查询（窗口回放与审计的数据源）。
 
 本文件只有裸 SQL 函数，不含业务规则；surrogate 清洗等语义由
 services/message_manager.py 持有。

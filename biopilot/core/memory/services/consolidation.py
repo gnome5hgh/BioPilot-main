@@ -289,7 +289,8 @@ class MemoryConsolidator:
             failures += repair_failures
 
         # 阶段 3：结算——条目被取代/删除后空掉的分册整块删掉，让「全量喂旧
-        # 记忆」的总量有界（记忆的语义是当前有效知识，历史交给 Recall）。
+        # 记忆」的总量有界（记忆的语义是当前有效知识，历史只留在 bio_message 表
+        # 供审计/排障）。
         # 结算失败只记日志：它不是编辑层面的失败，不参与下面「这批消息有没有被消费」的判定。
         try:
             self._cleanup_empty_shards()

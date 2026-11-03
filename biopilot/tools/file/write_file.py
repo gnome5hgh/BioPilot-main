@@ -3,7 +3,8 @@
 path 可写任意绝对路径(敏感路径黑名单除外,WorkspacePolicyMiddleware 强制)。
 filename+dir 便捷入口必须显式给 dir；只有装配时明确配置了默认写根的 agent
 （如 research-agent）才能省略。笔记不再有默认写根：保存位置由任务文本给出。
-写盘与入库解耦:本工具只负责落盘 + 登记产物,入库由调用方落盘后派发 rag-agent 完成。
+本工具只负责落盘 + 登记产物,不做索引入库——论文索引归 rag-agent,笔记类产物
+不参与检索。
 """
 from pathlib import Path
 

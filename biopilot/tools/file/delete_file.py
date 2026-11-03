@@ -1,4 +1,4 @@
-"""DeleteFileTool：删除一个语料文件（不可逆，需用户确认）。
+"""DeleteFileTool：删除一个文件（不可逆，需用户确认）。
 
 比 write_file 更保守：只收精确的绝对路径，不做便捷入口、不做 basename 容错搜索。
 写错地方只是写错，删错文件不可逆，所以宁可让调用方多给一次完整路径。
@@ -16,7 +16,7 @@ class DeleteFileTool(Tool):
         name: str，工具名 "delete_file"
         description: str，工具描述
         parameters: dict，JSON Schema（path）
-        risk_level: str，"medium"（删除不可逆但影响面限于单个文件）
+        risk_level: str，"critical"（删除不可逆；即使免问档调到 high 仍会确认）
         side_effects: list[str]，["delete_file"]（据此纳入同路径写互斥）
     """
 

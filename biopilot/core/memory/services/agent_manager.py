@@ -1,8 +1,8 @@
 """AgentManager：agent 生命周期 + refresh_memory（块变更后重编译 system prompt）。
 
-AgentState 持久化在 bio_agent_state 表——它是一行以 agent_id 为主键的
-JSON 快照，其中 message_ids 记录「当前 in-context 窗口的消息 id 列表」。
-单用户场景下 agent 表简化为按 agent_id 键控。
+AgentState 持久化在 bio_agent_state 表——它是一行以 agent_id（即会话 id）为主键的
+JSON 快照，其中 message_ids 记录「当前 in-context 窗口的消息 id 列表」。行上带
+user_id 做行级隔离，跨用户的会话互不可见。
 """
 from __future__ import annotations
 
@@ -207,7 +207,7 @@ class AgentManager:
                 - message_count: 该会话落盘消息总数
                 - preview: 首条用户消息的截断预览（无消息则为空串）
 
-        说明：逐会话查询消息表（单用户场景会话数量少，无需 JOIN）。
+        说明：逐会话查询消息表（每用户会话数有限，无需 JOIN）。
         """
         from biopilot.core.memory.storage.message import count_messages
 

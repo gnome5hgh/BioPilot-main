@@ -178,7 +178,7 @@ class BioPilotConfig:
         vision: VisionLLMConfig，视觉模型连接
         runtime: RuntimeConfig，运行时基础设施
         platform: PlatformConfig，Java 平台后端连接（agent 调平台内部能力）
-        corpus: CorpusConfig，语料库与产物路径
+        corpus: CorpusConfig，产物路径
         intent: IntentConfig，意图识别
         security: SecurityConfig，安全模块（预批准名单）
         rag: RagConfig，RAG 检索栈
@@ -200,7 +200,7 @@ class BioPilotConfig:
     #: Java 平台后端连接（内部检索、文档保存等外部能力）
     platform: PlatformConfig = field(default_factory=PlatformConfig)
 
-    #: 语料库与产物路径
+    #: 产物路径
     corpus: CorpusConfig = field(default_factory=CorpusConfig)
 
     #: 意图识别子系统（总开关 + 编码器 + 路由器）

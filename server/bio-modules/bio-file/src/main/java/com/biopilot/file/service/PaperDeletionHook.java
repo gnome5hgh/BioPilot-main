@@ -2,7 +2,7 @@ package com.biopilot.file.service;
 
 /** 论文删除时的扩展点：引用库在删除论文的同一事务里清掉对应的引用行。
 
-    定义在论文域、由引用域实现，避免 `bio-catalog` 反向依赖 `bio-citation`。
+    定义在论文域、由引用域实现，避免 `bio-file` 反向依赖 `bio-citation`。
 */
 public interface PaperDeletionHook {
 

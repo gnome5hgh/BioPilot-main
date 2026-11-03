@@ -71,7 +71,7 @@ class SecurityMiddleware(ABC):
         """审批生命周期钩子：phase ∈ {"requested", "decided"}，仅 AuditMiddleware 实现。
 
         其余中间件默认 no-op——这是洋葱模型外的可选横切关注点，只给需要监听
-        确认流程的中间件用（当前只有审计要落盘审批双事件）。
+        确认流程的中间件用（当前只有审计要落库审批双事件）。
 
         当需要用户确认的工具触发 ConfirmRequired 时，Agent 会在发送确认请求前
         调用所有中间件的 on_approval(ctx, "requested")，然后在收到用户决策后
