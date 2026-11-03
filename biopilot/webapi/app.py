@@ -17,8 +17,6 @@ import logging
 import pathlib
 from pathlib import Path
 
-import yaml as yaml_mod
-
 import uuid
 from dataclasses import dataclass
 
@@ -30,13 +28,6 @@ logger = logging.getLogger(__name__)
 
 #: 附件清单注入任务文本时使用的固定抬头：历史回放据此把注入块从展示正文中剥掉。
 _ATTACHMENT_HEADER = "【附件】以下数据文件已就位"
-
-#: 设置端点可写的键 → config.yaml 里的嵌套落点（覆盖链：schema 默认 ← config.yaml ← env）。
-#: 只开语义子集，凭据类字段永不经此通道。
-_SETTING_PATHS = {
-    "intent_enabled": ("intent", "enabled"),
-    "confirm_above": ("runtime", "confirm_above"),
-}
 
 
 @dataclass
@@ -57,11 +48,6 @@ class WebConfig:
 
 
 _db_instance = None
-
-
-def yaml_path() -> pathlib.Path:
-    """config.yaml 路径（工作区约定：仓库根）。"""
-    return pathlib.Path.cwd() / "config.yaml"
 
 
 def _shared_db():
@@ -178,6 +164,12 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
     user_runs: dict[str, int] = {}
     #: agent 最后使用时刻（idle 驱逐依据）
     agent_last_used: dict[tuple[str, str], float] = {}
+
+    def _invalidate_agents() -> None:
+        """丢弃全部缓存的 Agent：设置保存后下一轮按新配置重新装配。"""
+        agents.clear()
+        agent_last_used.clear()
+        usage_baseline.clear()
     #: 上下文用量的固定开销基线：(user_id, model) -> {parts, limit}。Agent 装配好
     #  即快照一份（此时窗口为空，parts 恰好只含 head 各块 + 工具 schema）；会话
     #  未装配（新会话/进程重启/空闲驱逐）时按基线 + DB 消息估算回答案指示器数据
@@ -705,16 +697,46 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
         return StreamingResponse(stream_chat(), media_type="text/event-stream")
 
-    # 设置端点（ADMIN 专属在 Java 层守卫）：意图开关/确认档位/沙箱配置的语义子集
+    # 设置端点（ADMIN 专属在 Java 层守卫）：字段描述、有效值、补丁写入、历史与回滚
     @app.get("/settings")
     async def settings_get(x_user_id: str | None = Header(default=None)) -> dict:
+        """返回设置页所需的全部数据：字段描述 + 有效值 + 来源 + 版本。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
-        return {"intent_enabled": cfg.intent.enabled,
-                "confirm_above": cfg.runtime.confirm_above,
-                "models": cfg.runtime.models}
+        from biopilot.webapi import settings as settings_service
+        return await asyncio.to_thread(settings_service.snapshot)
+
+    @app.get("/settings/history")
+    async def settings_history(limit: int = 20,
+                               x_user_id: str | None = Header(default=None)) -> dict:
+        """返回最近的配置保存历史。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        from biopilot.webapi import settings as settings_service
+        try:
+            return await asyncio.to_thread(settings_service.history, limit)
+        except settings_service.ConfigSourceUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/settings/rollback")
+    async def settings_rollback(body: dict,
+                                x_user_id: str | None = Header(default=None)) -> dict:
+        """回滚到指定历史版本；回滚动作本身也会记一条历史。"""
+        if not x_user_id:
+            raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
+        version = (body or {}).get("version")
+        if not isinstance(version, int):
+            raise HTTPException(status_code=422, detail="version 必填且为整数")
+        from biopilot.webapi import settings as settings_service
+        try:
+            result = await asyncio.to_thread(
+                settings_service.rollback, version, x_user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except settings_service.ConfigSourceUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _invalidate_agents()
+        return result
 
     @app.get("/models")
     async def models_list(x_user_id: str | None = Header(default=None)) -> dict:
@@ -725,7 +747,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
+        cfg = await asyncio.to_thread(BioPilotConfig.from_env)
         items = [{"name": m.get("name") or m.get("model", ""),
                   "model": m.get("model", ""),
                   "current": False}
@@ -742,7 +764,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
         name = (body or {}).get("name", "")
         from biopilot.config import BioPilotConfig
-        cfg = BioPilotConfig.from_env()
+        cfg = await asyncio.to_thread(BioPilotConfig.from_env)
         if name and name != "默认主模型":
             if cfg.runtime.find_model_entry(name) is None:
                 raise HTTPException(status_code=422, detail=f"未知模型：{name}")
@@ -753,32 +775,34 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 
     @app.post("/settings")
     async def settings_set(body: dict, x_user_id: str | None = Header(default=None)) -> dict:
-        """ADMIN 设置写入：把白名单键合并进 config.yaml 的嵌套覆盖结构。
+        """写入一批配置补丁（路径级），返回新版本号。
 
-        生效语义是「下一 run」——引擎在 run 启动时读一次配置快照，本端点只负责
-        把覆盖值真正落盘（此前实现只回显 applied、从未合并写入，保存是空操作）。
+        补丁写入 MySQL 的 ``bio_config``，密钥单独加密存放；生效语义是「下一轮」——
+        保存后丢弃本进程缓存的 Agent，下一次装配按新配置重建。
         """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        cfg_path = yaml_path()
-        overrides = {k: v for k, v in (body or {}).items() if k in _SETTING_PATHS}
-        applied = []
-        if overrides:
-            existing = {}
-            if cfg_path.exists():
-                existing = yaml_mod.safe_load(cfg_path.read_text()) or {}
-            for key, value in overrides.items():
-                node = existing
-                for seg in _SETTING_PATHS[key][:-1]:
-                    node = node.setdefault(seg, {})
-                    if not isinstance(node, dict):
-                        raise HTTPException(status_code=422,
-                                            detail=f"配置结构冲突：{key}")
-                node[_SETTING_PATHS[key][-1]] = value
-                applied.append(key)
-            with open(cfg_path, "w") as fh:
-                yaml_mod.safe_dump(existing, fh, allow_unicode=True)
-        return {"status": "ok", "applied": applied}
+        from biopilot.config.services.schema import ConfigValidationError
+        from biopilot.config.services.store import (
+            ConfigSecretDecryptError,
+            ConfigSecretKeyMissing,
+            ConfigVersionConflict,
+        )
+        from biopilot.webapi import settings as settings_service
+
+        try:
+            result = await asyncio.to_thread(
+                settings_service.patch, body or {}, x_user_id)
+        except ConfigVersionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ConfigValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (ConfigSecretKeyMissing, ConfigSecretDecryptError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except settings_service.ConfigSourceUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        _invalidate_agents()
+        return result
 
     # 删户两阶段：标记 → 等活动清零 → 物理删除（幂等）。只清引擎数据；
     # 平台表行与 OSS 对象由 Java 在同一个删户流程里清理。
@@ -1037,6 +1061,12 @@ async def _execute_scheduled(user_id: str, conversation_id: str, task: str,
 def run_server(config: WebConfig | None = None) -> None:
     """阻塞启动 uvicorn（`biopilot web` 子命令的实现体）。"""
     import uvicorn
+    from biopilot.config import enable_db_source, ensure_legacy_import
+
+    # 运行时可调配置的真相源是数据库；入口处统一打开，避免各请求各自判断。
+    enable_db_source()
+    # 首次部署：把旧的 config.yaml 一次性导入（之后文件只剩引导层）。
+    ensure_legacy_import()
     cfg = config or WebConfig(
         host=os_env("BIOPILOT_WEB_HOST", "127.0.0.1"),
         port=int(os_env("BIOPILOT_WEB_PORT", "8300")),
@@ -1112,6 +1142,22 @@ def _sweep_orphan_vectors(svc, counts: dict[str, int],
     return removed, remaining
 
 
+def _index_summary(**overrides: object) -> dict:
+    """构造一次索引轮次的结果摘要（各分支共用，字段齐全）。"""
+    from datetime import datetime, timezone
+
+    summary = {
+        "indexed": 0,
+        "failed": 0,
+        "removed": 0,
+        "orphans": 0,
+        "drifted": 0,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    }
+    summary.update(overrides)
+    return summary
+
+
 def _index_user_kb_sync(user_id: str) -> dict:
     """把该用户「已加入知识库」的论文逐篇索引，并清理已移出的论文。
 
@@ -1134,7 +1180,6 @@ def _index_user_kb_sync(user_id: str) -> dict:
         dict: indexed/failed/removed/orphans/drifted 计数与 finished_at；
         skipped=True 表示锁被另一个进程持有，本轮没有做任何事。
     """
-    from datetime import datetime, timezone
     from biopilot.config import BioPilotConfig
     from biopilot.core.memory.storage.named_lock import NamedLock
 
@@ -1151,9 +1196,7 @@ def _index_user_kb_sync(user_id: str) -> dict:
         lock_usable = False
         logger.warning("知识库索引锁不可用，本轮无锁执行（%s）", user_id, exc_info=True)
     if lock_usable and not acquired:
-        return {"indexed": 0, "failed": 0, "removed": 0, "orphans": 0,
-                "drifted": 0, "skipped": True,
-                "finished_at": datetime.now(timezone.utc).isoformat()}
+        return _index_summary(skipped=True)
     try:
         return _index_user_kb_locked(user_id, cfg)
     finally:
@@ -1185,7 +1228,7 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
     Returns:
         dict: indexed/failed/removed/orphans/drifted 计数与 finished_at。
     """
-    from datetime import datetime, timezone
+    from biopilot.common.platform import PlatformError
     from biopilot.core.rag.constants import IndexOutcomeStatus, paper_doc_key
     from biopilot.core.rag.services.rag_service import get_rag_service
 
@@ -1231,8 +1274,13 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         # 持锁时才敢把 indexing 判为僵尸；平台不可达则本轮直接退出，下一轮重试。
         try:
             platform.kb_normalize(user_id, requeue_indexing=True)
-        except Exception:
-            logger.warning("知识库状态收敛失败（%s），本轮跳过", user_id, exc_info=True)
+        except PlatformError as exc:
+            # 启动顺序上适配层先于 Java 起来：这不是错误，交给周期对账重试。
+            logger.info("平台未就绪，知识库对账稍后重试（%s）：%s", user_id, exc)
+            return _index_summary(skipped=True, deferred=True,
+                                  reason="platform_unavailable")
+        except Exception as exc:
+            logger.warning("知识库状态收敛失败（%s），本轮跳过：%s", user_id, exc)
             break
         rows = db.execute(
             "SELECT id, oss_key, kb_enabled, index_status, title FROM bio_paper"
@@ -1254,8 +1302,11 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         try:
             accepted = set(platform.kb_indexing(
                 user_id, [paper_id for paper_id, _row in todo]))
-        except Exception:
-            logger.warning("索引状态置位失败（%s），本轮跳过", user_id, exc_info=True)
+        except PlatformError as exc:
+            logger.info("平台未就绪，索引状态置位稍后重试（%s）：%s", user_id, exc)
+            break
+        except Exception as exc:
+            logger.warning("索引状态置位失败（%s），本轮跳过：%s", user_id, exc)
             break
         if not accepted:
             break
@@ -1292,9 +1343,11 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
             try:
                 applied = platform.kb_result(user_id, results)
                 reported = True
-            except Exception:
+            except PlatformError as exc:
+                logger.info("平台未就绪，索引结果上报稍后重试（%s）：%s", user_id, exc)
+            except Exception as exc:
                 # 状态未知：保留已建好的索引，下一轮按 indexing 重排后幂等重建
-                logger.warning("索引结果上报失败（%s）", user_id, exc_info=True)
+                logger.warning("索引结果上报失败（%s）：%s", user_id, exc)
 
         for item in results:
             paper_id = str(item["paper_id"])
@@ -1326,17 +1379,13 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
     # 收尾再收敛一次（不重排本轮刚置 indexing 的行）：不留「已就绪但不在知识库」
     try:
         platform.kb_normalize(user_id, requeue_indexing=False)
-    except Exception:
-        logger.warning("知识库收尾收敛失败（%s）", user_id, exc_info=True)
+    except PlatformError as exc:
+        logger.info("平台未就绪，收尾收敛稍后重试（%s）：%s", user_id, exc)
+    except Exception as exc:
+        logger.warning("知识库收尾收敛失败（%s）：%s", user_id, exc)
 
-    summary = {
-        "indexed": indexed,
-        "failed": failed,
-        "removed": removed,
-        "orphans": orphans,
-        "drifted": len(drift),
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-    }
+    summary = _index_summary(indexed=indexed, failed=failed, removed=removed,
+                             orphans=orphans, drifted=len(drift))
     kb_last_run[user_id] = summary
     return summary
 
@@ -1453,6 +1502,10 @@ def _schedule_user_index(user_id: str) -> None:
             while True:
                 reindex_pending.discard(user_id)
                 summary = await asyncio.to_thread(_index_user_kb_sync, user_id)
+                if summary.get("deferred"):
+                    # 平台（Java）还没起来：不是锁冲突，别原地重试烧资源，交给周期对账。
+                    logger.info("平台未就绪，知识库对账交给周期任务（%s）", user_id)
+                    break
                 if summary.get("skipped"):
                     misses += 1
                     if misses > _KB_LOCK_RETRIES:

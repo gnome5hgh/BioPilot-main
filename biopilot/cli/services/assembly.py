@@ -349,9 +349,15 @@ def main(argv: list[str] | None = None) -> int | None:
     """
     import argparse
 
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    if raw_args and raw_args[0] == "config":
+        from biopilot.cli.services.config_cli import config_main
+        return config_main(raw_args[1:])
+
     parser = argparse.ArgumentParser(
         prog="biopilot",
-        description="BioPilot 学术研究工作流助手（交互式 REPL，自然语言即命令）")
+        description="BioPilot 学术研究工作流助手（交互式 REPL，自然语言即命令）",
+        epilog="配置管理：biopilot config import|export|history|rollback")
     parser.add_argument("--resume", nargs="?", const="", default=None,
                         metavar="SESSION_ID",
                         help="恢复历史会话；不带 id 则列出历史会话供选择")
@@ -370,6 +376,11 @@ def main(argv: list[str] | None = None) -> int | None:
             memory_dsn=_os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")))
         return 0
 
+    # 引擎入口才启用数据库配置源：测试与离线脚本默认仍走配置文件。
+    from biopilot.config import enable_db_source, ensure_legacy_import
+    enable_db_source()
+    # 首次部署：把旧的 config.yaml 一次性导入（之后文件只剩引导层）。
+    ensure_legacy_import()
     config = BioPilotConfig.from_env()
     is_tty = sys.stdin.isatty()
     io = make_input_io(config)
@@ -389,7 +400,7 @@ def main(argv: list[str] | None = None) -> int | None:
     # api_key 缺失提示：RAG 的云端嵌入未配 key 时只提示不阻断（检索退纯
     # BM25、无精排，降级路径由 retriever 自己消化）。
     if not config.rag.embedding.api_key:
-        _msg = ("未配置云端嵌入 api_key（config.yaml rag.embedding 段）："
+        _msg = ("未配置云端嵌入 api_key（设置页 → 检索增强 → 嵌入）："
                 "RAG 检索无稠密路与精排。"
                 "注册 siliconflow.cn 获取（含实名认证）。")
         (console.print(_msg, style="yellow") if console else print(_msg))

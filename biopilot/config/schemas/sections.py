@@ -1,12 +1,14 @@
-"""配置分区：与 config.yaml 同构的一棵 dataclass 树。
+"""配置分区：一棵 dataclass 树，是设置页字段与运行时参数的共同契约。
 
-本文件是**所有可调参数默认值的唯一声明点**——改默认值只改这里；``config.yaml``
-是纯覆盖文件（不重复声明默认值），环境变量优先级最高。分区与 YAML 顶层键同名：
+本文件是**所有可调参数默认值的唯一声明点**——改默认值只改这里。运行时配置的
+真相源是 MySQL 的 ``bio_config``（设置页写入稀疏覆盖），环境变量优先级最高；
+``config.yaml`` 只保留启动引导项。分区与配置路径顶层同名：
 ``runtime`` / ``platform`` / ``corpus`` / ``intent`` / ``rag{...}`` / ``memory`` /
-``session`` / ``agents``，外加保留顶层的 ``llm`` / ``vision``。
+``session`` / ``agents`` / ``security`` / ``compaction``，外加保留顶层的
+``llm`` / ``vision``。
 
-加载与派生逻辑在 ``loader.py``（递归合并、env 派生、YAML 读取），对外只经
-``biopilot.config`` 取。
+加载与派生逻辑在 ``loader.py``（递归合并、env 派生、数据库覆盖），字段描述与
+写入校验在 ``schema.py``，持久化在 ``store.py``；对外只经 ``biopilot.config`` 取。
 """
 from dataclasses import dataclass, field
 from pydantic import Field
@@ -35,8 +37,8 @@ class LLMConfig:
     #: API 基础地址，默认为 DeepSeek 兼容端点
     base_url: str = "https://api.deepseek.com/v1"
 
-    #: API 密钥——**不硬编码默认值**。现必须经 BIOPILOT_LLM_API_KEY env / .env /
-    #: config.yaml llm.api_key 提供;留空由 LLMClient.__init__ 兜底报清晰错误。
+    #: API 密钥——**不硬编码默认值**。经 BIOPILOT_LLM_API_KEY env / .env /
+    #: 设置页「对话模型」提供;留空由 LLMClient.__init__ 兜底报清晰错误。
     api_key: str = ""
 
     #: 模型名称，传给 API 的 model 参数。用带视觉能力的模型：检索回来的图表原图
@@ -583,6 +585,10 @@ class RagConfig:
 
 # ── memory / session / agents ───────────────────────────────────────────────
 
+#: 压缩计量方式的合法取值（schema 校验与 ContextSize 共用，避免两处枚举漂移）。
+CONTEXT_SIZE_TYPES = ("tokens", "messages", "fraction")
+
+
 @dataclass
 class ContextSize:
     """压缩触发或保留量的计量方式。
@@ -602,7 +608,7 @@ class ContextSize:
         Raises:
             ValueError: 类型不在三种之内，或数值为负。
         """
-        if self.type not in ("tokens", "messages", "fraction"):
+        if self.type not in CONTEXT_SIZE_TYPES:
             raise ValueError(f"未知的 ContextSize 类型: {self.type!r}")
         if self.value < 0:
             raise ValueError(f"ContextSize 不能为负: {self.value!r}")

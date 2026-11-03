@@ -1,8 +1,8 @@
 """LLM 域组件的自有参数。
 
-与顶层 `biopilot/config/` 分工：那里是「与 config.yaml 同构、可经 env 派生」的
+与顶层 `biopilot/config/` 分工：那里是「与全局配置树同构、可经设置页或 env 调整」的
 全局可调参数（如 `LLMConfig`）；这里是**组件自己的行为参数**，由各消费方在调用点
-各给一套，不进 config.yaml。
+各给一套，不进全局配置。
 """
 from biopilot.core.llm.config.structured_output_config import StructuredOutputConfig
 

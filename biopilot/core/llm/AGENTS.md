@@ -16,7 +16,7 @@
 llm/
 ├─ domain/dto/   # messages/（wire 消息家族：基类 + system/user/assistant/tool 四子类）
 │                #   + 响应信封与 token 用量（层间载体，不是消息类型）
-├─ config/       # StructuredOutputConfig（组件自有参数，不进 config.yaml）
+├─ config/       # StructuredOutputConfig（组件自有参数，不进全局配置）
 └─ services/     # client.py（异步客户端，非流式与流式两个模式）
                  #   + structured.py（结构化输出 / JSON 抽取）
 ```

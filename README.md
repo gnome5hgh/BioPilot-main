@@ -37,8 +37,9 @@
 # 1. 安装（建议在虚拟环境 / conda env 中）
 pip install -e ".[dev]"
 
-# 2. 配置：复制模板并填入 LLM 与嵌入/精排的 api_key
-cp config.example.yaml config.yaml
+# 2. 部署引导：复制模板并填入 LLM 与嵌入/精排的 api_key
+cp .env.example .env
+# 运行时配置（模型参数/检索/安全档位等）在网页「设置」里维护，落 MySQL
 
 # 3. 启动依赖服务（Milvus + etcd + MinIO）并等健康
 docker compose up -d
@@ -86,14 +87,14 @@ cd web && npm install && npm run dev
 步骤：
 1. 先读仓库根的 AGENTS.md，按其中的 Commands 与环境要求执行。
 2. 创建并激活一个 Python ≥ 3.11 的虚拟环境，然后安装：pip install -e ".[dev]"
-3. 复制配置模板：cp config.example.yaml config.yaml
-4. 向我要下面两个 API key 并写进 config.yaml，拿到之前不要填假值、不要跳过：
-   - llm.api_key：OpenAI 兼容的对话端点 key（默认端点 https://api.deepseek.com/v1）
-   - rag.embedding.api_key：OpenAI 兼容的嵌入/精排端点 key（默认 https://api.siliconflow.cn/v1）
+3. 复制部署引导模板：cp .env.example .env
+4. 向我要下面两个 API key 并写进 .env，拿到之前不要填假值、不要跳过：
+   - BIOPILOT_LLM_API_KEY：OpenAI 兼容的对话端点 key（默认端点 https://api.deepseek.com/v1）
+   - BIOPILOT_RAG_EMBEDDING_API_KEY：OpenAI 兼容的嵌入/精排端点 key（默认 https://api.siliconflow.cn/v1）
 5. 启动依赖服务栈并等它真的健康：
    docker compose up -d
    然后轮询 curl http://localhost:9091/healthz 直到返回 OK（首次会拉镜像，可能几分钟）。
-6. 问我的论文 PDF 目录与笔记目录，填进 config.yaml 的 corpus.pdf_dir 与 corpus.note_dir。
+6. 问我的论文 PDF 目录与笔记目录，填进 .env 的 BIOPILOT_CORPUS_PDF_DIR 与 BIOPILOT_CORPUS_NOTE_DIR。
    这两个是必填项；我若给不出，就把情况告诉我，不要随便填。
 7. 验证：
    - python -m pytest tests/ -q（单测用 Milvus Lite 内嵌，不依赖服务栈）
@@ -103,7 +104,9 @@ cd web && npm install && npm run dev
 
 ## 配置说明
 
-所有可调参数的默认值唯一声明在 `biopilot/config/schemas/sections.py`（dataclass 字段默认值），`config.yaml` 是纯覆盖文件——只写要改的值，未列出的字段回落代码默认值。主要配置段：
+所有可调参数的默认值唯一声明在 `biopilot/config/schemas/sections.py`（dataclass 字段默认值）。**运行时配置的真相源是 MySQL 的 `bio_config`**，管理员在网页「设置」里修改；`.env` / 环境变量只承载进程启动前必须知道的引导项（MySQL/Milvus/MinIO 地址、内部 token、本机目录、配置加密密钥），且优先级最高。本地首次启动会把旧的 `config.yaml` 自动导入数据库，之后只剩引导层（可迁移到 `.env` 后删除）；容器部署没有旧文件可导入，直接用 compose 的环境变量。
+
+新增配置项不需要改前端：设置页按 `biopilot/config/services/schema.py` 的字段描述自动渲染。主要配置段：
 
 | 配置段 | 用途 |
 |---|---|

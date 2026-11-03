@@ -13,7 +13,7 @@
 
 ## 可跳过路径
 
-`.biopilot/` 运行期产物、`.venv/`、`__pycache__/`、`config.yaml`（个人配置，gitignored；`config.example.yaml` 变更仍审）。
+`.biopilot/` 运行期产物、`.venv/`、`__pycache__/`、`config.yaml` 与 `.env`（个人部署引导，gitignored；`.env.example` 变更仍审）。
 
 ## spec 源
 

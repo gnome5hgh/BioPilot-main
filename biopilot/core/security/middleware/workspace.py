@@ -76,7 +76,7 @@ def is_denied_path(resolved: Path, workspace: str) -> bool:
        运行数据根重定向到仓库外后，compose 数据卷仍在仓库里。
     ② 仓库内部段（任何位置）：.git / .claude / .zcode（settings 可能含
        API key）。
-    ③ 密钥文件名（任何位置）：config.yaml / .env / .env.local。
+    ③ 密钥文件名（任何位置）：config.yaml（含迁移备份 config.yaml.bak）/ .env / .env.local。
     ④ 凭证与秘密：home 目录下的 .ssh/.aws/.gnupg/.kube，以及任何位置的
        id_rsa/id_ed25519/id_ecdsa/.netrc 文件名与 .pem/.key 后缀。
     ⑤ shell 配置（任何位置）：.zshrc/.zprofile/.zshenv/.bashrc/
@@ -122,7 +122,8 @@ def is_denied_path(resolved: Path, workspace: str) -> bool:
     # ----- 第三段：密钥文件（任何位置） -----
     # 检查文件名（不含路径）是否属于敏感配置文件。
     # 同样使用 lower() 做大小写不敏感匹配。
-    if resolved.name.lower() in {"config.yaml", ".env", ".env.local"}:
+    if resolved.name.lower() in {"config.yaml", "config.yaml.bak",
+                                 ".env", ".env.local"}:
         return True
 
     # ----- 第四段：凭证与秘密（home 目录前缀 + 任何位置文件名/后缀） -----

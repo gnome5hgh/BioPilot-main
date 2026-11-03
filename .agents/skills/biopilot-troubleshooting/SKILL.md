@@ -26,7 +26,7 @@ description: 排查 BioPilot 项目问题：启动失败/报错、Milvus 服务�
 2. 交互式 REPL 例外：`conda run` 不转发 stdin，REPL 启动即 EOF。先 `conda activate biopilot`，再直接 `biopilot`。
 3. 单测走 Milvus Lite（内嵌本地文件，`tests/conftest.py` 把 uri 指到临时 `.db`），不需要服务栈。**评测相反**：`scripts/rag/rag_eval/` 连 Standalone、媒体块原图还要 MinIO，跑之前先 `docker compose up -d`（Lite 没有对象存储，起不来）。
 4. 全量套件当前全绿，整跑即可。历史上曾有「tests/rag 与其他套件合跑原生 Abort、须分套件跑」的环境问题，2026-10-14 实测已不复现（`1612 passed`，约 95s）；看到红先按真实失败查，别假定它是已知噪音。
-5. `config.yaml` 被 gitignore。缺失或字段异常时先对照仓库根 `config.example.yaml`，别假设代码坏了。
+5. 运行时配置在 MySQL 的 `bio_config`（设置页读写），`config.yaml` 只剩部署引导层（gitignored），引导模板是 `.env.example`。配置不生效先看设置页的 `source`（`env` 会压过数据库）与字段是否标「需重启」。
 
 ## 条目格式（回写时遵守）
 

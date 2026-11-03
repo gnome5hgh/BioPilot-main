@@ -98,9 +98,9 @@ class SemanticClassifier:
             ClassifierUnavailable: 不可用，`reason` 指出原因。
         """
         if not self._api_key:
-            raise ClassifierUnavailable("未配置网关 api_key（config.yaml 的 security.classifier.api_key）")
+            raise ClassifierUnavailable("未配置网关 api_key（设置页 → 安全 → 语义判定）")
         if not self._base_url:
-            raise ClassifierUnavailable("未配置网关地址（config.yaml 的 security.classifier.base_url）")
+            raise ClassifierUnavailable("未配置网关地址（设置页 → 安全 → 语义判定）")
         await self._evaluate("探测：这是一次连通性检查。")
 
     async def classify(self, content: str) -> ClassifierVerdict | None:

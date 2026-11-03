@@ -57,8 +57,14 @@ fi
 if alive "$RUN_DIR/server.pid"; then
   log "服务端已在跑（pid $(cat "$RUN_DIR/server.pid")）"
 else
-  (cd "$ROOT/server/bio-admin" && nohup mvn -q spring-boot:run >"$RUN_DIR/server.log" 2>&1 & echo $! >"$RUN_DIR/server.pid")
-  log "服务端启动中（日志 $RUN_DIR/server.log；库模块缺失时先 cd server && mvn install -DskipTests）"
+  # bio-admin 从本地 Maven 仓库取 bio-gateway 等模块；改了后端不 install 就会
+  # spring-boot:run 到旧 jar（新端点表现为 404）。启动前先安装一次。
+  log "安装服务端模块（保证 bio-gateway 等为最新）..."
+  if ! (cd "$ROOT/server" && mvn -q install -DskipTests >>"$RUN_DIR/server.log" 2>&1); then
+    log "服务端模块安装失败，继续用本地仓库已有版本（看 $RUN_DIR/server.log）"
+  fi
+  (cd "$ROOT/server/bio-admin" && nohup mvn -q spring-boot:run >>"$RUN_DIR/server.log" 2>&1 & echo $! >"$RUN_DIR/server.pid")
+  log "服务端启动中（日志 $RUN_DIR/server.log）"
 fi
 
 # ---- 4. 前端 dev server（5173）----

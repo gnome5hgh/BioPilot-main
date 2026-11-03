@@ -34,8 +34,8 @@
 - **验证**：单个子 agent 的 `read_pdf` 不连续跑多个不同 path；单篇精读子任务不撞超时帽。
 
 ### 启动报「LLM API key 未配置」
-- **根因**：`config.yaml` 的 `llm.api_key` 未配且无环境变量 `BIOPILOT_LLM_API_KEY`；`config.yaml` gitignored，新环境常缺。
-- **修法**：`cp config.example.yaml config.yaml` 后填 key；RAG 的 key 独立配 `rag.embedding.api_key` 或 `BIOPILOT_RAG_EMBEDDING_API_KEY`。
+- **根因**：设置页「对话模型」未填密钥，且无环境变量 `BIOPILOT_LLM_API_KEY`；新环境常缺。
+- **修法**：在设置页填 `llm.api_key`（加密存 `bio_config_secret`），或写 `.env` 的 `BIOPILOT_LLM_API_KEY`；RAG 的 key 独立配 `rag.embedding.api_key` 或 `BIOPILOT_RAG_EMBEDDING_API_KEY`。
 - **验证**：启动不再报 key 错误，进入正常对话。
 
 ### 检索只有 BM25 结果 / 稠密路静默消失
@@ -53,10 +53,10 @@
 - **修法**：`BIOPILOT_SKIP_BOOTSTRAP=1` 跳过预检；服务失败本就只警告不阻塞（软依赖降级）。
 - **验证**：设变量后启动秒进 REPL，无服务探测输出。
 
-### 改了 `config.yaml` 里的一个字段，程序行为完全没变（无报错、静默不生效）
-- **根因**：2026-10-05 配置模块化（spec 2026-10-05-constants-and-config-reorg）后 `config.yaml` 是纯覆盖文件，加载器 `_merge`（`biopilot/config/services/loader.py`）对 dataclass 树里不存在的键**静默忽略、不报错**；键名一次性迁移且无兼容层——按旧平铺键名（如 `milvus_uri`，`docs/SERVER.md` 仍这么写）或拼错、放错层级的字段改动等于没改。另注意：优先级 `BIOPILOT_*` 环境变量 > YAML，且 config 仅启动时 `from_env()` 加载一次，改完必须重启进程。
-- **修法**：键名/层级对照 `config.example.yaml` 与 `biopilot/config/schemas/sections.py` 的 dataclass 字段路径改写（旧→新键映射见 spec §4）；重启进程；确认 shell/`.env` 无同名 `BIOPILOT_*` 变量顶掉 YAML 值。
-- **验证**：`conda run -n biopilot python -c "from biopilot.config import BioPilotConfig; print(BioPilotConfig.from_env().<改动字段的路径，如 rag.storage.uri>)"` 输出与 config.yaml 改后的值一致；不一致时按 `tests/core/test_config.py` 的 `_leaf_unknowns` 口径扫 config.yaml 未生效键（未知键列表应只为命中的旧键）。
+### 改了设置页/配置文件里的一个字段，程序行为完全没变（无报错、静默不生效）
+- **根因**：①优先级固定为「默认值 < `bio_config` < `config.yaml` 引导层 < 环境变量」，设置页对 `source=env` 的字段只读，env 会压过数据库；②数据库覆盖有 5 秒进程内缓存，另一个进程的修改不是瞬间可见；③`rag.*` 与 `platform.search_timeout/transfer_timeout` 被进程级单例捕获，页面标「需重启」；④迁移后 `config.yaml` 里的运行时字段不再参与加载，只认引导层。
+- **修法**：在设置页确认该字段的 `source` 徽标与「需重启」标记；env 字段改 `.env`/compose 后重启；数据库字段保存后丢弃 Agent 缓存，下一轮生效；RAG 配置改完重启 webapi。
+- **验证**：`biopilot config export` 看有效配置；`conda run -n biopilot python -c "from biopilot.config import BioPilotConfig; print(BioPilotConfig.from_env().<改动字段路径>)"` 与页面一致。
 
 ### 重负载任务跑到一半 Milvus 崩溃循环（`streaming node is not alive` / `Slow etcd operation` / `session is expired`）
 - **根因**：与上一条同源但触发条件不同——不是 VM 一开始就太小，而是**任务把 VM 内存吃穿**。Docker VM 约 3.9GB，其中 Milvus 栈（etcd + minio + standalone）并发检索/写入时能占 1GB+。实测一次「读一下某目录下所有论文」：Milvus 在 13 分钟内重启 9 次（此前累计 RestartCount 25），随后整个 OrbStack VM 也重启一次（表现为**所有**容器同时变成 `Up N seconds`，RestartCount 清零）。VM 内内存耗尽后 Milvus 的 datanode/mixcoord/streamingnode 拿不到 etcd 租约（日志依次出现 `etcdserver: request timed out, waiting for the applied index took too long`、`Slow etcd operation`、`streaming node is not alive`、`confirm the lease is expired`）→ standalone 进程退出，`restart: unless-stopped` 反复拉起。宿主同为内存紧张时（`sysctl vm.swapusage` 显示 swap 用量高、宿主 load average 远超核数）会加剧。
@@ -77,7 +77,7 @@
 - **验证**：`conda run -n biopilot python -c "from biopilot.webapi import <缺失符号>"`。
 
 ### 适配层起不来：`memory_dsn 必须是 mysql://... 形式` / 启动即 fail-fast（`BIOPILOT_MEMORY_MYSQL_DSN`）
-- **根因**：`biopilot --web` 不读 `config.yaml` 的 DSN 段，DSN 只来自环境变量；标题更新、论文/文档端点的共享 `MemoryDB()` 无参构造时没有回退默认值。REPL 模式才有 config 默认值兜底。
+- **根因**：`runtime.memory_dsn` 的规范来源是 `BIOPILOT_MEMORY_MYSQL_DSN`（`BIOPILOT_RUNTIME_MEMORY_DSN` 优先）；两者都没有时回落代码默认值 `mysql://root@127.0.0.1:3307/biopilot`。配置库、标题更新、论文/文档端点的共享 `MemoryDB()` 都依赖它。
 - **修法**：启动命令带上 `BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3307/biopilot"`；库不存在时先 `docker compose up -d`（MySQL 容器首启由 `docker/mysql-init/` 建库建表；数据卷已存在的旧容器**不会**重跑 init，表缺失要手动执行 `server/script/sql/` 与建表脚本）。
 - **验证**：`docker exec biopilot-mysql mysql -uroot biopilot -e "SHOW TABLES;"` 列出 bio_memory_block/bio_message/sys_user 等表；适配层 `/health` 返回 ok。旧数据卷升级时先执行 `server/script/sql/migrations/2026-11-02-rename-tables.sql`。
 

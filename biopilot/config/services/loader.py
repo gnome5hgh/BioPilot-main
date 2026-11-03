@@ -1,9 +1,15 @@
-"""配置加载与派生：三级优先级 + 递归合并 + env 按路径派生。
+"""配置加载与派生：默认值 → 数据库 → 配置引导文件 → 环境变量。
 
-优先级从低到高：dataclass 默认值（``sections.py``）→ ``config.yaml``（可选、纯覆盖）
-→ 环境变量（``BIOPILOT_`` + 配置路径大写，``_`` 连接）。嵌套 dataclass 逐层递归；
-dict/list 自由字段仅 YAML 可配；标量字段两者都可覆写。
+优先级从低到高：dataclass 默认值（``sections.py``）→ MySQL 的
+``bio_config``（设置页写入的稀疏覆盖）→ ``config.yaml`` 里仅剩的引导层
+→ 环境变量（``BIOPILOT_`` + 配置路径大写，``_`` 连接）。
+
+运行时配置的真相源是数据库；``config.yaml`` 只保留「进程启动前必须知道、
+且跟部署环境绑定」的引导项（连接串、外部服务地址、本机路径），且可以被环境
+变量完全取代。测试与离线脚本通过 ``BIOPILOT_CONFIG_SOURCE=file`` 关闭数据库
+读取，回到「默认值 → YAML → env」的旧链路。
 """
+import logging
 import os
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
@@ -11,9 +17,67 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from biopilot.config.services.schema import BOOTSTRAP_PATHS, env_name, nest_patches
+
+logger = logging.getLogger(__name__)
+
 #: 仓库安装根（本文件位于 biopilot/config/services/，向上三级即仓库根）。
 #: 相对路径的缓存目录按它解析，避免随启动 cwd 漂移。
 _INSTALL_ROOT = Path(__file__).resolve().parents[3]
+
+#: 进程级开关：只有真正的引擎入口（``--web`` 与 REPL）打开数据库配置源。
+#: 测试、评测脚本、一次性运维脚本默认仍走文件链路，不给它们加 MySQL 依赖。
+_DB_SOURCE_ENABLED = False
+
+
+def enable_db_source() -> None:
+    """打开数据库配置源（由引擎入口调用；``BIOPILOT_CONFIG_SOURCE=file`` 仍可关闭）。"""
+    global _DB_SOURCE_ENABLED
+    _DB_SOURCE_ENABLED = True
+
+
+def db_source_enabled() -> bool:
+    """判断当前进程是否应从数据库读取运行时配置。
+
+    ``BIOPILOT_CONFIG_SOURCE`` 显式取值优先：``file`` 恒关闭、``db`` 恒开启；
+    未设置时由入口是否调用过 :func:`enable_db_source` 决定。
+
+    Returns:
+        bool: 应当读取数据库时返回 True。
+    """
+    source = os.environ.get("BIOPILOT_CONFIG_SOURCE", "").strip().lower()
+    if source == "file":
+        return False
+    if source == "db":
+        return True
+    return _DB_SOURCE_ENABLED
+
+
+def ensure_legacy_import(legacy_path: str | Path | None = None) -> int | None:
+    """引擎入口调用：数据库里还没有配置时，把旧 ``config.yaml`` 一次性导入。
+
+    导入后旧文件会被改写成「只含引导层」并留一份 ``.bak``。只由 ``--web`` 与
+    REPL 入口调用——普通脚本/测试读配置时**不**触发文件改写。
+
+    Args:
+        legacy_path: 旧配置路径；None 时取当前目录的 ``config.yaml``。
+
+    Returns:
+        导入后的版本号；没有导入（已有配置 / 文件不存在 / 未启用数据库）时 None。
+    """
+    if not db_source_enabled():
+        return None
+    from biopilot.config.services import store as config_store
+
+    config = BioPilotConfig.from_env()
+    path = Path(legacy_path) if legacy_path else Path.cwd() / "config.yaml"
+    try:
+        return config_store.get_store(
+            config.runtime.memory_dsn, config.runtime.workspace
+        ).ensure_seeded(path)
+    except Exception as exc:  # 数据库不可用不应阻塞启动；错误留给真正需要的链路
+        logger.warning("旧配置导入失败，继续使用当前配置：%s", exc)
+        return None
 
 from biopilot.config.schemas.sections import (
     AgentsConfig,
@@ -162,29 +226,69 @@ class BioPilotConfig:
 
     @classmethod
     def from_env(cls, config_path: str | None = None) -> "BioPilotConfig":
-        """工厂方法：依次加载 .env 兜底、可选 YAML、环境变量覆盖。
+        """工厂方法：按「默认值 → 数据库 → 引导文件 → 环境变量」加载配置。
 
-        返回值保证所有字段有值（至少为 dataclass 默认值）。
+        显式传入 ``config_path`` 时视为文件模式（测试/离线脚本的旧行为），
+        不读取数据库；不传时由进程开关与 ``BIOPILOT_CONFIG_SOURCE`` 决定。
 
         Args:
-            config_path: str | None，config.yaml 路径；None 用默认 "config.yaml"（不存在则跳过）
+            config_path: str | None，YAML 路径；None 时按入口设置选择配置源。
 
         Returns:
-            加载完成的配置（.env → YAML → env 覆盖，并解析留空继承与绝对化 workspace）。
+            加载完成的配置（含留空继承与 workspace 绝对化）。
         """
         # 加载 .env 文件（不覆盖已有环境变量，即 OS 环境优先于 .env）
         load_dotenv()
 
-        config = cls()
-        config._load_yaml(config_path)  # 第一步：YAML 文件（优先级最低）
-        config._load_env()               # 第二步：环境变量（覆盖 YAML 值）
+        use_db = config_path is None and db_source_enabled()
+        base = cls()
+        # 数据库模式下，配置文件只剩引导层；文件模式下仍可整份覆写（兼容测试）。
+        base._load_yaml(config_path, allowed_paths=BOOTSTRAP_PATHS if use_db else None)
+        base._load_env()   # 先解析出 DSN / workspace，才能去读数据库
+
+        config = cls._load_from_db(base) if use_db else base
+        cls._finalize(config)
+        return config
+
+    @classmethod
+    def _load_from_db(cls, base: "BioPilotConfig") -> "BioPilotConfig":
+        """在引导配置之上叠加数据库覆盖；失败时退回引导配置并告警。
+
+        Args:
+            base: 已读取引导文件与 env 的配置（提供 DSN 与 workspace）。
+
+        Returns:
+            叠加了数据库覆盖的配置；数据库不可用时返回 ``base``。
+        """
+        from biopilot.config.services import store as config_store
+
+        dsn = base.runtime.memory_dsn
+        workspace = base.runtime.workspace
+        try:
+            content, secrets, version = config_store.load_cached(dsn, workspace)
+            config = cls()
+            config._load_yaml(None, allowed_paths=BOOTSTRAP_PATHS)
+            if content:
+                # 引导层只认 env / 文件，防止历史导入把部署拓扑带进数据库。
+                _merge(config, _filter_tree(content, denied=BOOTSTRAP_PATHS))
+            if secrets:
+                _merge(config, nest_patches(secrets))
+            config._load_env()
+            return config
+        except Exception as exc:  # 数据库不可用不应让配置加载直接炸掉
+            logger.warning(
+                "数据库配置读取失败，回退到默认值/引导文件/环境变量：%s", exc)
+            return base
+
+    @staticmethod
+    def _finalize(config: "BioPilotConfig") -> None:
+        """归一化派生字段并绝对化路径（所有配置源合并完成后执行一次）。"""
         # trigger/keep 在 YAML 里是裸 dict，_merge 只做整体赋值、不实例化列表元素；
         # 加载完成后归一化成 ContextSize，后续判定才能直接读 .type/.value。
         config.compaction.normalize()
         # 留空继承：rag.query_rewrite ← llm、rag.rerank ← rag.embedding。
-        # 必须在 YAML/env 全部加载后做——否则 env 覆盖会被继承值抢先顶掉。
+        # 必须在全部配置源加载后做——否则 env 覆盖会被继承值抢先顶掉。
         emb = config.rag.embedding
-        # rag.rerank 留空逐项继承 rag.embedding（端点/key），与上面同一阶段。
         rr = config.rag.rerank
         rr.base_url = rr.base_url or emb.base_url
         rr.api_key = rr.api_key or emb.api_key
@@ -201,9 +305,9 @@ class BioPilotConfig:
         config.platform.internal_token = (
             config.platform.internal_token
             or os.environ.get("BIOPILOT_INTERNAL_TOKEN", ""))
-        return config
 
-    def _load_yaml(self, config_path: str | None) -> None:
+    def _load_yaml(self, config_path: str | None,
+                   allowed_paths: frozenset[str] | None = None) -> None:
         """从可选的 config.yaml 读取配置并覆盖默认值。
 
         顶层键与 dataclass 字段同名（``llm`` / ``runtime`` / ``rag`` …），
@@ -211,7 +315,9 @@ class BioPilotConfig:
         未知键忽略。
 
         Args:
-            config_path: str | None，config.yaml 路径；文件不存在时静默跳过
+            config_path: str | None，config.yaml 路径；文件不存在时静默跳过。
+            allowed_paths: 只允许合并这些叶子路径（数据库模式下用于只取引导层）；
+                None 表示整份合并。
         """
         path = Path(config_path or "config.yaml")
         if not path.exists():
@@ -221,7 +327,8 @@ class BioPilotConfig:
             data = yaml.safe_load(f) or {}
         if not isinstance(data, dict):
             return
-
+        if allowed_paths is not None:
+            data = _filter_tree(data, allowed=allowed_paths)
         _merge(self, data)
 
     def _load_env(self) -> None:
@@ -231,9 +338,50 @@ class BioPilotConfig:
         env 名 = ``BIOPILOT_`` + 配置路径（``.`` 换 ``_``）大写，如
         ``BIOPILOT_LLM_API_KEY`` / ``BIOPILOT_RAG_STORAGE_URI`` /
         ``BIOPILOT_RAG_QUERY_REWRITE_MODEL``。自由 dict/list 字段
-        （如 ``agents.timeouts``）不派生 env。
+        自由 dict/list 字段（如 ``agents.timeouts``）不派生 env。
+
+        另外兼容部署约定的 ``BIOPILOT_MEMORY_MYSQL_DSN``：它同时被 MemoryDB 与
+        start.sh/compose 使用，因此视作 ``runtime.memory_dsn`` 的规范来源；
+        显式的 ``BIOPILOT_RUNTIME_MEMORY_DSN`` 优先级更高。
         """
         _apply_env(self, ())
+        if (not os.environ.get("BIOPILOT_RUNTIME_MEMORY_DSN")
+                and os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")):
+            self.runtime.memory_dsn = os.environ["BIOPILOT_MEMORY_MYSQL_DSN"]
+
+
+def _filter_tree(data: dict, allowed: frozenset[str] | None = None,
+                 denied: frozenset[str] | None = None,
+                 prefix: tuple[str, ...] = ()) -> dict:
+    """按叶子路径白名单/黑名单裁剪嵌套配置树。
+
+    ``allowed`` 与 ``denied`` 二选一：前者只保留命中的叶子，后者剔除命中的叶子；
+    未命中的中间对象继续递归，子节点被裁空的整段丢弃。
+
+    Args:
+        data: 嵌套配置字典。
+        allowed: 允许保留的叶子路径集合；None 表示不按白名单过滤。
+        denied: 需要剔除的叶子路径集合；None 表示不按黑名单过滤。
+        prefix: 当前路径前缀。
+
+    Returns:
+        dict: 裁剪后的新字典（不修改入参）。
+    """
+    result: dict = {}
+    for key, value in data.items():
+        path = ".".join(prefix + (str(key),))
+        if allowed is not None and path in allowed:
+            result[key] = value
+            continue
+        if denied is not None and path in denied:
+            continue
+        if isinstance(value, dict):
+            child = _filter_tree(value, allowed, denied, prefix + (str(key),))
+            if child:
+                result[key] = child
+        elif allowed is None:
+            result[key] = value
+    return result
 
 
 def _apply_env(node, prefix: tuple[str, ...]) -> None:
@@ -253,8 +401,8 @@ def _apply_env(node, prefix: tuple[str, ...]) -> None:
             continue  # YAML-only 自由集合
         if not _is_scalar(cur):
             continue  # 非标量自定义对象不派生 env、不覆写
-        env_name = "BIOPILOT_" + "_".join(p.upper() for p in path)
-        val = os.getenv(env_name)
+        env_name_full = env_name(".".join(path))
+        val = os.getenv(env_name_full)
         if val:
             setattr(node, f.name, _coerce(cur, val))
 

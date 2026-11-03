@@ -134,6 +134,45 @@ CREATE TABLE IF NOT EXISTS bio_message (
     KEY idx_messages_agent (agent_id, created_at),
     KEY idx_messages_session (session_id, created_at)
 );
+
+-- bio_config 表：全局运行时配置（稀疏覆盖；未出现的键回落代码默认值）
+-- content 只存被改过的路径，密钥不在这一列（见 bio_config_secret）。
+CREATE TABLE IF NOT EXISTS bio_config (
+    scope VARCHAR(32) NOT NULL,          -- 作用域：global；为将来的用户级配置留位
+    content JSON NOT NULL,               -- 配置树（与 sections.py 同构的稀疏覆盖）
+    version BIGINT NOT NULL DEFAULT 1,   -- 乐观锁 / 进程缓存失效版本
+    updated_by VARCHAR(64) NULL,         -- 最后修改人
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+        ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (scope)
+);
+
+-- bio_config_secret 表：密钥字段按路径加密存放（AES-GCM）
+CREATE TABLE IF NOT EXISTS bio_config_secret (
+    scope VARCHAR(32) NOT NULL,
+    path VARCHAR(191) NOT NULL,          -- 配置路径，如 llm.api_key
+    ciphertext BLOB NOT NULL,            -- v1 + nonce + 密文
+    key_version INT NOT NULL DEFAULT 1,  -- 主密钥轮换版本
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+        ON UPDATE CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (scope, path)
+);
+
+-- bio_config_history 表：每次保存的整份快照与改动路径（审计 / 回滚）
+CREATE TABLE IF NOT EXISTS bio_config_history (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    scope VARCHAR(32) NOT NULL,
+    version BIGINT NOT NULL,
+    content JSON NOT NULL,               -- 保存后的非密钥覆盖
+    secrets_ciphertext BLOB NULL,        -- 保存后密钥覆盖的加密快照
+    changed_paths JSON NOT NULL,         -- 本次改动的字段路径
+    updated_by VARCHAR(64) NULL,
+    reason VARCHAR(255) NULL,            -- 变更说明
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    KEY idx_config_history_scope_version (scope, version)
+);
 """
 
 # 增量列迁移清单：(表, 列名, 列定义)。建表脚本只能建出新库——已有库不会因为

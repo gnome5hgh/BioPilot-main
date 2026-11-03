@@ -13,7 +13,7 @@
     </div>
     <div v-if="!store.enabled" class="disabled">
       当前部署未启用宿主终端。<br />
-      管理员可在 config.yaml 的 <code>runtime.allow_host_shell</code> 开启。
+      管理员可在「设置 → 运行时」打开「允许网页终端」。
     </div>
     <div v-else ref="termBox" class="term-box"></div>
     <div v-if="disconnected && store.enabled" class="disconnect-bar">

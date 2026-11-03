@@ -27,7 +27,7 @@ from biopilot.core.llm.domain.dto.messages import (
     SystemMessage,
     UserMessage,
 )
-# 行为参数住在 core/llm/config（组件自己的参数，不随 config.yaml 走）；这里再导出，
+# 行为参数住在 core/llm/config（组件自己的参数，不随 全局配置走）；这里再导出，
 # 让既有的 `from ...services.structured import StructuredOutputConfig` 继续可用。
 from biopilot.core.llm.config import StructuredOutputConfig
 

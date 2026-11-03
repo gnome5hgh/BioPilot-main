@@ -61,6 +61,8 @@ docs/
 .env
 .env.local
 config.yaml
+# 迁移旧配置时生成的备份（含密钥），确认迁移无误后删除
+config.yaml.bak
 
 # 仓库级配置文件本地化（含本文件自身），不入库
 # AGENTS.md 已转入 git 管理（根 manifest + 子目录逐级 manifest）；CLAUDE.md 为本地薄指针

@@ -163,9 +163,9 @@ class JevClient:
                 账户未验证 / 网络不可达 …）。
         """
         if not self._api_key:
-            raise JevUnavailable("未配置网关 api_key（config.yaml 的 intent.jev.api_key）")
+            raise JevUnavailable("未配置网关 api_key（设置页 → 意图识别 → 判定服务）")
         if not self._base_url:
-            raise JevUnavailable("未配置网关地址（config.yaml 的 intent.jev.base_url）")
+            raise JevUnavailable("未配置网关地址（设置页 → 意图识别 → 判定服务）")
         await self._evaluate("探测：这是一次连通性检查。", _PROBE_CRITERIA,
                              "这是一次连通性探测，请任选一项。")
 

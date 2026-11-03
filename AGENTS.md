@@ -35,7 +35,8 @@ BioPilot-main/
 ├─ .scratch/           # 开发过程文档：spec/ticket（matt-pocock 本地约定，gitignored；历史 spec/plan 归档在 .scratch/archive/）
 ├─ tests/              # 测试套件
 ├─ scripts/            # 实验与标定脚本
-├─ config.yaml         # 本地配置（gitignored），模板见 config.example.yaml
+├─ .env.example        # 部署引导模板（连接串/外部地址/本机路径）；运行时配置在数据库
+├─ config.yaml         # 可选、gitignored：只剩部署引导；首次启动会把旧的运行时配置导入数据库
 ├─ docker-compose.yml  # 依赖服务栈（Milvus Standalone + MinIO + MySQL）
 ├─ docker/mysql-init/  # MySQL 容器首启建库脚本（biopilot/biopilot_test + sys_* 表）
 └─ AGENTS.md
@@ -57,11 +58,11 @@ BioPilot-main/
 - 语言与运行时：Python ≥ 3.11（引擎与适配层，依赖在 `pyproject.toml`）；Java 21 + SpringBoot 3.5（`server/`，MyBatis-Plus + Sa-Token）；Vue3 + Vite（`web/`）。
 - 依赖服务栈：Milvus Standalone（向量库，gRPC 19530 / 健康检查 9091）+ MinIO（图表原图与论文原文的对象存储，回环 9000）+ MySQL 8.4（记忆/会话/业务真相源，回环 3307），由仓库根 `docker-compose.yml` 一次拉起，数据落 `.biopilot/infra/`。
 - 外部模型端点：对话 LLM、视觉模型、RAG 嵌入与精排都是 OpenAI 兼容的 HTTP 接口，端点、模型名与 key 经配置提供，不硬编码。
-- 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；`config.yaml` 是纯覆盖文件，只写要改的值。SpringBoot 侧配置在 `server/bio-admin/src/main/resources/application.yaml`。
+- 可调参数与默认值的唯一声明点是 `biopilot/config/schemas/sections.py`；运行时配置的真相源是 MySQL 的 `bio_config`（设置页写稀疏覆盖），`config.yaml` 只保留启动引导项，环境变量优先级最高。SpringBoot 侧配置在 `server/bio-admin/src/main/resources/application.yaml`。
 
 ## 环境与依赖
 
-- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
+- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。可在设置页填写（加密存 `bio_config_secret`），也可走环境变量。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
 - `corpus.pdf_dir` / `corpus.note_dir` 这类**个人路径没有默认值、必须显式配**。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。
 - 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 与 LLM key 是**硬依赖**：不可达/未配置即启动 fail-fast（真相源不能静默降级）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
 
@@ -85,11 +86,12 @@ BioPilot-main/
 三层平台的分工不是「按语言分」，而是「按职责分」。新增代码前先回答：它属于平台业务，还是 agent 运行时？
 
 - **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_paper` 统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）、用户技能管理（`bio-skill`：标准包准入、OSS 包、启停/更新/卸载）。
-- **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、引擎配置（`config.yaml`）、用户技能运行时消费（按用户物化技能缓存）。
+- **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、引擎配置（`bio_config` + 引导 env）、用户技能运行时消费（按用户物化技能缓存）。
 - **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_paper` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
 - **单写者规则（按表/列）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
   - `bio_rag_index_state`：Python 独占（RAG 增量索引状态）。隔离键是 `user_domain`（`local` 或登录用户 id），不是 `user_id`——本地语料域没有用户归属，这是该表不带 `user_id` 列的唯一理由。
+  - `bio_config`、`bio_config_secret`、`bio_config_history`：Python 独占（运行时配置、加密密钥、保存历史）；Java 只经 `/admin/settings` 代理，不直连这三张表。
   - `bio_paper`：Java 独占（身份/文件列、`kb_enabled`、书目字段、`citation_id`，以及 `indexed/index_status/index_error/indexed_at/chunk_count` 索引状态列）；Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位，状态落盘一律由 Java 完成。
   - `bio_citation`：Java 独占（引用库行）；Python 不读写。
   - `bio_file_upload`：Java 写（用户上传与 agent 分析产物都经 Java 登记）。
@@ -121,10 +123,10 @@ BioPilot-main/
 - **`allowed_spawns` 与风险档位由框架强制**，不靠提示词自律；批量同类对象**一个对象一路**派发。
 - **技能的读写各自归口**：管理面（`bio_skill` 表、OSS `users/<uid>/skills/`、安装准入）归 Java `bio-skill`；引擎只做只读消费（按 `content_sha` 物化的用户缓存），不写管理状态，也不接受 `tools.py` 这类「加载即执行」的非标准扩展。**内置流程（笔记/选题/审查）不是 skill**，写在对应 agent 的 `AGENT.md` 里，模板在该角色 `references/` 下。
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
-- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_paper`/`bio_document`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；唯一例外是 `bio_rag_index_state`，它的隔离键叫 `user_domain`（`local` 或用户 id），因为本地语料域不属于任何用户。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
+- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_paper`/`bio_document`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；例外有三类：`bio_rag_index_state` 的隔离键叫 `user_domain`（`local` 或用户 id），因为本地语料域不属于任何用户；`bio_config`/`bio_config_secret`/`bio_config_history` 是部署级全局配置，没有用户维度。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
 - **跨进程互斥只认 MySQL 锁**：per-conversation run 互斥与整合消费权认领都走 DB 锁（`GET_LOCK`/行级 `FOR UPDATE`），进程内锁只作单进程快路径；拿不到锁降级为文本提示，绝不排队阻塞。
 - **OSS 一致性方向固定**：对象先落、元数据行后写（失败留孤儿对象、不留死行）；删除反向（先删行、再删对象，孤儿可后台对账清扫）。论文标题恒来自解析器出口，上传登记也不回退文件名。
-- **config 快照语义**：run 启动时对配置做一次快照、全程读快照；设置页与模型切换都是**下一个 run 生效**，绝不热改在途 run。
+- **config 快照语义**：run 启动时对配置做一次快照、全程读快照；设置页与模型切换都是**下一个 run 生效**，绝不热改在途 run。保存设置会丢弃 Agent 缓存；`rag.*` 与平台客户端是进程级单例，标「需重启」。
 - **SSE 契约**：`done` 帧恒发（含异常路径），客户端断开映射为取消 run（不留悬挂任务占会话锁）；确认等待由策略引擎计时（300 秒自动拒绝），不依赖连接存活。
 - **审计落 MySQL**：`bio_security_audit_event` 表是审计真相源（不是 JSONL 文件）；审计行不参与租户插件过滤。
 - **同一会话的身份链四处一致**：web 会话 id → SpringBoot（`X-User-Id`/`X-Conversation-Id` 头透传）→ AgentManager → `Agent.session_id`，错位会让各自读到空数据；子 agent 共享父 `session_id`，各自持有独立 `conversation_id`（消息不互相污染窗口）。
@@ -142,7 +144,7 @@ BioPilot-main/
 - SpringBoot 启动类：`server/bio-admin/src/main/java/com/biopilot/admin/`；引擎接入（代理/SSE/终端 WS）：`server/bio-modules/bio-gateway/`
 - 前端入口与路由：`web/src/main.js`、`web/src/router/`
 - 参数声明点：`biopilot/config/schemas/sections.py`
-- 配置模板与字段示例：`config.example.yaml`
+- 配置模板与字段示例：`.env.example`（引导层）；可调字段以设置页/`biopilot/config/services/schema.py` 为准
 - Agent 插件契约：`agents/AGENTS.md` 与各 `agents/<name>/AGENT.md`
 - 设计文档索引：`docs/adr/`（设计为什么这么做）与 `docs/learning/`（实现怎么运作）
 
@@ -188,13 +190,19 @@ conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 e
 # 部署形态（实验室服务器）：容器化整套平台（nginx:80 + server + webapi）
 docker compose --profile full up -d --build   # 只起基建则省略 --profile full
 
+# 配置运维（运行时配置在 MySQL；旧 config.yaml 首次启动会自动导入）
+biopilot config import config.yaml    # 手动导入（默认把文件改写成只含引导层）
+biopilot config export                # 导出有效配置（不含密钥）
+biopilot config history               # 查看保存历史
+biopilot config rollback <version>    # 回滚到历史版本
+
 # 服务端测试（bio-admin）
 cd server && mvn test -pl bio-admin
 ```
 
 - 启动时自动探测依赖服务，未起则自动 `docker compose up -d` 并等待健康；失败只警告不阻塞。跳过预检：`BIOPILOT_SKIP_BOOTSTRAP=1`。
 - 非交互命令（测试 / 脚本 / 安装）**一律经 `conda run -n biopilot`**，不要用裸 `python` 或 `pip`。唯一例外就是上面的交互式 REPL。
-- Python 适配层不读 `config.yaml` 的 DSN 段（走 `BIOPILOT_MEMORY_MYSQL_DSN` 环境变量）：标题更新、论文/文档端点的轻量 SQL 依赖它，启动时务必带上。
+- Python 适配层与引擎都通过 `BIOPILOT_MEMORY_MYSQL_DSN`（或显式的 `BIOPILOT_RUNTIME_MEMORY_DSN`）拿 DSN：标题更新、论文/文档端点的轻量 SQL 以及配置库本身都依赖它，启动时务必带上。
 
 ## 统一编码规范
 
@@ -246,7 +254,7 @@ cd server && mvn test -pl bio-admin
 ## References
 
 - [`README.md`](README.md)
-- [`config.example.yaml`](config.example.yaml)
+- [`.env.example`](.env.example)（部署引导模板）
 - [`REVIEW.md`](REVIEW.md)（代码审查的仓库定制层：重点盯防区域 / 输出约束 / 风险分流，供 cross-review 等审查流程读取）
 - [`web/AGENTS.md`](web/AGENTS.md)
 - [`server/AGENTS.md`](server/AGENTS.md)

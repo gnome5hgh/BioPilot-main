@@ -22,6 +22,8 @@ dependencies = [
     "pymilvus[milvus-lite]>=2.4.2",
     # 图表原图的对象存储客户端（复用依赖栈里的 MinIO；见 rag/storage/image_store.py）
     "minio>=7.2",
+    # 配置密钥字段的 AES-GCM 加密（bio_config_secret；见 config/services/store.py）
+    "cryptography>=42",
     "rich>=13.0.0",
     "prompt_toolkit>=3.0.0",
     # 命令解析：把一条命令按语法树拆成逐条命令与 argv（区分 `rm -rf /work` 与

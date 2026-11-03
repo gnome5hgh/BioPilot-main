@@ -75,11 +75,24 @@ public class EngineProxyController {
         return relay.post("/terminal/restart", "{}");
     }
 
-    /** 设置读/写（ADMIN 专属：响应含带 key 的模型清单，学生不可见）。 */
+    /** 设置读/写（ADMIN 专属）：字段描述、有效值、补丁、历史与回滚。 */
     @SaCheckRole("ADMIN")
     @GetMapping("/admin/settings")
     public ResponseEntity<String> settingsGet() {
         return relay.get("/settings");
+    }
+
+    @SaCheckRole("ADMIN")
+    @GetMapping("/admin/settings/history")
+    public ResponseEntity<String> settingsHistory(
+            @RequestParam(defaultValue = "20") int limit) {
+        return relay.get("/settings/history?limit=" + limit);
+    }
+
+    @SaCheckRole("ADMIN")
+    @PostMapping("/admin/settings/rollback")
+    public ResponseEntity<String> settingsRollback(@RequestBody String body) {
+        return relay.post("/settings/rollback", body);
     }
 
     @SaCheckRole("ADMIN")

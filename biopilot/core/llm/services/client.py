@@ -74,7 +74,7 @@ class LLMClient:
         if not config.api_key:
             raise RuntimeError(
                 "LLM API key 未配置：请设置环境变量 BIOPILOT_LLM_API_KEY"
-                "（或在 .env 文件设置同名变量），或在 config.yaml 的 llm.api_key 提供"
+                "（或在 .env 文件设置同名变量），或在设置页「对话模型」里填写密钥"
             )
         #: OpenAI SDK 客户端实例（底层 httpx 连接池，线程安全）。
         #: 显式超时：SDK 默认 read 600s，一次 HTTP 挂死会让 UI 长时间空转。

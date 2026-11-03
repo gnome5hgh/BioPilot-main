@@ -14,7 +14,7 @@
 ## Directory Structure
 
 - `cli/` — 装配根：启动预检 + 对象图组装 + 工具装配（有 manifest）
-- `config/` — 全局可调参数：默认值的声明点 + 三级加载（有 manifest）
+- `config/` — 全局可调参数：默认值声明 + 数据库/引导文件/env 加载 + 设置页字段契约（有 manifest）
 - `common/` — 跨层共享基础设施：常量/通用工具/原子写/出站平台客户端（不是 agent 核心，也不是业务层）
 - `core/` — agent 系统技术核心，内含 `rag/` 与 `vision/`（有 manifest，其下各子包各有）
 - `tools/` — 面向 LLM 的工具声明，按域分包（有 manifest）
@@ -61,7 +61,7 @@
 
 1. 先读本文件建立主包边界，再按目标模块进对应子包 manifest。
 2. 启动或装配异常先查 `cli/services/bootstrap.py`（预检）与 `cli/services/assembly.py`（对象图），再往 core 里找。
-3. 参数问题查 `config/`：唯一声明点是 `sections.py`，模板与示例是仓库根 `config.example.yaml`。
+3. 参数问题查 `config/`：唯一声明点是 `sections.py`，字段契约在 `services/schema.py`，存储与加密在 `services/store.py`；部署引导模板是仓库根 `.env.example`。
 4. **改内部模块名要同步 `tests/` 里的 monkeypatch 字符串目标**：pytest 按「查找处」解析，指错模块不报错，只会让假件静默失效；`from X import f` 之后要 patch 的是**导入方**的全局名。
 5. 文档与代码冲突时，以代码事实为准。
 
@@ -91,4 +91,6 @@ conda run -n biopilot python -m pytest tests/cli tests/core -q
 - [`cli/services/bootstrap.py`](cli/services/bootstrap.py)
 - [`config/schemas/sections.py`](config/schemas/sections.py)
 - [`config/services/loader.py`](config/services/loader.py)
-- [`../config.example.yaml`](../config.example.yaml)
+- [`config/services/schema.py`](config/services/schema.py)
+- [`config/services/store.py`](config/services/store.py)
+- [`../.env.example`](../.env.example)

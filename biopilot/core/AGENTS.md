@@ -35,7 +35,7 @@
 
 - **只放子包**，不放裸 `.py` 模块（外加本 manifest 与 `__init__.py`）。散在根下的模块按「服务于谁」收进子包；跨包共享的叶子进 `biopilot/common/`，不要让 core 兼任 common 层。
 - **枚举一枚举一文件**：各子包的 `constants/` 里，枚举放 `enums/<snake_case>.py`，其余常量放同层 `constants.py`；`constants/__init__.py` 只做再导出。判据是「有没有第二个消费方」。
-- **两类 `config/`**：顶层 `biopilot/config/` 是可经 config.yaml 与 env 调整的全局参数；子包的 `config/` 放该包**组件自己的行为参数**（调用点各给一套、不进 config.yaml）。后者不是层间搬运的数据，故不住 `domain/dto/`。
+- **两类 `config/`**：顶层 `biopilot/config/` 是设置页（数据库）与环境变量可调的全局参数；子包的 `config/` 放该包**组件自己的行为参数**（调用点各给一套、不进全局配置）。后者不是层间搬运的数据，故不住 `domain/dto/`。
 - **`rag` 与 `vision` 必须同层**：rag 的媒体块要向 vision 取图与视觉描述（core 内部的惰性 import），分开摆会让包级依赖成环。
 - **子包内部按角色分层**：门面（对外只经一个单例）、`domain/`（公共词汇）、`services/`（编排）、`storage/`（持久化）、`config/`（组件参数）、`constants/`（本包词汇）——新增子包照这套分。
 
