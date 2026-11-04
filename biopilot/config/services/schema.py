@@ -102,7 +102,7 @@ SECTION_LAYOUT: dict[str, list[dict[str, str]]] = {
     "security": [
         {"key": "security", "label": "安全策略", "description": "外部来源工具默认逐次确认；预批准只降档、不旁路。"},
         {"key": "security.classifier", "label": "语义判定", "description": "可选层；端点或密钥缺失时整层不装配。"},
-        {"key": "security.sandbox", "label": "代码沙箱", "description": "run_python 的容器政策；执行类工具必须在进程外隔离。"},
+        {"key": "security.sandbox", "label": "代码沙箱", "description": "run_python / run_shell 的容器政策；执行类工具必须在进程外隔离。"},
     ],
     "rag": [
         {"key": "rag", "label": "检索通用", "description": "跨子模块的开关。"},

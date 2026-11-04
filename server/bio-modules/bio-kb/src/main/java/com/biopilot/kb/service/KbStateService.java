@@ -21,6 +21,9 @@ public interface KbStateService {
     /** 把该用户所有已加入知识库的论文重排为 `queued`（强制重建）。 */
     int requeueAll(String userId);
 
+    /** 把单篇仍在知识库的论文重排为 `queued`（标题变化触发）。 */
+    int requeue(String userId, String paperId);
+
     /** 把仍在知识库的论文置为「索引中」，返回真正被接受的 id。 */
     List<String> markIndexing(String userId, List<String> paperIds);
 

@@ -9,19 +9,16 @@
   renderer 造好之后才把流式回调挂到 supervisor；测试直接整表换 `tools`）。按值
   捕获会拿到过期引用，所以每次调用由调用方现取现传。
 
-管道主体是「查工具 → 解析参数 → 写类采样旧文本 → 三把锁 → before 钩子 → 执行 →
-逆序 after 钩子 → 一条 tool_end 收口」，也是「所有错误降级为文本」这条策略的唯一
-落点：任何异常都变成 ToolResult 文本回给模型（只有 MaxTurnsExceeded 向上抛，
-那在 Agent.run 里）。
+管道主体是「查工具 → 解析参数 → 引用形状校验 → before 钩子 → 执行 → 逆序 after 钩子
+→ 一条 tool_end 收口」，也是「所有错误降级为文本」这条策略的唯一落点：任何异常都
+变成 ToolResult 文本回给模型（只有 MaxTurnsExceeded 向上抛，那在 Agent.run 里）。
 """
 
 import asyncio
-import difflib
 import json
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 
 from biopilot.core.agent.constants import AgentEventKind
 from biopilot.core.agent.domain import AgentEvent
@@ -30,62 +27,11 @@ from biopilot.core.security import (
     ApprovalOutcome, ConfirmRequired, SecurityError, ToolContext,
 )
 from biopilot.core.tool import (
-    SUMMARY_DECISION, SUMMARY_VIOLATIONS, ToolResult, is_writer,
+    SUMMARY_DECISION, SUMMARY_VIOLATIONS, ToolResult,
 )
+from biopilot.core.tool.services.validation import validate_ref_args
 
 __all__ = ["ToolExecutor"]
-
-
-_PATH_LOCKS: dict[str, asyncio.Lock] = {}
-
-
-def _path_lock(path: str) -> asyncio.Lock:
-    """取目标路径的串行锁（无则建；setdefault 原子，多循环场景安全）。
-
-    Args:
-        path: str，目标文件路径
-
-    Returns:
-        该路径的 asyncio.Lock（无则建；同一文件的并发调用拿到同一把锁）。
-    """
-    # 键 = 目标文件路径
-    # setdefault 原子地“无则建、有则取”，保证同一文件的所有并发调用拿到的是同一把锁。
-    return _PATH_LOCKS.setdefault(path, asyncio.Lock())
-
-
-def _diffstat(old: str, new: str) -> tuple[int, int]:
-    """unified diff 行级统计 (added, removed)，不计 +++/--- 头。
-
-    Args:
-        old: str，旧的完整文本
-        new: str，新的完整文本
-
-    Returns:
-        (added, removed) 行级统计（不计 +++/--- 头）。
-    """
-    added = removed = 0
-    for line in difflib.unified_diff(old.splitlines(), new.splitlines(), n=0):
-        if line.startswith("+") and not line.startswith("+++"):
-            added += 1
-        elif line.startswith("-") and not line.startswith("---"):
-            removed += 1
-    return added, removed
-
-
-def _read_text_or_none(path: str) -> str | None:
-    """读文件文本；不存在返回 ""（新写文件场景），IO/解码失败返回 None（无徽标）。
-
-    Args:
-        path: str，文件路径
-
-    Returns:
-        文件文本；不存在返回 ""（新写文件场景），IO/解码失败返回 None（不发徽标）。
-    """
-    try:
-        p = Path(path)
-        return p.read_text(encoding="utf-8") if p.exists() else ""
-    except (OSError, UnicodeDecodeError):
-        return None
 
 
 
@@ -253,66 +199,19 @@ class ToolExecutor:
         # 这种异常情况也会被记录在 ctx.args 中供审计。
         ctx.args = raw_args if isinstance(raw_args, dict) else {}
 
-        # 4.5 写类工具采样旧文本（diffstat 徽标数据源；读失败 → 无徽标，不影响执行）
-        if ctx.tool_name in {"write_file", "edit_file"} and isinstance(ctx.args, dict) and ctx.args:
-            target = (tool.effective_target_path(ctx.args)
-                      if tool is not None else ctx.args.get("path"))
-            if isinstance(target, str):
-                ctx.diffstat_old = _read_text_or_none(target)
+        # 资源引用形状校验：畸形 id/文件名在进内部 HTTP 前就拒绝，避免白跑一次网络。
+        violations = validate_ref_args(tool, ctx.args) if tool is not None else []
+        if violations:
+            ctx.error = ValueError("资源引用非法")
+            await self._run_after_hooks(ctx)
+            detail = "；".join(
+                f"{v['param']}={v['value']!r}（{v['reason']}）" for v in violations)
+            return ToolResult(text=f"参数非法：{detail}", is_error=True)
 
-        # 并行写同一个文件会引出三件事，由三把不同的锁各管一段。把粒度与归属写清楚，
-        # 免得后续把某一层误当成另一层：
-        #
-        # 1）同一 agent 内部的多次同路径写——丢写竞态 + 重复确认。两个协程对同一文件并发读-改-写，
-        #    后写者会覆盖先写者；两个工具又各自弹确认框，用户输入的「a」（本会话放行）只覆盖先弹框的
-        #    那个，后到者会再弹一次（而且两个协程并发读 CLI 标准输入本身就是竞态）。解法是模块级按路径
-        #    注册表 `path_lock`：只有写类工具（side_effects 含文件写）才走这个加锁分支，按
-        #    `effective_target_path` 取该路径的 `asyncio.Lock`，且锁要包住 `_run_guarded` **整体**
-        #    （确认决策 + 执行，含 before 钩子里的 ConfirmRequired → confirm_callback → 工具
-        #    执行），不能只包执行那一步——这是设计关键，所以 `async with` 放在 `execute` 这一层包住
-        #    调用，而不是放进 guarded 函数内部。第二个并发调用因此在锁上等到第一个完整走完「用户确认 +
-        #    写文件」；它拿到锁时授权键已进已授权集合，于是不再弹框直接放行——既消除重复弹框，又把同路径
-        #    写串行化，丢写竞态随之消失。键经 `tool.effective_target_path` 导出而非直接读 `args["path"]`：
-        #    write_file 的 filename 便捷入口没有 path 参数，须先组合出落盘路径再上锁——否则 pathless
-        #    调用绕过锁，两类竞态经此入口复发。
-        # 2）多人同时抢 CLI 标准输入（与文件路径无关）。`confirm_lock` 是 run 层传入、每次 run 一把，
-        #    串行化所有并发工具调用的 confirm_callback 本身。
-        # 3）跨 agent 的同路径冲突——不排队，当场拒。写工具在 `RunState.writing_paths` 上按**真实写目标**
-        #    登记占用，另一个实例正在写同一路径时**当场拒绝**：等待结束仍然要写，那只是「带额外步骤的
-        #    丢更新」，本仓要防的正是跨子 agent 的静默丢失，所以让第二个写根本不发生。登记是纯同步字典
-        #    操作（无 await），所以能在这层 fail-fast，不会像中间件那样先排到路径锁后面才拒。
-        #
-        # 三者互补：`path_lock` 管同一个 agent 自己的多次调用排队，`confirm_lock` 管输入通道，
-        # 写占用管跨实例。写者身份用 `side_effects` 判定；写占用键复用 `effective_target_path`——它已是
-        # 确认键、串行锁与 diffstat 的唯一权威，对交付物写者返回的就是写目标（不做第二套路径概念）。
-        target = tool.effective_target_path(ctx.args) if tool is not None else None
-        owner = self._instance_id
-        claimed = isinstance(target, str) and is_writer(tool)
-        rs = get_run_state(ctx.trace_id) if claimed else None
-        if claimed:
-            holder = rs.claim_write(target, owner)
-            if holder is not None:
-                # 拒绝分支在 try 之外：本次没登记成功，不能走释放（否则会摘掉别人的占用）。
-                # 仍走 after 链，让这次拒绝在审计里留痕（与 JSON 解析失败的早退同款）。
-                ctx.error = RuntimeError(f"写互斥：{target} 正被另一实例占用")
-                await self._run_after_hooks(ctx)
-                return ToolResult(text=(
-                    f"目标文件正被另一个并发子任务写入：{target}。"
-                    "不要改文件名另写一份；请稍后原样重试，或把该冲突上报给上级。"),
-                    is_error=True)
-        try:
-            if isinstance(target, str) and is_writer(tool):
-                async with _path_lock(target):
-                    return await self._run_guarded(tool, ctx, tools, confirm_callback, confirm_lock, turn)
-            return await self._run_guarded(tool, ctx, tools, confirm_callback, confirm_lock, turn)
-        finally:
-            # 异常、取消、用户拒绝都会走到——所以占用不需要 TTL 兜底。
-            # 取消场景有一处已知的宽松：占用在此释放时，`asyncio.to_thread` 起的 worker 线程可能仍在跑
-            # 那次写——`to_thread` 不可取消，取消协程不会停掉线程。这可以接受：写是原子替换（不会留下
-            # 写了一半的文件），且 Ctrl+C 取消的是整棵 agent 树，不会有别的写者趁这段时间进来。代价是
-            # 「占用在手」在取消下不严格等于「写在进行」——不要依赖这个等价做判断。
-            if claimed:
-                rs.release_write(target, owner)
+        # 写入互斥与版本冲突由 Java 的 bio_file.version 条件更新裁决；Python 侧只保留
+        # 确认回调的串行锁（confirm_lock），不再按本地路径排队或登记写占用。
+        return await self._run_guarded(
+            tool, ctx, tools, confirm_callback, confirm_lock, turn)
 
     async def _run_guarded(self, tool, ctx, tools, confirm_callback,
                            confirm_lock, turn) -> ToolResult:
@@ -416,14 +315,8 @@ class ToolExecutor:
         """
         duration = (int((time.monotonic() - ctx.started_at) * 1000)
                     if ctx.started_at is not None else None)
+        # 文档正文在 OSS，diffstat 不再采样本地文件；终端只显示工具完成文本。
         diffstat = None
-        if ctx.tool_name in {"write_file", "edit_file"} and ctx.diffstat_old is not None:
-            target = (ctx.tool.effective_target_path(ctx.args)
-                      if ctx.tool is not None else ctx.args.get("path"))
-            new_text = _read_text_or_none(target) if isinstance(target, str) else None
-            if new_text is not None:
-                added, removed = _diffstat(ctx.diffstat_old, new_text)
-                diffstat = (target, added, removed)
         completion = (ctx.result.completion
                       if ctx.result is not None and ctx.result.completion else None)
         return AgentEvent(AgentEventKind.TOOL_END, "", self._agent_type,

@@ -12,6 +12,7 @@
 
 ## Directory Structure
 
+- `code/` — 沙箱执行：`run_python`（Python 代码）与 `run_shell`（shell 命令/脚本）；共用 `sandboxed.py` 的政策组装、产物登记与结果渲染
 - `file/` — 读 / 写 / 编辑 / glob / grep / 读 PDF（只做工具声明与降级文案；标题由 Java 提取，本层不推导）
 - `search/` — 文献检索薄转发（`search_literature`，调 Java `/internal/literature/search`）与 PDF 下载（`fetch_pdf`：调 Java `/internal/literature/fetch-pdf`，SSRF 与 `%PDF` 校验在 Java `bio-common-net`；本层只管落盘、查重与负缓存）
 - `review/` — 审查裁决、模板体检（helper 已并入工具文件）
@@ -24,7 +25,7 @@
 工具装配不在本包：`make_tools` 在 `cli/services/tool_assembly.py`；工具运行时上下文在
 `core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在 `biopilot/common/` 与 `core/security/`。
 平台数据端口（论文目录/文件/文档）已迁 Java `bio-file`，本包不再保留数据访问 adapter。
-分析产物（`run_python`）经 Java `/internal/files/artifacts` 登记；平台文件字节经 `/internal/attachments/*` 取回，工具不直连 OSS。
+沙箱产物（`run_python` / `run_shell`）经 Java `/internal/files/artifacts` 登记；平台文件字节经 `/internal/attachments/*` 取回，工具不直连 OSS。
 
 ## Responsibilities
 

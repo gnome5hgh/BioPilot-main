@@ -11,7 +11,7 @@ SpringBoot 3.5 服务端（Java 21）：BioPilot 的鉴权、平台业务表与�
 
 - 名称：`biopilot-server`
 - 角色：多用户平台的**唯一鉴权与平台业务真相层**——注册/登录/登出/资料、角色两档（ADMIN/USER）、登录日志、项目管理、文件目录（论文/数据文件/文档的 HTTP CRUD 与 OSS 生命周期）、定时任务管理、文献搜索与导入、MCP 检索源配置、管理端（用户/会话/审计读取），以及到 Python 适配层（127.0.0.1:8300）的内网代理。
-- 不做的事：不实现 agent 编排/记忆/检索/切块/嵌入（引擎的事）；不复制 Python 的文件解析/切块逻辑；不做页面（web 的事）；对 SSE 流不缓冲不重组、不设应用层超时。`bio_paper` 的索引状态列由本侧 `bio-kb` 的 `KbStateService` 维护，但状态内容由引擎经内部端点上报。
+- 不做的事：不实现 agent 编排/记忆/检索/切块/嵌入（引擎的事）；不复制 Python 的文件解析/切块逻辑；不做页面（web 的事）；对 SSE 流不缓冲不重组、不设应用层超时。`bio_file` 的索引状态列由本侧 `bio-kb` 的 `KbStateService` 维护，但状态内容由引擎经内部端点上报。
 - 与 Python 的分工、单写者规则与表命名规范以根 `AGENTS.md` 的「Python 与 Java 的职责边界」为准。
 - **模块划分按职责，不按页面**：一个模块 = 独立的数据所有权 + 独立的变更理由 + 内聚的对外契约。前端页面可以跨模块（设置页、文件管理页就是如此），不为了 1:1 去拆业务域；`bio-gateway` 是技术适配层（浏览器↔引擎），不是业务域，禁止在其中长业务逻辑。
 
@@ -48,13 +48,13 @@ server/
 - **对外 URL 按资源命名，不跟模块名走**：浏览器接口统一 `/api/v1/**`，管理端（`@SaCheckRole("ADMIN")`）统一 `/api/v1/admin/**`，资源用复数与 kebab-case；`/internal/**` 是跨栈契约，不版本化也不改名。模块拆分/改名不得牵动 URL。
 - **service 包一律「接口 + `impl/` 实现」**：控制器与跨模块消费者只依赖接口；模块之间只调对方公开接口，不借 mapper/entity。
 - **行级 user_id 过滤由 MyBatis-Plus 租户插件统一注入**（`TenantLineInnerInterceptor`）：业务表**不许手写 where 补过滤**（漏一处就是越权读）；豁免表（无 user_id 列的 `sys_role` 等全局表，以及引擎侧需要跨用户读写的 `bio_agent_state` / `bio_security_audit_event`）以插件配置为准。Python 走原生 SQL，不经过插件。
-- **拥有的表**：`sys_user` / `sys_role` / `sys_user_role` / `sys_login_log` / `bio_project`，以及 `bio_paper`、`bio_citation`（引用库）、`bio_file_upload`（用户上传 + agent 分析产物，`source` 区分 `upload`/`artifact`）、`bio_document`（HTTP CRUD）、`bio_user_file`（用户文件同名登记，唯一键 `(user_id, name_key)`）、`bio_schedule_task`（任务定义与调度进度）、`bio_literature_mcp_server`（检索源配置）、`bio_skill`（用户技能安装记录，带 `user_id`，引擎只读 `enabled/content_sha`）。文献检索没有结果表，导入复用 `bio_paper`。
-- **`bio_paper` 按列分写者**：`bio-file` 写身份/文件/书目/`citation_id` 列（含上传登记时的 `kb_enabled` 初值），并在「标题变更且论文在库」时把该篇置回 `queued`（与书目字段同一条 UPDATE，保证原子）；`bio-kb` 写 `kb_enabled` 的状态迁移与 `indexed/index_status/index_error/indexed_at/chunk_count` 列。两边都不碰对方的列。
-- **标题与书目提取归本侧**：`bio-common-pdf` 是平台论文标题/作者/年份/期刊的唯一来源；Python 的 RAG 索引只从 `bio_paper.title` 读取，不再自行推导。
+- **拥有的表**：`sys_user` / `sys_role` / `sys_user_role` / `sys_login_log` / `bio_project`，以及 `bio_file`（论文/数据文件/文档/分析产物统一表）、`bio_citation`（引用库）、`bio_oss_gc`（OSS 删除 outbox）、`bio_schedule_task`（任务定义与调度进度）、`bio_literature_mcp_server`（检索源配置）、`bio_skill`（用户技能安装记录，带 `user_id`，引擎只读 `enabled/content_sha`）。文献检索没有结果表，导入复用 `bio_file` 的 paper 行。
+- **`bio_file` 按列分写者**：`bio-file` 写身份/文件/书目/`citation_id`/`kb_enabled` 列；`bio-kb` 写 `indexed/index_status/index_error/indexed_at/chunk_count` 列。标题变更且论文在库时，`bio-file` 只发 `PaperRequeueHook` 通知，由 `bio-kb` 把该篇置回 `queued` 并唤醒引擎——不直接改索引列。
+- **标题与书目提取归本侧**：`bio-common-pdf` 是平台论文标题/作者/年份/期刊的唯一来源；Python 的 RAG 索引只从 `bio_file.title` 读取，不再自行推导。
 - **读取引擎表只读**：`bio_agent_state`、`bio_message`、`bio_security_audit_event` 等由 Python 写入；Java 只读，除项目删除时清 `bio_agent_state.project_id` 外不得写。租户插件豁免表必须显式按 `user_id` 过滤；新增跨栈读取要在本文件登记。
-- **同名登记的内部路径例外**：`bio_user_file` 的占名、按名字查与释放同时服务没有登录态的引擎内部调用（成稿入库、文献登记、启动回填），这些 Mapper 方法显式带 `user_id` 并 `@InterceptorIgnore`（与各业务 Mapper 的 `*ForAgent` 同一受控例外）；改名与浏览器预检仍走 Wrapper，由租户插件注入。
+- **同名唯一约束内联在 `bio_file`**：`(user_id, name_key)` 是唯一键，论文/数据文件/文档共用一个名字空间；artifact 的 `name_key` 为 NULL（不占名）。创建直接 INSERT，由唯一键裁决，**禁止应用层「先查再插」**；按名改/覆盖走条件更新。`bio_oss_gc` 是系统级 outbox，没有 `user_id`，已加入租户插件豁免表。
 - **内部调用双向**：Java 调 Python `/internal/*`、Python 调 Java `/internal/*`，两个方向都必须带 `X-Internal-Token` 与 `X-User-Id`；`/internal/**` 从 Sa-Token 登录过滤中排除，由 `InternalTokenFilter` 单独把关，内部端点只绑回环/内网。
-- **内部端点清单**：Java→Python 为 `/internal/kb/sync`、`/internal/kb/runtime`、`/internal/schedule/run`、`/internal/users/*`；Python→Java 为 `/internal/literature/search`、`/internal/literature/fetch-pdf`、`/internal/documents/save`、`/internal/attachments/{kind}/{id}`、`/internal/files/artifacts`、`/internal/kb/{normalize,indexing,requeue-all,result}`、`/internal/skills/{name}/package`。
+- **内部端点清单**：Java→Python 为 `/internal/kb/sync`、`/internal/kb/runtime`、`/internal/schedule/run`、`/internal/users/*`；Python→Java 为 `/internal/literature/search`、`/internal/literature/fetch-pdf`、`/internal/documents`（读/按名读/列/删）与 `/internal/documents/save`、`/internal/attachments/{kind}/{id}`、`/internal/files`（读/列/删）与 `/internal/files/artifacts`、`/internal/kb/{normalize,indexing,requeue-all,result}`、`/internal/skills/{name}/package`。
 - **HTTP 客户端锁死 HTTP/1.1**：Java HttpClient 默认的 h2c 升级头（`Upgrade: h2c`）会被 uvicorn 按协议升级处理并**吞掉请求体**——所有浏览器透传共用 `bio-gateway` 的 `AgentRelay` 单一 client，不得改回默认或另建 client。
 - **口令只存 BCrypt 摘要**；`SysUser.password` 标注 `@JsonIgnore`，任何响应不得带出摘要。
 - **异常语义**：业务失败抛 `ServiceException`（`R.fail` 带文案）；未映射路径 404、方法不支持 405、上传超限 413——不许被全局兜底吞成 500。

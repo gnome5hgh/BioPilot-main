@@ -552,16 +552,22 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                 # 队列随 agent 一起丢弃：已死会话的队列留着只会在长跑进程里无限堆积
                 _queues.pop((stale_key[0], stale_key[1]), None)
 
-        # 附件：落本地副本 + 生成清单（元数据行注入任务文本；沙箱挂目录读数据）
+        # 附件：平台文件按 id 注入任务文本；本地副本只给沙箱一次性读取用。
         attachments = _resolve_attachments(
             x_user_id, (body or {}).get("attachments") or [], conversation_id)
         attachment_meta = _attachment_meta(attachments)
-        # 用户原话先留一份：标题与历史展示都只取原话，不取后面注入的路径清单
+        # 用户原话先留一份：标题与历史展示都只取原话，不取后面注入的附件清单
         user_task = task
         if attachments:
-            lines = [f"{_ATTACHMENT_HEADER}（沙箱内见 /corpus/uploads/，本机见列出的路径）："]
+            lines = [f"{_ATTACHMENT_HEADER}（用 kind + id 调 read_file/read_pdf；"
+                     "run_python / run_shell 里用 /corpus/uploads/ 下的沙箱路径）："]
             for a in attachments:
-                lines.append(f"- {a['name']}（{a['size']} 字节）路径：{a['path']}")
+                kind = "paper" if a.get("paper_id") else "file"
+                obj_id = a.get("paper_id") or a.get("file_id") or ""
+                sandbox = "/corpus/uploads/" + Path(a["path"]).name
+                lines.append(
+                    f"- {a['name']}（{a['size']} 字节，kind={kind}，id={obj_id}，"
+                    f"沙箱路径={sandbox}）")
             task = "\n".join(lines) + "\n\n" + task
 
         key = (x_user_id, conversation_id, user_models.get(x_user_id))
@@ -882,7 +888,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             import shutil
 
             from biopilot.config import BioPilotConfig, user_cache_root
-            cache_dir = Path(user_cache_root(BioPilotConfig.from_env())) / target_id
+            cache_dir = (Path(user_cache_root(BioPilotConfig.from_env()))
+                     / _safe_component(target_id))
             shutil.rmtree(cache_dir, ignore_errors=True)
         except Exception as exc:
             logger.warning("删户清理用户缓存失败（跳过）：%r", exc)
@@ -1305,8 +1312,8 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
                        exc_info=True)
     if vector_counts is not None:
         rows = db.execute(
-            "SELECT id, kb_enabled, index_status, chunk_count FROM bio_paper"
-            " WHERE user_id=?", (user_id,)).fetchall()
+            "SELECT id, kb_enabled, index_status, chunk_count FROM bio_file"
+            " WHERE kind='paper' AND user_id=?", (user_id,)).fetchall()
         enabled_ids = {str(row["id"]) for row in rows if row["kb_enabled"]}
         # 1) 向量库里不属于任何「已加入」论文的块：删掉。非 paper: 键是旧版本按
         #    镜像绝对路径建的遗留块，检索面里还留着就会召回已移出的内容。
@@ -1340,8 +1347,8 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
             logger.warning("知识库状态收敛失败（%s），本轮跳过：%s", user_id, exc)
             break
         rows = db.execute(
-            "SELECT id, oss_key, kb_enabled, index_status, title FROM bio_paper"
-            " WHERE user_id=?",
+            "SELECT id, oss_key, kb_enabled, index_status, title FROM bio_file"
+            " WHERE kind='paper' AND user_id=?",
             (user_id,)).fetchall()
         enabled = {str(row["id"]): row for row in rows if row["kb_enabled"]}
         todo = []
@@ -1422,7 +1429,8 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
     # 已移出知识库（或已删除）的论文：按向量库实际持有的文档标识清理。
     # 文件本身在 OSS 里不动，平台行由 Java 负责。
     rows = db.execute(
-        "SELECT id, kb_enabled FROM bio_paper WHERE user_id=?", (user_id,)).fetchall()
+        "SELECT id, kb_enabled FROM bio_file WHERE kind='paper' AND user_id=?",
+        (user_id,)).fetchall()
     enabled = {str(row["id"]) for row in rows if row["kb_enabled"]}
     try:
         counts = svc.document_chunk_counts()
@@ -1457,7 +1465,8 @@ def _users_with_kb() -> list[str]:
         list[str]: 用户 id（去重排序）。
     """
     rows = _shared_db().execute(
-        "SELECT DISTINCT user_id FROM bio_paper WHERE kb_enabled=1").fetchall()
+        "SELECT DISTINCT user_id FROM bio_file"
+        " WHERE kind='paper' AND kb_enabled=1").fetchall()
     return sorted({str(row["user_id"]) for row in rows if row.get("user_id")})
 
 
@@ -1479,7 +1488,7 @@ def _users_needing_reconcile() -> list[str]:
     db = _shared_db()
     rows = db.execute(
         "SELECT user_id, id, kb_enabled, indexed, index_status, index_error,"
-        " indexed_at, chunk_count FROM bio_paper"
+        " indexed_at, chunk_count FROM bio_file WHERE kind='paper'"
     ).fetchall()
     stale = {
         row["user_id"] for row in rows

@@ -7,7 +7,6 @@
 修正后重试。
 """
 from biopilot.core.tool import SUMMARY_TERMINAL, Tool, ToolResult
-from biopilot.core.tool.constants import ScopeRoot
 
 #: verdict 合法值（与下载审查共用）
 VERDICTS = ("pass", "fail")
@@ -31,10 +30,9 @@ class SubmitReviewTool(Tool):
     Attributes:
         name: str，工具名 "submit_review"
         description: str，工具描述
-        parameters: dict，JSON Schema（path/verdict/issues）
+        parameters: dict，JSON Schema（document/verdict/issues）
         risk_level: str，"low"（只读格式化，无副作用）
         terminal: bool，True（提交成功即终结本轮任务）
-        root_hints: list[str]，笔记/草稿/选题根（仅生成 [目录] 提示）
     """
     name = "submit_review"
     description = ("汇总对一篇笔记的审查裁决（review-agent 笔记审查模式返回）。"
@@ -42,7 +40,8 @@ class SubmitReviewTool(Tool):
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "format": "path", "description": "笔记绝对路径"},
+            "document": {"type": "string", "format": "file_name",
+                         "description": "被审查文档的 id 或名字"},
             "verdict": {"type": "string", "enum": ["pass", "fail"],
                         "description": "pass = 无 blocking 意见；fail = 存在 blocking 意见"},
             "issues": {"type": "array", "items": {"type": "object",
@@ -55,24 +54,21 @@ class SubmitReviewTool(Tool):
                 },
                 "required": ["severity", "dimension", "location", "action"]}},
         },
-        "required": ["path", "verdict", "issues"],
+        "required": ["document", "verdict", "issues"],
     }
     risk_level = "low"                     # 只读格式化，无副作用
     # 终止型工具：校验通过的提交即本 agent 任务终结，Agent.run 直接
     # 结束 ReAct 循环——重复提交会白烧 token，属于成本事故。
     terminal = True
-    # 审稿流目标是任务文本给出的草稿路径；execute 不读文件内容（只格式化提交字段），
-    # 声明 scratch 仅生成 [目录] 提示、零安全影响（强制在 WorkspacePolicy，与本声明无关）。
-    root_hints = [ScopeRoot.SCRATCH, ScopeRoot.RESEARCH]
 
-    def execute(self, path: str, verdict: str, issues: list) -> ToolResult:
+    def execute(self, document: str, verdict: str, issues: list) -> ToolResult:
         """校验并格式化审查裁决;非法输入返回可行动报错文本。
 
         三步校验:verdict 枚举 → 逐 issue 枚举/必需字段 → verdict 与 issues 一致性
         (pass 当且仅当无 blocking)。通过后按 severity 分组渲染,供 note-agent 确定性读取。
 
         Args:
-            path: str，被审查笔记的绝对路径
+            document: str，被审查文档的 id 或名字
             verdict: str，"pass"（无 blocking）或 "fail"
             issues: list[dict]，每条含 severity/dimension/location/action
 
@@ -101,7 +97,7 @@ class SubmitReviewTool(Tool):
         if verdict == "fail" and not has_blocking:
             return ToolResult(text="verdict=fail 但无 blocking 意见——fail 必须含至少一个 blocking")
         # ④ 格式化：verdict 行 + 按 severity 分组 issue 清单（note-agent 确定性可读）
-        lines = [f"审查裁决：{verdict}"]
+        lines = [f"审查裁决：{verdict}（{document}）"]
         for sev in SEVERITIES:
             for issue in issues:
                 if issue["severity"] == sev:

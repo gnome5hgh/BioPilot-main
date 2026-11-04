@@ -52,7 +52,8 @@ public class PaperTitleBackfillRunner implements ApplicationRunner {
     private void backfill() {
         try {
             List<Map<String, Object>> rows = jdbc.queryForList(
-                    "SELECT id, user_id, oss_key FROM bio_paper WHERE title=''");
+                    "SELECT id, user_id, oss_key FROM bio_file"
+                            + " WHERE kind='paper' AND title=''");
             if (rows.isEmpty()) {
                 return;
             }
@@ -66,7 +67,8 @@ public class PaperTitleBackfillRunner implements ApplicationRunner {
                     if (title.isBlank()) {
                         continue;
                     }
-                    jdbc.update("UPDATE bio_paper SET title=? WHERE id=?", title, id);
+                    jdbc.update("UPDATE bio_file SET title=? WHERE id=? AND kind='paper'",
+                            title, id);
                     String userId = String.valueOf(row.get("user_id"));
                     touched.computeIfAbsent(userId, key -> new ArrayList<>()).add(id);
                     filled += 1;
@@ -82,8 +84,9 @@ public class PaperTitleBackfillRunner implements ApplicationRunner {
                 for (int i = 0; i < ids.size(); i++) {
                     args[i + 1] = ids.get(i);
                 }
-                jdbc.update("UPDATE bio_paper SET index_status='queued', index_error=NULL"
-                        + " WHERE user_id=? AND kb_enabled=1 AND id IN (" + in + ")", args);
+                jdbc.update("UPDATE bio_file SET index_status='queued', index_error=NULL"
+                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
+                        + " AND id IN (" + in + ")", args);
                 try {
                     internal.kbSync(Long.parseLong(userId));
                 } catch (NumberFormatException e) {

@@ -611,7 +611,12 @@ async function openDoc(row) {
   if (!(await confirmLeaveDoc())) return
   try {
     const { data } = await http.get(`/documents/${row.id}`)
-    editing.value = { id: data.id, name: data.name, content: data.content || '' }
+    editing.value = {
+      id: data.id,
+      name: data.name,
+      content: data.content || '',
+      version: data.version || 1,
+    }
     editingOrigin.value = { name: data.name, content: data.content || '' }
     docPreview.value = false
   } catch (error) {
@@ -635,16 +640,19 @@ async function saveDoc() {
   saving.value = true
   try {
     if (editing.value.id) {
-      await http.put(`/documents/${editing.value.id}`, {
+      const { data } = await http.put(`/documents/${editing.value.id}`, {
         name: editing.value.name,
         content: editing.value.content,
+        expected_version: editing.value.version,
       })
+      editing.value.version = data.version || editing.value.version
     } else {
       const { data } = await http.post('/documents', {
         name: editing.value.name || '新文档.md',
         content: editing.value.content,
       })
       editing.value.id = data.id
+      editing.value.version = data.version || 1
     }
     editingOrigin.value = { name: editing.value.name, content: editing.value.content }
     toast('文档已保存', 'success')

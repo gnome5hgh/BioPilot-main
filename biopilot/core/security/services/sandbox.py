@@ -1,7 +1,9 @@
-"""沙箱执行能力：把一段 Python 代码放进一次性容器里跑。
+"""沙箱执行能力：把一段代码或 shell 脚本放进一次性容器里跑。
 
 这是安全模块的**独立防护能力**（与命令解析同层同角色）——不是
 中间件洋葱的一部分，而是「执行一段代码」这个动作本身的实现，由工具直接调用。
+Python 与 shell 共用同一套容器政策：差别只在写进临时目录的脚本名与容器内的
+解释器命令，墙本身不变。
 
 边界由**容器**强制，不是进程内的字符串检查：默认断网、宿主目录以只读挂载进去、
 只开一个临时目录可写；容器另加一套固定加固（根文件系统只读、丢弃全部
@@ -26,7 +28,13 @@ from pathlib import Path
 #: 使每次跑的脚本本身留在磁盘上可回溯（不入镜像、不经 stdin）。
 _WORKDIR = "/work"
 _SCRIPT_NAME = "_run.py"
+_SHELL_NAME = "_run.sh"
 _SCRIPT_IN_CONTAINER = f"{_WORKDIR}/{_SCRIPT_NAME}"
+_SHELL_IN_CONTAINER = f"{_WORKDIR}/{_SHELL_NAME}"
+
+#: 容器内执行入口：Python 用解释器直接跑脚本，shell 用 bash 跑脚本。
+_PYTHON_COMMAND = ("python", _SCRIPT_IN_CONTAINER)
+_BASH_COMMAND = ("bash", _SHELL_IN_CONTAINER)
 
 #: 容器内运行代码的用户（镜像里建的非 root 用户，非 POSIX 平台的回退值）
 _SANDBOX_USER = "sandbox"
@@ -124,7 +132,8 @@ def _docker(args: list[str], timeout: float) -> subprocess.CompletedProcess:
         ["docker", *args], capture_output=True, text=True, timeout=timeout)
 
 
-def build_docker_argv(policy: SandboxPolicy, container_name: str) -> list[str]:
+def build_docker_argv(policy: SandboxPolicy, container_name: str,
+                      command: tuple[str, ...] | None = None) -> list[str]:
     """把政策拼成 ``docker`` 的参数表（安全关键，纯函数便于断言）。
 
     这里决定墙长什么样：断网、根只读、丢权限、禁提权、资源上限、非 root、
@@ -133,6 +142,7 @@ def build_docker_argv(policy: SandboxPolicy, container_name: str) -> list[str]:
     Args:
         policy: SandboxPolicy，本次执行政策
         container_name: str，容器名（超时后据此杀容器）
+        command: tuple[str, ...] | None，容器内执行入口；None 表示 Python 脚本入口
 
     Returns:
         list[str]，``docker`` 之后的完整参数（不含开头的 "docker"）。
@@ -162,7 +172,7 @@ def build_docker_argv(policy: SandboxPolicy, container_name: str) -> list[str]:
     # 唯一可写挂载：临时目录。
     argv += ["-v", f"{policy.scratch}:{_WORKDIR}:rw"]
 
-    argv += ["-w", _WORKDIR, policy.image, "python", _SCRIPT_IN_CONTAINER]
+    argv += ["-w", _WORKDIR, policy.image, *(command or _PYTHON_COMMAND)]
     return argv
 
 
@@ -208,14 +218,15 @@ def _snapshot(root: Path) -> dict[str, tuple[int, int]]:
     return snap
 
 
-def _diff_files(root: Path, before: dict[str, tuple[int, int]]) -> list[dict]:
+def _diff_files(root: Path, before: dict[str, tuple[int, int]],
+                script_name: str) -> list[dict]:
     """本次新增或改动的文件清单（脚本自身不算产物）。"""
     out: list[dict] = []
     for p in sorted(root.rglob("*")):
         if not p.is_file():
             continue
         rel = str(p.relative_to(root))
-        if rel == _SCRIPT_NAME:
+        if rel == script_name:
             continue
         st = p.stat()
         if before.get(rel) != (st.st_size, st.st_mtime_ns):
@@ -223,15 +234,18 @@ def _diff_files(root: Path, before: dict[str, tuple[int, int]]) -> list[dict]:
     return out
 
 
-def run_python(code: str, policy: SandboxPolicy) -> SandboxResult:
-    """在一次性容器里执行一段 Python 代码，返回结果。
+def _run_script(source: str, policy: SandboxPolicy, *, filename: str,
+                command: tuple[str, ...]) -> SandboxResult:
+    """把源码写成脚本再在一次性容器里执行（Python 与 shell 共用）。
 
-    代码先落到临时目录的脚本文件再执行（一次跑完容器即删），超时按容器名杀掉。
+    源码先落到临时目录的脚本文件再执行（一次跑完容器即删），超时按容器名杀掉。
     环境不可用时抛 SandboxUnavailable——不返回降级结果、不退回进程内。
 
     Args:
-        code: str，要执行的 Python 源码
+        source: str，要执行的源码或命令文本
         policy: SandboxPolicy，本次执行政策
+        filename: str，脚本在临时目录（即容器 ``/work``）里的文件名
+        command: tuple[str, ...]，容器内执行入口（解释器与脚本路径）
 
     Returns:
         SandboxResult，退出码 / 输出 / 是否超时 / 耗时 / 本次产物清单。
@@ -243,12 +257,12 @@ def run_python(code: str, policy: SandboxPolicy) -> SandboxResult:
 
     scratch = Path(policy.scratch)
     scratch.mkdir(parents=True, exist_ok=True)
-    (scratch / _SCRIPT_NAME).write_text(code, encoding="utf-8")
+    (scratch / filename).write_text(source, encoding="utf-8")
     # 脚本落盘后再拍快照——脚本本身不算产物（_diff_files 亦二次排除）。
     before = _snapshot(scratch)
 
     container_name = f"biopilot-sbx-{uuid.uuid4().hex[:12]}"
-    argv = build_docker_argv(policy, container_name)
+    argv = build_docker_argv(policy, container_name, command=command)
 
     started = time.monotonic()
     timed_out = False
@@ -271,8 +285,46 @@ def run_python(code: str, policy: SandboxPolicy) -> SandboxResult:
         stderr=stderr,
         timed_out=timed_out,
         duration_ms=duration_ms,
-        files=_diff_files(scratch, before),
+        files=_diff_files(scratch, before, filename),
     )
+
+
+def run_python(code: str, policy: SandboxPolicy) -> SandboxResult:
+    """在一次性容器里执行一段 Python 代码，返回结果。
+
+    Args:
+        code: str，要执行的 Python 源码
+        policy: SandboxPolicy，本次执行政策
+
+    Returns:
+        SandboxResult，退出码 / 输出 / 是否超时 / 耗时 / 本次产物清单。
+
+    Raises:
+        SandboxUnavailable: docker 不可执行或镜像不存在（fail-closed）。
+    """
+    return _run_script(code, policy, filename=_SCRIPT_NAME, command=_PYTHON_COMMAND)
+
+
+def run_shell(script: str, policy: SandboxPolicy) -> SandboxResult:
+    """在一次性容器里执行一段 shell 命令或脚本，返回结果。
+
+    命令文本写进 ``/work/_run.sh`` 后由 bash 执行；不拼 ``bash -c`` 字符串，
+    避免引号与转义差异。命令文本里的 CRLF 先归一化为 LF，防止 Windows 风格
+    换行让 bash 把 ``\\r`` 当成命令的一部分。
+
+    Args:
+        script: str，要执行的 shell 命令或脚本（可多行）
+        policy: SandboxPolicy，本次执行政策
+
+    Returns:
+        SandboxResult，退出码 / 输出 / 是否超时 / 耗时 / 本次产物清单。
+
+    Raises:
+        SandboxUnavailable: docker 不可执行或镜像不存在（fail-closed）。
+    """
+    normalized = script.replace("\r\n", "\n").replace("\r", "\n")
+    return _run_script(normalized, policy, filename=_SHELL_NAME,
+                       command=_BASH_COMMAND)
 
 
 def docker_available() -> bool:

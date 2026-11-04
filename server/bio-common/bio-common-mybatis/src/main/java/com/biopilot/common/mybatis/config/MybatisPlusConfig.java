@@ -27,7 +27,9 @@ public class MybatisPlusConfig {
             "sys_user", "sys_role", "sys_user_role", "sys_login_log",
             "bio_agent_state", "bio_security_audit_event",
             // 全局管理员配置，无 user_id 列（不是用户数据，不能按租户过滤）
-            "bio_literature_mcp_server");
+            "bio_literature_mcp_server",
+            // OSS 删除队列是系统级 outbox，没有 user_id；定时线程无登录态
+            "bio_oss_gc");
 
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {

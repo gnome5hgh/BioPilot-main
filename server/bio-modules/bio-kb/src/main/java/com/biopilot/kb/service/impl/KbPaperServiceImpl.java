@@ -22,10 +22,10 @@ import org.springframework.stereotype.Service;
 public class KbPaperServiceImpl implements KbPaperService {
 
     private static final String SELECT_PAPERS =
-            "SELECT id, title, file_name, oss_key, size_bytes, indexed, kb_enabled,"
+            "SELECT id, title, name AS file_name, oss_key, size_bytes, indexed, kb_enabled,"
                     + " citation_id, authors, year, journal, index_status, index_error,"
                     + " indexed_at, chunk_count, created_at"
-                    + " FROM bio_paper WHERE user_id=? ORDER BY seq DESC";
+                    + " FROM bio_file WHERE kind='paper' AND user_id=? ORDER BY seq DESC";
 
     private final JdbcTemplate jdbc;
     private final AgentInternalClient internal;
@@ -79,8 +79,9 @@ public class KbPaperServiceImpl implements KbPaperService {
         args.add(String.valueOf(userId));
         args.addAll(ids);
         int count = jdbc.update(
-                "UPDATE bio_paper SET index_status='queued', index_error=NULL"
-                        + " WHERE user_id=? AND kb_enabled=1 AND id IN (" + placeholders(ids.size()) + ")",
+                "UPDATE bio_file SET index_status='queued', index_error=NULL"
+                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
+                        + " AND id IN (" + placeholders(ids.size()) + ")",
                 args.toArray());
         internal.kbSync(userId);
         return count;
@@ -93,17 +94,18 @@ public class KbPaperServiceImpl implements KbPaperService {
         args.addAll(ids);
         if (!enabled) {
             return jdbc.update(
-                    "UPDATE bio_paper SET kb_enabled=0, indexed=0, index_status='not_added',"
+                    "UPDATE bio_file SET kb_enabled=0, indexed=0, index_status='not_added',"
                             + " index_error=NULL, indexed_at=NULL, chunk_count=0"
-                            + " WHERE user_id=? AND id IN (" + placeholders(ids.size()) + ")",
+                            + " WHERE kind='paper' AND user_id=? AND id IN ("
+                            + placeholders(ids.size()) + ")",
                     args.toArray());
         }
         // 已在库里的论文重复勾选不重置状态：重置会把 ready 打回 queued，
         // 白白触发一次全量重建。失败论文的重试走独立的 retry 端点。
         return jdbc.update(
-                "UPDATE bio_paper SET kb_enabled=1, indexed=0, index_status='queued',"
+                "UPDATE bio_file SET kb_enabled=1, indexed=0, index_status='queued',"
                         + " index_error=NULL, indexed_at=NULL, chunk_count=0"
-                        + " WHERE user_id=? AND kb_enabled=0 AND id IN ("
+                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=0 AND id IN ("
                         + placeholders(ids.size()) + ")",
                 args.toArray());
     }

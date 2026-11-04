@@ -18,13 +18,17 @@
 
 1. **熔断**（``circuit_break``）：无论参数如何都毁灭，或参数指向毁灭性目标——
    提权（``sudo``）与格式化（``mkfs``）没有合法形态；``rm -rf`` / ``dd`` 只在
-   目标指向根、系统目录或设备节点时熔断。命中即硬拒。
+   目标指向根、系统目录或设备节点时熔断。命中即硬拒。目标会先去掉成对引号、
+   识别 ``~`` / ``$HOME`` / ``${HOME}`` 的各种写法；绝对路径里带 glob 时按
+   glob 之前的路径前缀判定（``/*``、``/etc/*`` 熔断，``/work/*`` 放行）。
 2. **未知**（``parse_failed``）：解析不出结构（含语法错误节点）→ 不猜，升级确认。
 3. **不在安全清单内**（``unsafe``）：命令名不在只读/可重入清单里（含执行器、
    联网、装包类）→ 升级确认。
 
-**它是策略，不是隔离**——本项目没有隔离轴，所以这张表是命令与宿主之间唯一的东西，
-不配当那堵墙。
+**它是策略，不是隔离**——命令在一次性容器里执行时，真正的墙是容器（断网、根只读、
+只有 /work 可写）；这张表负责提前拒掉明显毁灭性的写法、并让不在常用清单内的命令
+先经用户确认。挂在命令参数上的内层载荷（``find -exec``、``xargs``、重定向目标、
+``env``/``nice`` 包装器）不会拆开分析——它们是已知空窗，不据此把它当边界。
 """
 
 import os
@@ -153,25 +157,68 @@ def parse(text: str) -> tuple[tuple[Command, ...], bool]:
     return tuple(commands), failed
 
 
+#: 家目录下任意深度的写法（带分隔符才算前缀，避免把 $HOME_DIR 误当成家目录）
+_HOME_PREFIXES = ("~/", "$HOME/", "${HOME}/")
+
+
+def _strip_quotes(target: str) -> str:
+    """去掉路径里的引号字符（引号可能只包住路径的一段，不能只剥首尾）。"""
+    return target.replace('"', "").replace("'", "")
+
+
+def _glob_prefix(target: str) -> str | None:
+    """返回绝对路径里 glob 之前的路径前缀；不含 glob 或相对路径返回 None。
+
+    ``/*`` 的前缀是 ``/``、``/etc/*`` 是 ``/etc/``；``*.tmp`` 这种相对路径
+    不算（它在可写目录里，删的是本次产物）。
+
+    Args:
+        target: str，命令里的一个参数
+
+    Returns:
+        str | None：glob 之前的路径前缀；没有可判定的绝对 glob 时为 None。
+    """
+    if not target.startswith("/"):
+        return None
+    indexes = [target.find(ch) for ch in "*?[" if ch in target]
+    if not indexes:
+        return None
+    return target[:min(indexes)]
+
+
 def _is_root_target(target: str) -> bool:
     """目标是否指向文件系统根、系统目录或家目录（含其下任意深度）。
 
     ``rm -rf /work/tmp`` 不该熔断（它在受控目录里），``rm -rf /``、``rm -rf /etc``
-    与 ``rm -rf /etc/nginx`` 都必须熔断。判据：目标消解 ``.``/``..`` 后落在
-    ROOT_TARGETS 的任一项之下（按路径前缀，不是字符串前缀），或写法里带 ``..``
-    （往上跳的意图明确，不猜）。
+    与 ``rm -rf /etc/nginx`` 都必须熔断。判据：目标先去掉引号、识别
+    ``~`` / ``$HOME`` 的各种写法；绝对路径带 glob 时只看 glob 之前的路径前缀，
+    且前缀只是根目录名的一段时也算（``/e*`` 能展开到 ``/etc``）；其余按路径
+    消解 ``.``/``..`` 后判断是否落在 ROOT_TARGETS 之下（按路径前缀，不是字符串
+    前缀），或写法里带 ``..``（往上跳的意图明确，不猜）。
+
+    Args:
+        target: str，命令里的一个参数（路径或含 glob 的路径）
+
+    Returns:
+        bool：指向根 / 系统目录 / 家目录或其下任意深度时为 True。
     """
-    if not target or target.startswith("-"):
+    text = _strip_quotes(target.strip())
+    if not text or text.startswith("-"):
         return False
-    if target in ("~", "$HOME") or target.startswith("~/"):
+    if text in ("~", "$HOME", "${HOME}") or text.startswith(_HOME_PREFIXES):
         return True
-    if ".." in target.split("/"):
+    if ".." in text.split("/"):
         return True
-    normalized = os.path.normpath(target)
+    glob_prefix = _glob_prefix(text)
+    candidate = text if glob_prefix is None else glob_prefix
+    normalized = os.path.normpath(candidate) if candidate else "/"
     for root in ROOT_TARGETS:
         if not root.startswith("/"):
             continue
         if normalized == root or normalized.startswith(root + "/"):
+            return True
+        # glob 前缀可能只是根目录名的一段（/e* 能展开到 /etc）：按名字前缀也熔断
+        if glob_prefix is not None and root.startswith(normalized):
             return True
     return False
 
@@ -185,8 +232,9 @@ def _circuit_break_reasons(cmd: Command) -> list[str]:
         reasons.append(f"{name}：提权/格式化类指令")
 
     if name == "rm":
-        recursive = any(_RM_RECURSIVE_RE.match(a) for a in cmd.args)
-        force = any(_RM_FORCE_RE.match(a) for a in cmd.args)
+        recursive = any(_RM_RECURSIVE_RE.match(a) or a == "--recursive"
+                        for a in cmd.args)
+        force = any(_RM_FORCE_RE.match(a) or a == "--force" for a in cmd.args)
         if recursive and force and any(_is_root_target(a) for a in cmd.args):
             reasons.append("rm -rf 的目标是根/系统目录")
 

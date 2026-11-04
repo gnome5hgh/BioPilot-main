@@ -138,28 +138,21 @@ class ToolResultStore:
         """
         key = object_key(user_id, session_id, tool_call_id)
         client = self._get_client()
-        if client is not None:
-            try:
-                data = text.encode("utf-8")
-                client.put_object(
-                    self._bucket, key, BytesIO(data), len(data),
-                    content_type="text/plain; charset=utf-8")
-                # 对象已落 MinIO：本地副本不存在，不能把未写过的路径交给调用方
-                return key, ""
-            except Exception as exc:
-                self._failed_at = time.monotonic()
-                logger.warning("工具结果写 MinIO 失败，回退本地: %r", exc)
-        local_path = self._local_path(user_id, session_id, tool_call_id)
+        if client is None:
+            return None
         try:
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            local_path.write_text(text, encoding="utf-8")
-            return "", str(local_path)
-        except OSError as exc:
-            logger.warning("工具结果写本地失败: %r", exc)
+            data = text.encode("utf-8")
+            client.put_object(
+                self._bucket, key, BytesIO(data), len(data),
+                content_type="text/plain; charset=utf-8")
+            return key, ""
+        except Exception as exc:
+            self._failed_at = time.monotonic()
+            logger.warning("工具结果写 MinIO 失败（不再回退本地）: %r", exc)
             return None
 
     def get(self, user_id: str, session_id: str, tool_call_id: str) -> str | None:
-        """按会话与 tool_call_id 取回原文（先 MinIO，后本地）。
+        """按会话与 tool_call_id 取回原文（只读 MinIO）。
 
         Args:
             session_id: 会话标识。
@@ -168,13 +161,7 @@ class ToolResultStore:
         Returns:
             原文；未找到或存储不可用时为 None。
         """
-        text = self.get_key(object_key(user_id, session_id, tool_call_id))
-        if text is not None:
-            return text
-        try:
-            return self._local_path(user_id, session_id, tool_call_id).read_text(encoding="utf-8")
-        except OSError:
-            return None
+        return self.get_key(object_key(user_id, session_id, tool_call_id))
 
     def get_key(self, key: str) -> str | None:
         """按对象键取回原文。

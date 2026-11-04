@@ -1,95 +1,84 @@
-# biopilot/tools/file/grep.py
-"""GrepTool：在文件/目录内按正则搜文本（只读）。
+"""GrepTool：在平台文档内按正则搜文本（只读）。
 
-edit_file 的 search-replace 锚点确认、review-agent 事实核对、paper-agent 下载校验。
-只读 → low、无确认。目录递归只搜文本文件（md/txt/py/jsonl），跳过二进制/pdf。
+不再递归本地目录：按 id/name 搜单篇，或列最近文档后逐篇取正文搜索。返回
+``document id name line:text``，命中行原样返回，便于作为 edit_file 的锚点。
 """
 import re
-from pathlib import Path
 
-from biopilot.core.security.middleware.workspace import is_denied_path
+from biopilot.common.platform import PlatformError
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import SEARCH_HINTS
-
-_TEXT_SUFFIXES = (".md", ".txt", ".py", ".jsonl")
+from biopilot.tools.file._support import current_user_id, platform_for
 
 
 class GrepTool(Tool):
-    """在文件/目录内按正则搜文本的只读工具（目录递归只搜文本文件）。
+    """在平台文档内按正则搜文本的只读工具。
 
     Attributes:
         name: str，工具名 "grep"
         description: str，工具描述
-        parameters: dict，JSON Schema（pattern/path）
+        parameters: dict，JSON Schema（pattern/id/name/limit）
         risk_level: str，"low"（只读）
-        root_hints: list[str]，SEARCH_HINTS（记忆/产物根）
     """
     name = "grep"
-    description = ("在文件或目录内搜索文本（正则），返回 file:line 匹配行。"
-                   "用于确认锚点文本、核对内容。目录递归搜索 md/txt 等文本文件。"
-                   "path 必须显式指定，不再有默认语料根。")
+    description = ("在平台文档内搜索文本（正则），返回 document id name line:text。"
+                   "给 id/name 搜单篇；都不给时搜索最近文档（最多 20 篇）。")
     parameters = {
         "type": "object",
         "properties": {
-            "pattern": {"type": "string", "description": "正则表达式（如 'Disentangled Progressive'）"},
-            "path": {"type": "string", "format": "path",
-                     "description": "文件或目录绝对路径（目录递归；必填）。"
-                                    "别名 root 同样接受"},
-            # 别名的声明不是可选项：路径策略中间件按 format="path" 收集要校验的参数名，
-            # 别名不进 schema 就等于开了一条绕过敏感路径黑名单的通道。
-            "root": {"type": "string", "format": "path",
-                     "description": "path 的别名（等同）。两者都传时以 path 为准。"},
+            "pattern": {"type": "string", "description": "正则表达式"},
+            "id": {"type": "string", "format": "file_id",
+                   "description": "只搜这一篇文档 id"},
+            "name": {"type": "string", "format": "file_name",
+                     "description": "只搜这一篇文档名"},
+            "limit": {"type": "integer", "description": "最多返回条数；默认 30"},
         },
         "required": ["pattern"],
     }
     risk_level = "low"
-    provenance = "local_file"                  # 读的是用户文件：内容是外部数据
-    root_hints = SEARCH_HINTS
+    provenance = "local_file"
 
-    def execute(self, pattern: str, path: str | None = None,
-                root: str | None = None) -> ToolResult:
-        """在文件或目录内按正则搜索文本,返回 file:line 匹配行(最多 30 条)。
+    def execute(self, pattern: str, id: str | None = None,
+                name: str | None = None, limit: int = 30) -> ToolResult:
+        """在平台文档内按正则搜索文本。
 
         Args:
-            pattern: 正则表达式
-            path: 文件路径或目录(目录递归,只搜文本文件,跳过二进制/PDF);必填
-            root: str | None，path 的别名（工具提示词里把数据目录称作「根」，
-                模型常按该措辞传参；接受别名省掉一次「参数名不对」的往返）
+            pattern: 正则表达式。
+            id: 只搜该文档 id。
+            name: 只搜该文档名。
+            limit: 最多返回条数。
 
         Returns:
-            匹配行每行一条(file:line: 原文);无匹配返回"无匹配"
-
+            ToolResult，每行 ``document id name line:text``；无匹配返回“无匹配”。
         """
-        # root 是模型视角的常用措辞（[目录] 提示用「根」），与 path 等义
-        if path is None and root:
-            path = root
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            return ToolResult(text=f"正则无效: {e}")
-        if not path:
-            return ToolResult(text="未传 path——请显式给文件或目录的绝对路径")
-        # cfg 防御式读取(测试与裸构造时可能没有 _config)。敏感路径黑名单:
-        # 目录递归时跳过审计/密钥等目录,防通配符枚举。
-        cfg = getattr(self, "_config", None)
-        p = Path(path)
-        files = [p] if p.is_file() else [
-            f for f in p.rglob("*")
-            if f.suffix.lower() in _TEXT_SUFFIXES
-            and (cfg is None or not is_denied_path(f.resolve(), cfg.runtime.workspace))
-        ]
-        results: list[str] = []
-        for f in files:
-            try:
-                lines = f.read_text(encoding="utf-8").splitlines()
-            except (UnicodeDecodeError, OSError):
-                continue    # 非文本/权限问题跳过,不阻断整体搜索
-            for i, line in enumerate(lines, 1):
-                if regex.search(line):
-                    # 返回原始行(不 strip/截断):grep 命中会当作 edit_file 的 old_text
-                    # 锚点,锚点必须与文件逐字节一致,strip/截断会让模型复制过去的锚点
-                    # 匹配失败。行可能很长,但作为锚点需要原样;用 30 条封顶控制量。
-                    results.append(f"{f}:{i}: {line}")
-                    if len(results) >= 30:                       # 封顶 30 条
-                        return ToolResult(text="\n".join(results))
-        return ToolResult(text="\n".join(results) if results else "无匹配")
+            return ToolResult(text=f"正则无效: {e}", is_error=True)
+        user = current_user_id()
+        platform = platform_for(self)
+        cap = max(1, min(int(limit or 30), 100))
+        hits: list[str] = []
+        try:
+            docs: list[dict] = []
+            if id:
+                docs = [platform.get_document(user, id)]
+            elif name:
+                docs = [platform.get_document_by_name(user, name)]
+            else:
+                docs = platform.list_documents(user)[:20]
+            for meta in docs:
+                doc_id = str(meta.get("id") or "")
+                doc_name = str(meta.get("name") or "")
+                content = meta.get("content")
+                if content is None:
+                    content = platform.get_document(user, doc_id).get("content")
+                for line_no, line in enumerate(str(content or "").splitlines(), 1):
+                    if regex.search(line):
+                        hits.append(f"{doc_id}\t{doc_name}\t{line_no}:{line}")
+                        if len(hits) >= cap:
+                            return ToolResult(text="\n".join(hits))
+            return ToolResult(text="\n".join(hits) if hits else "无匹配")
+        except PlatformError as e:
+            return ToolResult(text=f"搜索失败：{e}", is_error=True)
+        finally:
+            platform.close()

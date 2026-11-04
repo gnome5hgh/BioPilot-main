@@ -1,103 +1,67 @@
-"""ReadPdfTool：本地解析 PDF 为 markdown 文本，不依赖任何外部服务。
+"""ReadPdfTool：从平台取回 PDF 字节并在内存中解析为文本。
 
-解析走 PyMuPDF 直读（见 ``pdf_extract``）。以前这里绕道检索服务栈取解析结果，代价是
-读一篇论文要排在索引/检索共用的全局锁后面、还要等外部解析服务——读本地文件本不该有
-这些牵扯。抽取实现与索引共用一个模块，但运行期互不牵连：读一篇 PDF 不碰服务、
-也不占索引/检索那把全局锁。
+论文/数据文件都只存在 OSS；通过 ``/internal/attachments`` 取字节后交给
+``extract_pdf_bytes``，不再依赖本地路径，也没有目录模糊匹配。
 """
-from pathlib import Path
-
+from biopilot.common.platform import PlatformError
+from biopilot.core.rag.parsers.pdf_extract import extract_pdf_bytes
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.rag.parsers.pdf_extract import extract_pdf
-
-
-def _normalize_path(p: str) -> str:
-    """归一化路径:连续空白折叠为单空格 + 小写。用于模糊匹配——LLM 可能把双空格
-    文件名折叠成单空格,归一化后与真实文件名一致。
-
-    Args:
-        p: str，路径或文件名
-
-    Returns:
-        折叠连续空白并小写后的字符串（模糊匹配用）。
-    """
-    return " ".join(p.split()).lower()
+from biopilot.tools.file._support import current_user_id, platform_for
 
 
 class ReadPdfTool(Tool):
-    """解析 PDF 为 markdown 文本的只读工具（本地 PyMuPDF 直读）。
+    """解析平台 PDF 为 markdown 文本的只读工具。
 
     Attributes:
         name: str，工具名 "read_pdf"
         description: str，工具描述
-        parameters: dict，JSON Schema（path）
+        parameters: dict，JSON Schema（id/kind）
         risk_level: str，"low"（只读）
-        provenance: str，"pdf"（论文全文属外部内容）
+        provenance: str，"pdf"
         side_effects: list[str]，["read_file"]
     """
-
     name = "read_pdf"
-    description = "解析 PDF 论文为文本（本地提取，章节标题按版面还原）"
+    description = ("解析平台 PDF 为文本（内存提取，章节标题按版面还原）。"
+                   "论文用 kind=paper + paper_id；数据文件/产物用 kind=file + file_id。")
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "format": "path", "description": "PDF 绝对路径"},
+            "id": {"type": "string", "format": "file_id",
+                   "description": "论文/文件 id"},
+            "kind": {"type": "string", "enum": ["paper", "file", "data", "artifact"],
+                     "description": "paper 或 file/data/artifact；默认 paper"},
         },
-        "required": ["path"],
+        "required": ["id"],
     }
     risk_level = "low"
-    provenance = "pdf"                       # 论文全文属外部内容
+    provenance = "pdf"
     side_effects = ["read_file"]
 
-    def execute(self, path: str) -> ToolResult:
-        """解析 PDF 为 markdown 文本,顶部带论文标题;解析不出内容时给出提示。
-
-        精确路径优先(走抽取缓存,同一篇被反复读时只解析一次);精确失败才走容错分支
-        ——LLM 可能折叠路径空白,按归一化 basename 在请求路径所在目录找唯一命中。
+    def execute(self, id: str, kind: str = "paper") -> ToolResult:
+        """取回 PDF 字节并解析为文本。
 
         Args:
-            path: str，PDF 文件绝对路径
+            id: 论文/文件 id。
+            kind: paper/file/data/artifact。
 
         Returns:
-            ToolResult，文本为「标题 + 正文 markdown」；解析不出内容时返回提示文本。
+            ToolResult，文本为「标题 + 正文 markdown」；失败时返回可行动错误文本。
         """
+        user = current_user_id()
+        platform = platform_for(self)
+        attachment_kind = "paper" if kind == "paper" else "file"
         try:
-            doc = extract_pdf(path)
-        except (FileNotFoundError, OSError):
-            # 精确 miss → 容错分支:LLM 可能折叠路径空白(双空格文件名被归一成单空格),
-            # 按归一化 basename 在 pdf 根下找唯一命中。
-            try:
-                doc = self._resolve_fuzzy(path)
-            except (FileNotFoundError, ValueError) as e:
-                # 0/多候选直接上抛,由执行器转为错误结果——旧行为返回含错误文本的结果
-                # 会被审计记为成功,agent 分不清读成功还是读到错误。LLM 仍能看到可读
-                # 错误文本(经执行器的 "Tool error:" 包装)。
-                raise e
+            data, meta = platform.attachment(user, attachment_kind, id)
+        except PlatformError as e:
+            return ToolResult(text=f"读取 PDF 失败：{e}", is_error=True)
+        finally:
+            platform.close()
+        try:
+            doc = extract_pdf_bytes(data, title=str(meta.get("name") or ""),
+                                    digest=str(meta.get("sha256") or ""))
+        except Exception as e:  # PDF 打不开/损坏/加密 → 降级文本
+            return ToolResult(text=f"PDF 解析失败：{e}", is_error=True)
         text = doc.body
         if doc.title:
-            text = f"# {doc.title}\n\n" + text   # 标题在顶部，note-agent 据此拿干净全标题
+            text = f"# {doc.title}\n\n" + text
         return ToolResult(text=text or "（PDF 未能解析出文本）")
-
-    def _resolve_fuzzy(self, path: str):
-        """精确路径失败时的容错解析。安全语义:唯一命中才用、不猜。
-
-        0 候选 → 明确"未找到";多候选 → 明确"不唯一"交 LLM 澄清。搜索根只取
-        **请求路径所在目录**——不再有全局 PDF 语料根，也不跨目录递归。
-
-        Args:
-            path: str，精确解析失败的原始路径
-
-        Returns:
-            唯一命中时返回解析结果；0 候选抛 FileNotFoundError，多候选抛 ValueError（交 LLM 澄清）。
-        """
-        root = Path(path).parent
-        # 归一化目标取 basename 而非全路径:LLM 空格折叠只影响文件名本身,子目录层级
-        # 不应参与匹配——否则同 basename 异目录的文件会被全路径比较误判为唯一命中,
-        # 该不唯一的场景本应报"不唯一"交 LLM 澄清(安全语义,不猜)。
-        target = _normalize_path(Path(path).name)
-        hits = [f for f in root.rglob("*.pdf") if _normalize_path(f.name) == target]
-        if len(hits) == 1:
-            return extract_pdf(str(hits[0]))
-        if not hits:
-            raise FileNotFoundError(f"PDF 未找到: {path}")
-        raise ValueError(f"PDF 路径不唯一（{len(hits)} 个候选），请明确指定: {path}")

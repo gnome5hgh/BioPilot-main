@@ -26,4 +26,4 @@ TOOLS = make_tools(BioPilotConfig.from_env(), [
     SpawnSubAgentTool(agent_timeouts=BioPilotConfig.from_env().agents.timeouts,
                    max_turns=BioPilotConfig.from_env().agents.max_turns),
     SaveDocumentTool(),  # 四份研究产物成稿后入库（网页文档编辑器可见）
-], default_write_root="research") + get_recall_tools()
+]) + get_recall_tools()

@@ -4,8 +4,9 @@ package com.biopilot.file.domain;
 public enum UserFileKind {
 
     PAPER("paper", "论文"),
-    FILE("file", "数据文件"),
-    DOCUMENT("document", "文档");
+    DATA("data", "数据文件"),
+    DOCUMENT("document", "文档"),
+    ARTIFACT("artifact", "分析产物");
 
     private final String code;
     private final String label;

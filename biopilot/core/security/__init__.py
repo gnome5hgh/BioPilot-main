@@ -27,10 +27,6 @@ from biopilot.core.security.middleware.base import (
 )
 from biopilot.core.security.domain import AuditEntry, ToolContext
 from biopilot.core.security.middleware.audit import AuditMiddleware
-from biopilot.core.security.middleware.workspace import (
-    WorkspacePolicy,
-    WorkspacePolicyMiddleware,
-)
 from biopilot.core.security.middleware.content_guard import (
     ContentGuardMiddleware,
     has_critical,
@@ -43,7 +39,6 @@ __all__ = [
     "ToolContext", "SecurityMiddleware", "SecurityError",
     "ConfirmRequired", "SecurityBlocked",
     "AuditMiddleware", "AuditEntry",
-    "WorkspacePolicy", "WorkspacePolicyMiddleware",
     "scan", "has_critical", "ContentGuardMiddleware",
     "CommandGuardMiddleware", "PolicyEngineMiddleware",
     "ApprovalOutcome", "ToolDecision", "ToolResultStatus",

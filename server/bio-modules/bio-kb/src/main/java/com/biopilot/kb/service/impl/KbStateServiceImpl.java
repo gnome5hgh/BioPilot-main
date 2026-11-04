@@ -48,19 +48,21 @@ public class KbStateServiceImpl implements KbStateService {
     public Map<String, Object> normalize(String userId, boolean requeueIndexing) {
         return transaction.execute(status -> {
             int reset = jdbc.update(
-                    "UPDATE bio_paper SET indexed=0, index_status='not_added',"
+                    "UPDATE bio_file SET indexed=0, index_status='not_added',"
                             + " index_error=NULL, indexed_at=NULL, chunk_count=0"
-                            + " WHERE user_id=? AND kb_enabled=0"
+                            + " WHERE kind='paper' AND user_id=? AND kb_enabled=0"
                             + " AND (indexed<>0 OR index_status<>'not_added' OR chunk_count<>0"
                             + " OR index_error IS NOT NULL OR indexed_at IS NOT NULL)",
                     userId);
             int queued = jdbc.update(
-                    "UPDATE bio_paper SET index_status='queued', index_error=NULL"
-                            + " WHERE user_id=? AND kb_enabled=1 AND index_status='not_added'",
+                    "UPDATE bio_file SET index_status='queued', index_error=NULL"
+                            + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
+                            + " AND index_status='not_added'",
                     userId);
             int requeued = requeueIndexing ? jdbc.update(
-                    "UPDATE bio_paper SET index_status='queued', index_error=NULL"
-                            + " WHERE user_id=? AND kb_enabled=1 AND index_status='indexing'",
+                    "UPDATE bio_file SET index_status='queued', index_error=NULL"
+                            + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
+                            + " AND index_status='indexing'",
                     userId) : 0;
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("reset", reset);
@@ -81,9 +83,16 @@ public class KbStateServiceImpl implements KbStateService {
      */
     public int requeueAll(String userId) {
         return jdbc.update(
-                "UPDATE bio_paper SET index_status='queued', index_error=NULL"
-                        + " WHERE user_id=? AND kb_enabled=1",
+                "UPDATE bio_file SET index_status='queued', index_error=NULL"
+                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=1",
                 userId);
+    }
+
+    public int requeue(String userId, String paperId) {
+        return jdbc.update(
+                "UPDATE bio_file SET index_status='queued', index_error=NULL"
+                        + " WHERE kind='paper' AND user_id=? AND id=? AND kb_enabled=1",
+                userId, paperId);
     }
 
     /**
@@ -104,16 +113,17 @@ public class KbStateServiceImpl implements KbStateService {
             args.add(userId);
             args.addAll(ids);
             List<String> accepted = jdbc.queryForList(
-                    "SELECT id FROM bio_paper WHERE user_id=? AND kb_enabled=1"
-                            + " AND id IN (" + in + ")",
+                    "SELECT id FROM bio_file WHERE kind='paper' AND user_id=?"
+                            + " AND kb_enabled=1 AND id IN (" + in + ")",
                     String.class, args.toArray());
             if (!accepted.isEmpty()) {
                 String acceptedIn = placeholders(accepted.size());
                 List<Object> updateArgs = new ArrayList<>();
                 updateArgs.add(userId);
                 updateArgs.addAll(accepted);
-                jdbc.update("UPDATE bio_paper SET index_status='indexing', index_error=NULL"
-                        + " WHERE user_id=? AND kb_enabled=1 AND id IN (" + acceptedIn + ")",
+                jdbc.update("UPDATE bio_file SET index_status='indexing', index_error=NULL"
+                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
+                        + " AND id IN (" + acceptedIn + ")",
                         updateArgs.toArray());
             }
             return accepted;
@@ -147,17 +157,17 @@ public class KbStateServiceImpl implements KbStateService {
                 int rows;
                 if (ok) {
                     rows = jdbc.update(
-                            "UPDATE bio_paper SET indexed=1, index_status='indexed',"
+                            "UPDATE bio_file SET indexed=1, index_status='indexed',"
                                     + " index_error=NULL, indexed_at=?, chunk_count=?"
-                                    + " WHERE user_id=? AND id=? AND kb_enabled=1"
-                                    + " AND index_status='indexing'",
+                                    + " WHERE kind='paper' AND user_id=? AND id=?"
+                                    + " AND kb_enabled=1 AND index_status='indexing'",
                             now, Math.max(0, chunks), userId, paperId);
                 } else {
                     rows = jdbc.update(
-                            "UPDATE bio_paper SET indexed=0, index_status='failed',"
+                            "UPDATE bio_file SET indexed=0, index_status='failed',"
                                     + " index_error=?, chunk_count=0"
-                                    + " WHERE user_id=? AND id=? AND kb_enabled=1"
-                                    + " AND index_status='indexing'",
+                                    + " WHERE kind='paper' AND user_id=? AND id=?"
+                                    + " AND kb_enabled=1 AND index_status='indexing'",
                             truncate(stringValue(item.get("error")), ERROR_LIMIT),
                             userId, paperId);
                 }

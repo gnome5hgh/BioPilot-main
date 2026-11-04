@@ -42,7 +42,7 @@ public class LiteratureImportServiceImpl implements LiteratureImportService {
             throw new ServiceException(422, "文献标题为空，无法加入论文库");
         }
         String name = sanitizeName(title.length() > 120 ? title.substring(0, 120) : title) + ".pdf";
-        papers.assertNameAvailable(name);
+        papers.assertNameAvailable(userId, name);
 
         List<String> candidates = new ArrayList<>();
         String doi = String.valueOf(body.getOrDefault("doi", "")).trim();

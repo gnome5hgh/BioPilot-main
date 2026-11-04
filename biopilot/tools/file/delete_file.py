@@ -1,73 +1,80 @@
-"""DeleteFileTool：删除一个文件（不可逆，需用户确认）。
+"""DeleteFileTool：删除平台文档或数据文件/分析产物。
 
-比 write_file 更保守：只收精确的绝对路径，不做便捷入口、不做 basename 容错搜索。
-写错地方只是写错，删错文件不可逆，所以宁可让调用方多给一次完整路径。
+删除不可逆：文档按 id/名字删，数据文件与产物按 id 删。对象由 Java 在行删除后
+交给 GC，失败只留孤儿，不会留下指向不存在对象的行。
 """
-from pathlib import Path
-
+from biopilot.common.platform import PlatformError
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import ScopeRoot
+from biopilot.tools.file._support import current_user_id, platform_for
 
 
 class DeleteFileTool(Tool):
-    """删除单个文件的写入类工具（需用户确认）。
+    """删除平台文件的写入类工具（需用户确认）。
 
     Attributes:
         name: str，工具名 "delete_file"
         description: str，工具描述
-        parameters: dict，JSON Schema（path）
-        risk_level: str，"critical"（删除不可逆；即使免问档调到 high 仍会确认）
-        side_effects: list[str]，["delete_file"]（据此纳入同路径写互斥）
+        parameters: dict，JSON Schema（kind/id/name）
+        risk_level: str，"critical"
+        side_effects: list[str]，["delete_file"]
     """
-
     name = "delete_file"
-    description = (
-        "删除一个文件（不可逆）。path 必须是精确的绝对路径，"
-        "不支持通配符、不支持批量、不猜测相近文件名；目录一律拒绝。")
+    description = ("删除一个平台文件（不可逆）。kind=document 时用 id 或 name；"
+                   "kind=data/artifact 时必须用 id。不支持通配符、不支持批量。")
     parameters = {
         "type": "object",
         "properties": {
-            "path": {
-                "type": "string",
-                "format": "path",
-                "description": "要删除的文件的绝对路径（精确匹配）",
-            },
+            "kind": {"type": "string", "enum": ["document", "data", "artifact"],
+                     "description": "文件类型"},
+            "id": {"type": "string", "format": "file_id",
+                   "description": "文件/文档 id"},
+            "name": {"type": "string", "format": "file_name",
+                     "description": "文档名（仅 document）"},
         },
-        "required": ["path"],
+        "required": ["kind"],
     }
-    risk_level = "critical"                    # 不可逆操作；即使免问档调到 high 仍会确认
+    risk_level = "critical"
     side_effects = ["delete_file"]
-    root_hints = [ScopeRoot.RESEARCH, ScopeRoot.ANALYSIS]
 
-    def effective_target_path(self, args: dict) -> str | None:
-        """导出写互斥键：被删的那个路径（基类默认行为，显式声明以表明契约）。
-
-        Args:
-            args: dict，已解析的工具调用参数
-
-        Returns:
-            目标文件的绝对路径；无 path 参数时 None。
-        """
-        return args.get("path")
-
-    def execute(self, path: str) -> ToolResult:
-        """删除文件；不存在或目标是目录时返回可行动的错误文本。
+    def execute(self, kind: str, id: str | None = None,
+                name: str | None = None) -> ToolResult:
+        """删除平台文档/数据文件/产物。
 
         Args:
-            path: str，要删除的文件的绝对路径
+            kind: document/data/artifact。
+            id: 文件或文档 id。
+            name: 文档名（document 且没有 id 时使用）。
 
         Returns:
-            ToolResult；删除成功时 completion 供终端渲染完成行。
+            ToolResult；参数缺失/不存在/平台失败时返回错误文本。
         """
-        p = Path(path)
-        if not p.exists():
-            return ToolResult(text=f"文件不存在，未删除任何东西: {path}", is_error=True)
-        if p.is_dir():
-            return ToolResult(
-                text=f"目标是目录，本工具只删文件；请给出目录内的具体文件路径: {path}",
-                is_error=True)
+        user = current_user_id()
+        platform = platform_for(self)
         try:
-            p.unlink()
-        except OSError as e:
-            return ToolResult(text=f"删除失败: {e}", is_error=True)
-        return ToolResult(text=f"已删除 {path}", completion=f"File deleted: {path}")
+            if kind == "document":
+                doc_id = id
+                if not doc_id and name:
+                    doc_id = str(platform.get_document_by_name(user, name).get("id") or "")
+                if not doc_id:
+                    return ToolResult(text="删除文档需要 id 或 name", is_error=True)
+                platform.delete_document(user, doc_id)
+                return ToolResult(text=f"已删除文档 {doc_id}")
+            if not id:
+                return ToolResult(text=f"删除 {kind} 需要 id", is_error=True)
+            platform.delete_file(user, id)
+            return ToolResult(text=f"已删除 {kind} {id}")
+        except PlatformError as e:
+            return ToolResult(text=f"删除失败：{e}", is_error=True)
+        finally:
+            platform.close()
+
+    def effective_target_key(self, args: dict) -> str | None:
+        """确认键作用域：文档 id/名字，或文件 id。"""
+        user = current_user_id()
+        kind = args.get("kind") or "document"
+        if args.get("id"):
+            return f"{kind}:{user}:{args['id']}"
+        name = args.get("name")
+        if isinstance(name, str) and name.strip():
+            return f"name:{user}:{name.strip().lower()}"
+        return None

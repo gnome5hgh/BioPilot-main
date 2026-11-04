@@ -1,142 +1,81 @@
-"""WriteFileTool：写入或整篇重写文件(filename+dir 便捷入口 / path 精确入口)。
+"""WriteFileTool：把文本写入平台文档或分析产物。
 
-path 可写任意绝对路径(敏感路径黑名单除外,WorkspacePolicyMiddleware 强制)。
-filename+dir 便捷入口必须显式给 dir；只有装配时明确配置了默认写根的 agent
-（如 research-agent）才能省略。笔记不再有默认写根：保存位置由任务文本给出。
-本工具只负责落盘 + 登记产物,不做索引入库——论文索引归 rag-agent,笔记类产物
-不参与检索。
+不再接受本地路径：文档走 ``/internal/documents/save``（同名覆盖、OSS 落盘），
+分析产物走 ``/internal/files/artifacts``（不占用户可见名字）。
 """
-from pathlib import Path
-
+from biopilot.common.platform import PlatformError
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.security.middleware.workspace import is_denied_path
-from biopilot.core.tool.constants import WRITE_HINTS
-from biopilot.common.storage.atomic import atomic_write
+from biopilot.tools.file._support import (
+    content_type_for, current_run_id, current_user_id, normalize_name, platform_for,
+)
 
 
 class WriteFileTool(Tool):
-    """写入或整篇重写文件的工具（path 精确入口 / filename+dir 便捷入口）。
+    """写入平台文档或分析产物的工具。
 
     Attributes:
         name: str，工具名 "write_file"
-        description: str，工具描述（含双入口说明）
-        parameters: dict，JSON Schema（content/path/filename/dir）
-        risk_level: str，"high"（写/覆盖操作，高于默认免问档 → 执行前确认）
-        root_hints: list[str]，WRITE_HINTS
+        description: str，工具描述
+        parameters: dict，JSON Schema（name/content/kind）
+        risk_level: str，"high"（覆盖型写）
         side_effects: list[str]，["write_file"]
-        wants_run_state: bool，True（写盘后登记产物账本）
-        _default_write_root: str | None，装配注入的默认写根（仅显式配置的角色可用）
     """
     name = "write_file"
-    description = (
-        "写入或整篇重写文件。两种入口二选一：① path=绝对路径（精确控制，敏感路径黑名单外均可写）；"
-        "② filename=纯文件名 + dir=绝对目录（filename 模式必须给 dir；"
-        "只有本角色明确配置了默认写根时才可省略）。"
-        "已存在的文件将被覆盖（小范围修改请用 edit_file 定向替换）。"
-        "任务文本指定了保存位置时必须显式传 path 或 dir。"
-    )
+    description = ("把文本保存到平台：kind=document（默认）按名字写入文档编辑器，"
+                   "同名覆盖；kind=artifact 作为分析产物入库（返回 file_id）。"
+                   "不再接受本地路径。")
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "format": "path",
-                     "description": "目标文件绝对路径（与 filename 二选一）"},
-            "filename": {"type": "string",
-                         "description": "纯文件名（不得含路径分隔符或..；与 path 二选一）"},
-            "dir": {"type": "string", "format": "path",
-                    "description": "filename 模式的目标目录（必须显式给出）"},
-            "content": {"type": "string", "format": "content", "description": "文件完整新内容"},
+            "name": {"type": "string", "format": "file_name",
+                     "description": "文件名/文档名（如 笔记.md）"},
+            "content": {"type": "string", "format": "content",
+                        "description": "完整文本内容"},
+            "kind": {"type": "string", "enum": ["document", "artifact"],
+                     "description": "document=文档编辑器；artifact=分析产物；默认 document"},
         },
-        "required": ["content"],
+        "required": ["name", "content"],
     }
-    risk_level = "high"                        # 写/覆盖操作；高于默认免问档 → 执行前确认
-    root_hints = WRITE_HINTS
+    risk_level = "high"
     side_effects = ["write_file"]
-    #: 注入本次 run 的状态容器，用于把落盘路径登记进产物账本
-    wants_run_state = True
 
-    def _resolve_target(self, path, filename, dir) -> Path:
-        """双入口 → 落盘路径的组合规则唯一真相源。
-
-        execute() 与 effective_target_path() 共用，组合规则只写这一份：
-        path 模式 → Path(path)；filename 模式 → (dir 或本角色默认写根)/filename。
-        入口冲突/缺失、filename 含路径分隔符或 ".."、无 dir 且无默认写根——一律抛
-        ValueError（消息即 LLM 面报错文本）。execute 把它转成 ToolResult，
-        effective_target_path 把它折叠为 None（该调用必然报错、不落盘，
-        确认键/写锁无需作用域）。
+    def execute(self, name: str, content: str, kind: str = "document") -> ToolResult:
+        """写入平台文档或分析产物。
 
         Args:
-            path: str | None，精确入口的绝对路径
-            filename: str | None，便捷入口的文件名（须为纯文件名）
-            dir: str | None，便捷入口的目标目录（缺省用默认写根）
+            name: 文件名/文档名。
+            content: 完整文本。
+            kind: document 或 data。
 
         Returns:
-            落盘路径 Path；入口冲突/缺失、filename 非法、无默认写根时抛 ValueError（消息即报错文本）。
+            ToolResult，文本含 id/版本；平台失败时为错误文本。
         """
-        # 双入口互斥校验：path 与 filename 恰好给一个
-        if path and filename:
-            raise ValueError("path 与 filename 只能二选一，请勿同时提供")
-        if not path and not filename:
-            raise ValueError("必须提供 path（绝对路径）或 filename（落默认根/指定 dir）")
-        if path:
-            return Path(path)
-        # filename 不是 path 参数、不经中间件校验——穿越与敏感名在此工具内防
-        if not filename or "/" in filename or "\\" in filename or ".." in filename:
-            raise ValueError(f"非法 filename: {filename!r}——只允许纯文件名，目录请用 dir 参数")
-        root = dir or getattr(self, "_default_write_root", None)
-        if not root:
-            raise ValueError("未指定 dir 且本 agent 未配置默认写根——请显式传 dir（绝对目录）或改用 path（绝对路径）")
-        return Path(root) / filename
-
-    def effective_target_path(self, args: dict) -> str | None:
-        """导出有效目标路径供会话确认键与写锁键控。
-
-        filename 便捷入口在此导出组合落盘路径：同一文件无论经 path 还是
-        filename 入口写，确认键与写锁键一致；不同文件各自确认、互不串锁。
-
-        Args:
-            args: dict，已解析的工具调用参数
-
-        Returns:
-            组合后的落盘路径字符串；解析失败返回 None（确认键/写锁无需作用域）。
-        """
+        user = current_user_id()
+        platform = platform_for(self)
         try:
-            return str(self._resolve_target(args.get("path"), args.get("filename"),
-                                            args.get("dir")))
-        except (ValueError, TypeError):
+            if kind == "artifact":
+                created = platform.upload_artifact(
+                    user, current_run_id(), name, (content or "").encode("utf-8"),
+                    content_type_for(name))
+                return ToolResult(
+                    text=(f"已保存分析产物 {created.get('name') or name}"
+                          f"（file_id={created.get('file_id')}）"))
+            saved = platform.save_document(user, name, content or "")
+            return ToolResult(
+                text=(f"已保存文档《{saved.get('name') or name}》"
+                      f"（id={saved.get('id')}，version={saved.get('version')}）"))
+        except PlatformError as e:
+            return ToolResult(text=f"保存失败：{e}", is_error=True)
+        finally:
+            platform.close()
+
+    def effective_target_key(self, args: dict) -> str | None:
+        """确认键作用域：文档按归一化名，产物按名字。"""
+        name = args.get("name")
+        if not isinstance(name, str) or not name.strip():
             return None
-
-    def execute(self, content: str, path: str | None = None,
-                filename: str | None = None, dir: str | None = None,
-                _run_state=None) -> ToolResult:
-        """解析双入口 → 黑名单兜底 → 写盘 + 登记产物。
-
-        _run_state 为本次 run 的状态容器（未注入时为 None）：写盘成功后把落盘路径
-        登记进产物账本。入库不在本工具：调用方据返回文本派发 rag-agent。
-
-        Args:
-            content: str，待写入的完整文本
-            path: str | None，精确入口绝对路径
-            filename: str | None，便捷入口文件名
-            dir: str | None，便捷入口目录
-            _run_state: RunState | None，本次 run 的状态容器（登记产物）
-
-        Returns:
-            ToolResult；解析失败/敏感路径/写盘异常都返回错误文本。
-        """
-        try:
-            p = self._resolve_target(path, filename, dir)
-        except ValueError as e:
-            return ToolResult(text=str(e))
-        # filename 模式的组合路径（dir/filename）不经中间件校验——filename 不是
-        # path 参数，只有 dir 被检查；组合结果在此兜底，防 .env 等敏感名落盘。
-        # path 模式已是中间件解析并校验过的绝对路径，不再重复查一遍。
-        cfg = getattr(self, "_config", None)
-        if filename is not None and cfg is not None and is_denied_path(p, cfg.runtime.workspace):
-            return ToolResult(text=f"敏感路径受保护，拒绝写入: {p}")
-        atomic_write(p, content)
-        if _run_state is not None:
-            _run_state.artifacts[str(p)] = "write_file"
-        # 本地文件不进检索库：知识库只索引平台论文，rag-agent 也不再扫描目录。
-        return ToolResult(
-            text=f"已写入 {p}",
-            completion=f"File written: {p}")
+        kind = args.get("kind") or "document"
+        user = current_user_id()
+        if kind == "artifact":
+            return f"file:{user}:{name.strip()}"
+        return f"name:{user}:{normalize_name(name)}"

@@ -12,10 +12,8 @@ from pathlib import Path
 from ..common import compute_diff, truncate_diff
 from ..render.activity import activity_label
 
-#: 升级因 → 确认框里的一句白话。让用户看出这次问的是「哪件事」——
-#: 档位升级是常态（不备注），围栏与命令是新增的主因，必须说清。
+#: 升级因 → 确认框里的一句白话。让用户看出这次问的是「哪件事」。
 _CAUSE_NOTES = {
-    "path_fence": "目标在声明的产物目录之外",
     "command": "命令不在安全清单内",
 }
 

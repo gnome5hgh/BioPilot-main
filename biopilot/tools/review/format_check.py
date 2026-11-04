@@ -1,17 +1,13 @@
 """FormatCheckTool：笔记 Markdown 标题树与模板对比(review-agent 用,确定性代码)。
 
-模板取自 **review-agent 自己的 `references/paper_note.md`**——审查方的标准就是它手里那份，
-与审查流程里 `read_reference` 读到的是同一个文件。刻意不读 note-agent 的那份：
-工具按 A 判定、审查方按 B 判定时，同一篇笔记会同时得到「结构完整」和「缺章节」，
-这比模板缺失更难查。
-
-模板路径在构造期由 `agents/review-agent/tools.py` 绑定（`__file__` 推导），
-运行期不再查找、不依赖部署路径。模板缺失时**返回明确错误、绝不落盘**。
+模板取自 review-agent 自己的 `references/paper_note.md`；待检查的笔记从平台按
+id/名字读取，不再需要本地路径。
 """
 from pathlib import Path
 
+from biopilot.common.platform import PlatformError
 from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.constants import ScopeRoot
+from biopilot.tools.file._support import current_user_id, platform_for
 
 
 class FormatCheckTool(Tool):
@@ -20,32 +16,30 @@ class FormatCheckTool(Tool):
     Attributes:
         name: str，工具名 "format_check"
         description: str，工具描述
-        parameters: dict，JSON Schema（path）
+        parameters: dict，JSON Schema（id/name）
         risk_level: str，"low"
-        root_hints: list[str]，笔记根与草稿根
-        _template_path: str | None，模板路径（构造期由 agent 插件绑定；测试可覆盖）
+        _template_path: str | None，模板路径（构造期由 agent 插件绑定）
     """
 
     name = "format_check"
-    description = "检查笔记结构是否符合模板（对比 Markdown 标题树）"
+    description = "检查平台文档的结构是否符合模板（对比 Markdown 标题树）"
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "format": "path", "description": "笔记绝对路径"},
+            "id": {"type": "string", "format": "file_id",
+                   "description": "文档 id（与 name 二选一）"},
+            "name": {"type": "string", "format": "file_name",
+                     "description": "文档名（与 id 二选一）"},
         },
-        "required": ["path"],
     }
     risk_level = "low"
-    root_hints = [ScopeRoot.SCRATCH]
-    #: 两侧都只读：读笔记与读模板比结构，不写任何落点
     side_effects = ["read_file"]
 
     def __init__(self, template_path: str | Path | None = None):
         """初始化工具并绑定模板路径。
 
         Args:
-            template_path: 模板文件路径（review-agent 的 tools.py 用 `__file__` 推导；
-                测试可显式传入）。
+            template_path: 模板文件路径（review-agent 的 tools.py 用 `__file__` 推导）。
         """
         super().__init__()
         self._template_path: str | None = str(template_path) if template_path else None
@@ -55,30 +49,42 @@ class FormatCheckTool(Tool):
         return Path(self._template_path) if self._template_path else None
 
     def _template_headings(self) -> list[str]:
-        """读模板的标题树；模板不存在时返回空列表，由调用方转成明确错误（不落盘）。"""
+        """读模板的标题树；模板不存在时返回空列表。"""
         tpl = self._template_file()
         if tpl is None or not tpl.exists():
             return []
         return [ln.lstrip("# ").strip()
-                for ln in tpl.read_text(encoding="utf-8").splitlines() if ln.startswith("#")]
+                for ln in tpl.read_text(encoding="utf-8").splitlines()
+                if ln.startswith("#")]
 
-    def execute(self, path: str) -> ToolResult:
-        """对比笔记标题树与模板,返回缺失章节清单或"结构完整"。
+    def execute(self, id: str | None = None, name: str | None = None) -> ToolResult:
+        """对比平台文档的标题树与模板。
 
         Args:
-            path: str，待检查笔记的绝对路径
+            id: 文档 id。
+            name: 文档名。
 
         Returns:
-            ToolResult，文本为缺失章节清单或「结构完整」；模板取不到时返回错误文本
-            （不落盘、不中断调用方流程）。
+            ToolResult，文本为缺失章节清单或「结构完整」；模板/文档取不到时返回错误文本。
         """
         headings = self._template_headings()
         if not headings:
             where = self._template_path or "本角色 references/paper_note.md"
             return ToolResult(is_error=True, text=f"模板不存在，无法比对结构：{where}")
+        if not id and not name:
+            return ToolResult(text="format_check 需要 id 或 name", is_error=True)
+        user = current_user_id()
+        platform = platform_for(self)
+        try:
+            doc = (platform.get_document(user, id) if id
+                   else platform.get_document_by_name(user, name))
+            content = str(doc.get("content") or "")
+        except PlatformError as e:
+            return ToolResult(text=f"读取文档失败：{e}", is_error=True)
+        finally:
+            platform.close()
         note_heads = [ln.lstrip("# ").strip()
-                      for ln in Path(path).read_text(encoding="utf-8").splitlines()
-                      if ln.startswith("#")]
+                      for ln in content.splitlines() if ln.startswith("#")]
         missing = [h for h in headings if h not in note_heads]
         if missing:
             return ToolResult(text=f"缺少模板章节: {', '.join(missing)}")

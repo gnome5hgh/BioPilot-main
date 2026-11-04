@@ -2,9 +2,10 @@
 
 - SessionState（键 session_id）：跨 run 存活。装「跨任务才有意义」的东西——连续失败
   计数（连续失败才升级）。
-- RunState（键 trace_id）：一次用户任务一个。装本次任务的中间产物——搜索去重池、产物
-  账本、各类预算计数、在途写占用、在途派发去重注册表。子 agent 继承父的
-  trace_id，故整棵任务树共用一份。
+- RunState（键 trace_id）：一次用户任务一个。装本次任务的中间产物——搜索去重池、
+  各类预算计数、在途派发去重注册表。子 agent 继承父的 trace_id，故整棵任务树共用一份。
+  写入互斥与版本冲突由 Java 的 ``bio_file.version`` 条件更新裁决，本容器不再持有
+  写占用；产物登记也归平台文件表。
 
 两者都按 TTL 惰性清扫（取用时顺手剔除过期条目，不需要定时任务），粒度不同：
 session 逐条过期（过窗的失败计数），run 整份丢弃（trace 每次 run 重新生成、永不复用，
@@ -51,12 +52,10 @@ class RunState:
 
     Attributes:
         failed_urls: dict[str, str]，失败 URL → 失败原因（搜索负缓存）
-        downloaded: dict[str, str]，URL 或规范化标题 → 落盘路径（搜索成功短路）
+        downloaded: dict[str, str]，URL/DOI/标题 → 平台 file_id（搜索成功短路）
         turn_spawn_counts: dict[int, int]，轮次 → 该轮派发次数（每轮上限用）
-        review_counts: dict[tuple[str, str], int]，(父实例 id, mode) → 审稿次数（预算用）
-        writing_paths: dict[str, tuple[str, int]]，目标路径 → (持有者实例 id, 重入计数)（在途写互斥）
-        spawn_registry: dict[tuple[str, str], float]，(父实例 id, 任务指纹) → 注册时刻（在途派发去重）
-        artifacts: dict[str, str]，落盘路径 → 生产者工具名（产物账本）
+        review_counts: dict[tuple[str, str], int]，(父实例 id, agent_type) → 审稿次数
+        spawn_registry: dict[tuple[str, str], float]，(父实例 id, 任务指纹) → 注册时刻
         last_touched_at: float，最后一次取用时刻（TTL 滑动窗口清扫依据）
     """
 
@@ -64,74 +63,19 @@ class RunState:
         """初始化空 run 状态（各账本与缓存为空，取用时刻记为当前）。"""
         #: 搜索负缓存：失败 URL -> 失败原因（拒绝重复尝试）
         self.failed_urls: dict[str, str] = {}
-        #: 搜索成功短路：URL 或规范化标题 -> 落盘路径
+        #: 搜索成功短路：URL/DOI/标题 -> 平台 file_id
         self.downloaded: dict[str, str] = {}
         #: 每轮派发计数：turn -> 次数（仅统计 supervisor 自身的派发）
         self.turn_spawn_counts: dict[int, int] = {}
-        #: 审稿预算计数：(父实例 id, mode) -> 次数
+        #: 审稿预算计数：(父实例 id, agent_type) -> 次数
         self.review_counts: dict[tuple[str, str], int] = {}
-        #: 在途写占用：目标绝对路径 -> (持有者实例 id, 该持有者的重入计数)。只登记
-        #: 「正在写的那一刻」——调用方在 finally 里释放，异常/取消都会走到，所以残留
-        #: 条目只是防御性兜底，随整份容器被 TTL 回收。跨 agent 共享靠 trace：子 agent
-        #: 继承父 trace，整棵任务树一份。键是工具解析出的真实写目标。
-        self.writing_paths: dict[str, tuple[str, int]] = {}
-        #: 写占用的登记锁：claim 的「看持有者 -> 计数自增」是复合操作，必须整体原子
-        #: （与 spawn 侧守「检查-注册」同理）。当前调用方都在事件循环线程上，加的是
-        #: 一层便宜保险。**它只护这张登记表，不串行化任何写入**——写入的排队在
-        #: runtime 的路径锁、写入的原子性在 atomic_write，别把三者混作一谈。
-        self._claim_lock = threading.Lock()
         #: 在途派发去重：(父实例 id, 任务指纹) -> 注册时刻。只登记「正在执行中」的派发，
         #: 完成即清除、不缓存结果——所以条目只活在一次 run 内，残留条目随整份容器被 TTL
         #: 回收，无需专门清扫。按父实例分桶：机械重复来自一次 LLM 生成（一个实例），分桶
         #: 足够，且不会让两个兄弟实例的同文本任务互相误拒。
         self.spawn_registry: dict[tuple[str, str], float] = {}
-        #: 产物账本：落盘路径 -> 生产者（工具名）
-        self.artifacts: dict[str, str] = {}
         #: 最后一次取用时刻（TTL 依据）：滑动窗口而非创建时刻，原因见 get_run_state。
         self.last_touched_at: float = time.monotonic()
-
-    def claim_write(self, path: str, owner: str) -> str | None:
-        """登记某实例正在写某路径；被另一个实例占用时返回其 id，登记成功返回 None。
-
-        同一个 owner 重复登记只加计数——同一个 agent 在同一条消息里并行发两次同路径写，
-        本就该交给路径锁串行，不该被自己拒掉。
-
-        键就取「工具报上来的路径字符串」本身，不做任何归一化（不 resolve、不折叠 `.`/`..`、
-        不去尾斜杠）——合约如此：`/a/./b.md` 与 `/a/b.md` 是两个不同的键。这是有意为之，
-        不是疏漏：确认键、路径锁、写占用键都取自同一个 `effective_target_path` 字符串，
-        若在这里替写占用单独归一化，它就会和另两把键错位，正是本设计要消除的键漂移。
-
-        Args:
-            path: str，目标绝对路径（工具解析出的真实写目标）
-            owner: str，持有者实例 id（Agent._instance_id）
-
-        Returns:
-            None 表示登记成功；否则返回当前持有者的实例 id，调用方据此拒绝本次写。
-        """
-        with self._claim_lock:
-            held = self.writing_paths.get(path)
-            if held is not None and held[0] != owner:
-                return held[0]
-            self.writing_paths[path] = (owner, held[1] + 1 if held else 1)
-            return None
-
-    def release_write(self, path: str, owner: str) -> None:
-        """释放一次写占用；计数归零即删条目。
-
-        owner 不匹配时直接返回——防止误释放别人的占用（例如登记被拒的那次调用根本没登记）。
-
-        Args:
-            path: str，目标绝对路径
-            owner: str，持有者实例 id
-        """
-        with self._claim_lock:
-            held = self.writing_paths.get(path)
-            if held is None or held[0] != owner:
-                return
-            if held[1] <= 1:
-                self.writing_paths.pop(path, None)
-            else:
-                self.writing_paths[path] = (owner, held[1] - 1)
 
 
 _RUN_STATES: dict[str, RunState] = {}

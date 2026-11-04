@@ -1,16 +1,12 @@
 package com.biopilot.file.dto;
 
-import com.biopilot.file.domain.BioDocument;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-/** 文档读接口的对外视图。 */
+/** 文档读接口的对外视图；version 用于保存时的乐观锁。 */
 public record DocumentView(
         String id,
         String name,
         String content,
+        long version,
         @JsonProperty("updated_at") String updatedAt) {
-
-    public static DocumentView from(BioDocument d) {
-        return new DocumentView(d.getId(), d.getName(), d.getContent(), d.getUpdatedAt());
-    }
 }
