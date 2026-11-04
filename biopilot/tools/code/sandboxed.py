@@ -4,7 +4,7 @@ run_python 与 run_shell 的差别只有参数 schema、容器内执行入口与
 政策怎么组装、产物怎么登记、结果怎么落成文本必须完全一致——否则两条执行路径
 会各自演化出不同的墙。共用逻辑集中在这里，子类只实现 `_sandbox_call`。
 
-工具本身不做隔离——墙由 ``core/security/services/sandbox.py`` 砌（断网、根只读、
+工具本身不做隔离——墙由 ``engine/security/services/sandbox.py`` 砌（断网、根只读、
 只读挂载、一个临时目录可写）。环境不可用时返回可行动的错误文本（fail-closed），
 绝不退回进程内执行。
 """
@@ -16,9 +16,9 @@ import uuid
 from pathlib import Path
 
 from biopilot.config import user_cache_root
-from biopilot.core.security.services import sandbox as sb
-from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.services.roots import semantic_roots
+from biopilot.engine.security.services import sandbox as sb
+from biopilot.engine.tool import Tool, ToolResult
+from biopilot.engine.tool.services.roots import semantic_roots
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class SandboxedTool(Tool):
         Args:
             files: summary["files"] 列表（就地补 oss_key）。
         """
-        from biopilot.core.tool.services.runtime_context import get_memory_context
+        from biopilot.engine.tool.services.runtime_context import get_memory_context
         ctx = get_memory_context()
         user_id = getattr(ctx, "user_id", None) if ctx is not None else None
         if not user_id or not files:
@@ -197,7 +197,7 @@ class SandboxedTool(Tool):
         if not cfg.security.sandbox.enabled:
             return ToolResult(text="沙箱执行已在配置中关闭（sandbox.enabled=false）")
 
-        from biopilot.core.tool.services.runtime_context import get_memory_context
+        from biopilot.engine.tool.services.runtime_context import get_memory_context
         ctx = get_memory_context()
         policy = self._build_policy(
             cfg,

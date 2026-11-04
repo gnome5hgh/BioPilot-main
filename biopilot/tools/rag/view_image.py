@@ -12,8 +12,8 @@
 import asyncio
 import base64
 
-from biopilot.core.llm import LLMClient, UserMessage
-from biopilot.core.tool import Tool, ToolResult
+from biopilot.engine.llm import LLMClient, UserMessage
+from biopilot.engine.tool import Tool, ToolResult
 
 #: 不给问题时默认问什么。要的是「这张图画了什么」，不是泛泛的图片描述。
 _DEFAULT_QUESTION = "这张图/表展示了什么？说清它的核心内容、关键结论与坐标轴或列名的含义。"
@@ -78,8 +78,8 @@ class ViewImageTool(Tool):
         llm = self._llm
         if store is None or llm is None:
             # 只在真的缺依赖时才去取全局服务（测试两样都注入时就不碰它）
-            from biopilot.core.rag.services.rag_service import get_rag_service
-            from biopilot.core.tool.services.runtime_context import get_rag_domain
+            from biopilot.engine.rag.services.rag_service import get_rag_service
+            from biopilot.engine.tool.services.runtime_context import get_rag_domain
             svc = get_rag_service(user_domain=get_rag_domain())
             if store is None:
                 store = svc.image_store

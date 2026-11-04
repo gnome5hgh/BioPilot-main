@@ -27,19 +27,19 @@ env 名约定：字段路径以 ``_`` 连接并大写，前缀 ``BIOPILOT_``。�
     config = BioPilotConfig.from_env()          # 自动加载（引擎入口会读数据库）
     config = BioPilotConfig.from_env("my.yaml") # 指定 YAML 路径（文件模式）
 
-包内按角色收进子包：``schemas/sections.py``（配置分区 dataclass 树）+
-``services/loader.py``（合并与派生）+ ``services/schema.py``（设置页字段描述与
-校验）+ ``services/store.py``（MySQL 持久化/加密/历史）；本文件只做再导出，
-消费方一律 ``from biopilot.config import ...``。
+包内按角色平铺：``sections.py``（配置分区 dataclass 树）+ ``settings.py``
+（合并与派生）+ ``schema.py``（设置页字段描述与校验）+ ``store.py``（MySQL
+持久化/加密/历史）；本文件只做再导出，消费方一律
+``from biopilot.config import ...``。
 """
-from biopilot.config.services.loader import (
+from biopilot.config.settings import (
     BioPilotConfig,
     db_source_enabled,
     enable_db_source,
     ensure_legacy_import,
     user_cache_root,
 )
-from biopilot.config.schemas.sections import (
+from biopilot.config.sections import (
     AgentsConfig,
     ChunkerConfig,
     CorpusConfig,

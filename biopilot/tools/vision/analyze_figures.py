@@ -8,9 +8,9 @@ import re
 
 from biopilot.common.platform import PlatformError
 from biopilot.config import BioPilotConfig
-from biopilot.core.llm import LLMClient
-from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.vision import FigureAnalyzer, FigureExtractor
+from biopilot.engine.llm import LLMClient
+from biopilot.engine.tool import Tool, ToolResult
+from biopilot.engine.vision import FigureAnalyzer, FigureExtractor
 from biopilot.tools.file._support import (
     content_type_for, current_run_id, current_user_id, platform_for,
 )

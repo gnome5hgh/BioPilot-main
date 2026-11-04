@@ -1,0 +1,764 @@
+"""配置分区：一棵 dataclass 树，是设置页字段与运行时参数的共同契约。
+
+本文件是**所有可调参数默认值的唯一声明点**——改默认值只改这里。运行时配置的
+真相源是 MySQL 的 ``bio_config``（设置页写入稀疏覆盖），环境变量优先级最高；
+``config.yaml`` 只保留启动引导项。分区与配置路径顶层同名：
+``runtime`` / ``platform`` / ``corpus`` / ``intent`` / ``rag{...}`` / ``memory`` /
+``agents`` / ``security`` / ``compaction``，外加保留顶层的
+``llm`` / ``vision``。
+
+加载与派生逻辑在 ``loader.py``（递归合并、env 派生、数据库覆盖），字段描述与
+写入校验在 ``schema.py``，持久化在 ``store.py``；对外只经 ``biopilot.config`` 取。
+"""
+from dataclasses import dataclass, field
+from pydantic import Field
+from typing import Literal
+
+
+@dataclass
+class LLMConfig:
+    """LLM 连接配置，封装 OpenAI-compatible API 所需的所有参数。
+
+    默认值指向 DeepSeek API（通过 OpenAI SDK 兼容层调用），
+    修改 base_url 可切换到任意兼容服务（如 OpenAI、vLLM、Ollama 等）。
+
+    Attributes:
+        base_url: str，API 基础地址（默认 DeepSeek 兼容端点）
+        api_key: str，密钥（无硬编码默认值，留空由 LLMClient 报清晰错误）
+        model: str，模型名
+        max_tokens: int，单次响应输出上限（给足防长草稿被截断）
+        temperature: float，采样温度（0.0 = 确定性，适合工具调用）
+        timeout_connect: float，HTTP 连接超时（秒）
+        timeout_read: float，HTTP 读超时（秒，含流式 chunk 间隔）
+        max_retries: int，传输层自动重试次数（连接错误/5xx）
+        context_window: int，模型上下文窗口（压缩预算来源）
+    """
+
+    #: API 基础地址，默认为 DeepSeek 兼容端点
+    base_url: str = "https://api.deepseek.com/v1"
+
+    #: API 密钥——**不硬编码默认值**。经 BIOPILOT_LLM_API_KEY env / .env /
+    #: 设置页「对话模型」提供;留空由 LLMClient.__init__ 兜底报清晰错误。
+    api_key: str = ""
+
+    #: 模型名称，传给 API 的 model 参数。用带视觉能力的模型：检索回来的图表原图
+    #: 要直接进上下文给模型看（见 rag 媒体块的图片通道），纯文本模型看不了图。
+    model: str = "deepseek-flash"
+
+    #: 单次响应输出上限：deepseek-flash 最大输出 384K（393216 = 384×1024，合法范围
+    #: 1-393216）。必须给足：上限过小会把长笔记草稿/大参数 write_file 静默截断成
+    #: 残缺内容。换模型要同查新模型的上限（超限会被端点直接拒）。
+    max_tokens: int = 393216
+
+    #: 采样温度，0.0 表示确定性输出（适合工具调用场景）
+    temperature: float = 0.0
+
+    #: LLM HTTP 连接超时（秒）——连接挂死时秒级暴露而非无限等待
+    timeout_connect: float = 10.0
+
+    #: LLM HTTP 读超时（秒，含流式 chunk 间隔）——长输出（max_tokens 上限下单次
+    #: 可跑数分钟）不能被误杀，取 300s；两个相邻 chunk 间隔超过此值即判定服务挂死
+    timeout_read: float = 300.0
+
+    #: 传输层自动重试次数（连接错误/5xx 时 SDK 原生重试，与上层业务重试无关）
+    max_retries: int = 2
+
+    #: 模型上下文窗口：deepseek-flash 官方 1M。ContextCompressor.resolve_context_size
+    #: 取半窗口 = 500K → 压缩阈值 400K、reserve 50K，正常对话永不压缩（1M 上下文的预期）。
+    #: **换模型必须同查它的窗口并改这里**：填大了永不触发压缩、迟早撞上下文上限报错。
+    context_window: int = 1000000
+
+
+@dataclass
+class VisionLLMConfig:
+    """视觉模型连接配置（多模态图表分析）。
+
+    字段对齐 LLMConfig（duck-typing：可直接喂 LLMClient），但指向独立的
+    视觉端点——图表看图必须引入可配置的视觉模型。
+    默认 DeepSeek 视觉模型（deepseek-v4-flash-vision-exp，与文本 LLM 同一
+    端点/key）；可经 BIOPILOT_VISION_MODEL/BASE_URL 换其他 OpenAI 兼容
+    端点（如智谱 GLM-4V）。api_key 留空不崩启动，由 analyze_figures 工具
+    调用时降级报错。
+
+    Attributes:
+        base_url: str，视觉端点地址
+        api_key: str，视觉模型密钥（留空不崩启动，调用时降级）
+        model: str，视觉模型名
+        max_tokens: int，单次视觉输出上限
+        timeout_connect: float，连接超时（秒）
+        timeout_read: float，读超时（秒）
+        max_retries: int，自动重试次数
+        temperature: float，采样温度
+        context_window: int，上下文窗口（token）
+    """
+
+    #: 视觉端点基础地址，默认 DeepSeek（与文本 LLM 同一端点/key）
+    # base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    base_url: str = "https://api.deepseek.com/v1"
+
+    #: 视觉模型 API 密钥——**不硬编码默认值**，经 BIOPILOT_VISION_API_KEY 提供
+    api_key: str = ""
+
+    #: 视觉模型名称（deepseek-v4-flash-vision-exp；可经 env 换回 glm-4v-flash）
+    # model: str = "glm-4v-flash"
+    model: str = "deepseek-v4-flash-vision-exp"
+
+    #: 单次视觉输出上限。视觉模型是**推理模型**（响应带 reasoning_content），思维链长度每次
+    #: 都会变，偶尔一次能把整个预算跑光——响应 `finish_reason=length`、正文为空或截在半句
+    #: （索引期给媒体块生成描述时实测：同一张图两次请求可以一次思维链 6866 字把自己饿死、
+    #: 一次 1153 字正常出稿）。2048 对"逐图几行分析"的旧假设成立，对复杂图表的转写不够，
+    #: 给到 8192 让单次尝试更容易在预算内说完（重试就少烧几次满额调用）。
+    max_tokens: int = 8192
+
+    #: LLM HTTP 连接超时（秒）——字段与 LLMConfig 对齐（LLMClient 按字段读 config）
+    timeout_connect: float = 10.0
+
+    #: LLM HTTP 读超时（秒）——逐图分析输出短，取文本 LLM 的一半
+    timeout_read: float = 120.0
+
+    #: 传输层自动重试次数
+    max_retries: int = 2
+
+    #: 采样温度，0.0 确定性输出
+    temperature: float = 0.0
+
+    #: 模型上下文窗口（token 数）
+    context_window: int = 32768
+
+
+# ── runtime / corpus ────────────────────────────────────────────────────────
+
+@dataclass
+class RuntimeConfig:
+    """运行时基础设施：工作区、agent 插件目录、会话免问上限档。
+
+    Attributes:
+        workspace: str，运行时数据根目录（产物根、工具结果本地回退等；会话与记忆在
+            MySQL，论文原文不落盘）
+        user_cache_dir: str，按用户隔离的派生缓存根（附件副本、技能物化）
+        agents_dir: str，Agent 插件扫描目录
+        confirm_above: str，会话免问上限档（风险档高于它的工具执行前需用户确认）
+        allow_host_shell: bool，是否允许网页终端启动宿主 shell（拥有服务账号权限）
+    """
+
+    #: 运行时数据根目录，存放产物根与工具结果本地回退等运行期数据（会话、记忆与
+    #: RAG 索引状态都在 MySQL，论文原文不落盘）
+    workspace: str = ".biopilot"
+    #: 按用户隔离的派生缓存根：附件本地副本与用户技能物化目录。
+    #: 空串 = <workspace>/user-cache；相对路径按仓库安装根解析（便于把缓存固定在
+    #: 仓库内，而运行数据根重定向到仓库外）。内容全部可从 OSS/MySQL 重建。
+    user_cache_dir: str = ""
+    #: 记忆/会话真相源的 MySQL 连接串（Python 侧 bio_memory_block/bio_memory_block_history/bio_message；
+    #: 测试经 BIOPILOT_MEMORY_MYSQL_DSN 覆盖到 biopilot_test 库）
+    #: 容器实例发布在宿主 3307（3306 常被本机自装 MySQL 占用）
+    memory_dsn: str = "mysql://root@127.0.0.1:3307/biopilot"
+    #: 多模型条目（名称/端点/key/费率展示值）；会话内切换下一次 run 生效。
+    #: 空列表表示未配置多模型——模型选择器退化为只展示当前主模型。
+    models: list[dict] = field(default_factory=list)
+
+    def find_model_entry(self, name: str) -> "dict | None":
+        """按展示名（name 缺省回退 model）查多模型条目；未命中返回 None。
+
+        Args:
+            name: 模型展示名（models/select 与装配两侧共用的唯一匹配口径）。
+
+        Returns:
+            dict | None：命中的条目；name 为空或未配置多模型时为 None。
+        """
+        if not name:
+            return None
+        for m in self.models:
+            if (m.get("name") or m.get("model")) == name:
+                return m
+        return None
+
+    #: Agent 插件扫描目录，默认扫描项目根下的 agents/
+    agents_dir: str = "agents"
+
+    #: 会话免问上限档：工具风险档**高于**此档的，执行前升级为人工确认
+    #:（不拒绝）；不高于的静默放行。取值 ∈ RISK_ORDER 的键。
+    confirm_above: str = "medium"
+
+    #: 网页终端是否允许启动宿主 shell。默认关闭——宿主 shell 拥有服务账号的
+    #: 文件与环境访问权；共享部署上开启前必须自行评估，或改用沙箱终端。
+    allow_host_shell: bool = False
+
+
+@dataclass
+class PlatformConfig:
+    """Java 平台后端连接：agent 经内部端点调用平台能力（如文献检索）。
+
+    引擎不自建平台业务实现；需要外部能力时调 Java 的 ``/internal/*``。
+    这与 Java 调引擎内部端点是同一套共享 token 语义，只是方向相反。
+
+    Attributes:
+        base_url: str，SpringBoot 地址（本机 8080，compose 内为 http://server:8080）
+        internal_token: str，内部调用共享 token；留空时回退环境变量
+            ``BIOPILOT_INTERNAL_TOKEN``（与引擎入站校验同一个 secret）
+        search_timeout: float，单次内部检索请求的超时秒数
+        transfer_timeout: float，文件上传/下载等大流量内部请求的超时秒数
+    """
+
+    #: SpringBoot 地址；容器部署由 compose 注入 http://server:8080
+    base_url: str = "http://127.0.0.1:8080"
+    #: 内部调用 token；留空回退 BIOPILOT_INTERNAL_TOKEN
+    internal_token: str = ""
+    #: 文献检索等内部请求的超时（秒）；要大于 Java 侧单源超时，给聚合留出余量
+    search_timeout: float = 90.0
+    #: 文件传输类内部请求的超时（秒）
+    transfer_timeout: float = 120.0
+
+
+@dataclass
+class CorpusConfig:
+    """产物路径。个人绝对路径，经 config.yaml / env 提供，留空走工作区回退。
+
+    笔记与论文不再使用本地语料目录：笔记定稿进平台文档编辑器，论文由平台
+    （OSS + ``bio_paper``）提供字节；这里只保留分析产物与研究产物两个落点。
+
+    Attributes:
+        analysis_dir: str，分析产物根（空则回退 workspace/analysis）
+        research_dir: str，研究产物目录（空则回退 workspace/research）
+    """
+
+    #: 分析产物根（生信分析代码与结果；空则回退 workspace/analysis）
+    analysis_dir: str = ""
+
+    #: 研究产物目录（产物区,research/）——空则由 factory 回退 workspace/research。
+    research_dir: str = ""
+
+
+# ── intent ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class IntentJevConfig:
+    """判定服务（经 Vercel AI Gateway 调决策模型）配置。
+
+    网关是托管 API：账户**必须先绑定信用卡**才服务请求（连免费额度也要先绑），
+    未完成验证的账户一律 403。因此启用意图层要求启动探测通过，见 `cli.py`。
+
+    Attributes:
+        base_url: str，网关地址（Decision 模态走 `/v1/evaluate`）
+        api_key: str，网关 key（`vck_` 前缀）；留空则该层不可用
+        model: str，模型名（`<厂商>/<模型>`）。同一请求形态下有多家可选实现，
+            换实现只改这一项
+        timeout: float，单次调用读超时（秒）
+        max_retries: int，可恢复错误（429/5xx/超时）的重试次数
+        zero_data_retention: bool，请求零数据保留。本层会把**用户对话史**发出去，
+            因此默认开启；被服务端拒绝时按「该层不可用」处理，**不静默摘掉**这一项
+        only_provider: str，钉住服务提供方（避免被路由到别的实现）；留空不钉
+    """
+
+    base_url: str = "https://ai-gateway.vercel.sh/v1"
+    api_key: str = ""
+    model: str = "typesafe-ai/jev"
+    #: 单次调用读超时（秒）
+    timeout: float = 5.0
+    #: 可恢复错误的重试次数（次）
+    max_retries: int = 1
+    #: 零数据保留（默认开启：本层发送的是用户对话史）
+    zero_data_retention: bool = True
+    #: 钉住的服务提供方（空串 = 不钉，由网关路由）
+    only_provider: str = "typesafe-ai"
+
+
+@dataclass
+class IntentConfig:
+    """意图识别子系统配置：总开关 + 判定用的历史窗口 + 判定服务。
+
+    Attributes:
+        enabled: bool，意图识别总开关（关时整套意图层不装配：不装载知识库、
+            Agent 走纯 ReAct，提示词不含意图规则）
+        history_messages: int，判定时参考的最近对话条数（运行时按它截历史切片）
+        jev: IntentJevConfig，判定服务配置（规则层不命中时才用得上）
+    """
+
+    #: 意图识别总开关（默认关：系统默认形态是纯 ReAct；显式开启才挂载意图层）
+    enabled: bool = False
+
+    #: 判定时参考的最近若干轮对话（只取 user/assistant 文本，不含工具结果）
+    history_messages: int = 6
+
+    jev: IntentJevConfig = field(default_factory=IntentJevConfig)
+
+
+# ── security ────────────────────────────────────────────────────────────────
+
+@dataclass
+class SecurityConfig:
+    """安全模块配置：外部来源工具的预批准名单。
+
+    预批准是**降档表达信任**（降到会话免问档内），不是旁路——会话把免问上限调严
+    （如 confirm_above=low）时，名单内的工具照样会被问。
+
+    Attributes:
+        pre_approved_tools: list[str]，允许静默执行的工具名（外部来源工具默认要问）
+        classifier: ClassifierConfig，语义判定层（可选、默认关）
+    """
+
+    #: 预批准的工具名（降 medium）——外部来源工具默认逐次确认，这里显式放行
+    pre_approved_tools: list[str] = field(default_factory=list)
+
+    #: 语义判定层（判定网关；端点或密钥缺失即整层不装配）
+    classifier: "ClassifierConfig" = field(default_factory=lambda: ClassifierConfig())
+
+    #: 沙箱执行（run_python / run_shell 的容器政策来源）
+    sandbox: "SandboxConfig" = field(default_factory=lambda: SandboxConfig())
+
+
+@dataclass
+class SandboxConfig:
+    """沙箱执行配置（run_python / run_shell 依赖；缺它整条链路不可用）。
+
+    Attributes:
+        enabled: bool，总开关（关掉时两个执行工具直接返回未启用文本）
+        image: str，沙箱镜像名（须预先构建：docker build -f docker/sandbox.Dockerfile）
+        network: bool，容器是否联网（默认 False = 断网，分析依赖须预装进镜像）
+        read_roots: list[str]，额外只读挂载的语义根名（挂到 /corpus/<根名>）
+        memory: str，容器内存上限（docker --memory 语法）
+        cpus: float，容器 CPU 上限
+        pids_limit: int，容器进程数上限
+        timeout_s: int，单次执行超时（秒）
+    """
+
+    enabled: bool = True
+    image: str = "biopilot-sandbox:latest"
+    network: bool = False
+    read_roots: list[str] = field(default_factory=list)
+    memory: str = "2g"
+    cpus: float = 2.0
+    pids_limit: int = 128
+    timeout_s: int = 120
+
+
+@dataclass
+class ClassifierConfig:
+    """语义判定层配置：只判 L1 覆盖不到的语义诱导，命中只标记不阻断。
+
+    Attributes:
+        enabled: bool，总开关（默认 False——每次读入都要付一次网络调用）
+        base_url: str，判定网关地址（与意图判定同款形态）
+        api_key: str，网关密钥（留空 = 该层不可用）
+        model: str，判定模型名
+        timeout: float，单次调用超时（秒）
+        max_retries: int，可恢复错误重试次数
+    """
+
+    enabled: bool = False
+    base_url: str = "https://ai-gateway.vercel.sh/v1"
+    api_key: str = ""
+    model: str = "typesafe-ai/jev"
+    timeout: float = 5.0
+    max_retries: int = 1
+
+
+# ── rag ─────────────────────────────────────────────────────────────────────
+
+@dataclass
+class EmbeddingConfig:
+    """RAG 检索栈云端嵌入配置。
+
+    仅云端：api_key 缺失不阻塞启动，由调用方按降级语义处理（路由退稀疏、
+    检索跳稠密路）。
+
+    batch_size/timeout/max_retries 是 RagEmbedder 传输参数（改它们不改变
+    向量结果，无需重建索引）。精排连接在 rag.rerank，本段只负责嵌入。
+
+    Attributes:
+        base_url: str，嵌入端点地址
+        api_key: str，密钥（缺失不阻塞启动，降级处理）
+        embed_model: str，嵌入模型名
+        batch_size: int，单批文本条数
+        timeout: float，读超时（秒）
+        max_retries: int，可恢复错误重试次数
+    """
+    base_url: str = "https://api.siliconflow.cn/v1"
+    api_key: str = ""
+    embed_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    #: 单批嵌入请求的文本条数（条）
+    batch_size: int = 32
+    #: 嵌入 HTTP 读超时（秒）
+    timeout: float = 60.0
+    #: 可恢复错误（连接错误/超时/5xx）的重试次数（次）
+    max_retries: int = 2
+
+
+@dataclass
+class RerankConfig:
+    """精排模型独立连接配置——与 embedding 的传输参数解耦。
+
+    base_url/api_key 留空 = 继承 rag.embedding 同名字段，from_env 阶段解析完毕，
+    装配侧拿到的是已合并值（与 intent 的继承解析同一阶段完成）。
+    timeout/max_retries 与 embedding 的同名字段解耦，改精排超时不牵动嵌入。
+
+    Attributes:
+        base_url: str，精排端点（留空继承 rag.embedding）
+        api_key: str，密钥（留空继承 rag.embedding）
+        model: str，精排模型名
+        timeout: float，读超时（秒；与嵌入解耦）
+        max_retries: int，可恢复错误重试次数
+    """
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "Qwen/Qwen3-Reranker-0.6B"
+    #: 精排 HTTP 读超时（秒）
+    timeout: float = 60.0
+    #: 可恢复错误的重试次数（次）
+    max_retries: int = 2
+
+
+@dataclass
+class RetrieverConfig:
+    """混合检索参数（改动需重评检索质量）。
+
+    Attributes:
+        top_k: int，默认返回块数
+        bm25_topk: int，BM25 粗召回数
+        vector_topk: int，向量粗召回数
+        rerank_candidates: int，重排候选池下限（实际池 = max(top_k*2, 本值)）
+        rrf_k: int，RRF 融合常数 k（越大分数差越小、融合越平滑）
+    """
+
+    #: 默认返回块数（条）。
+    top_k: int = 5
+    #: BM25 粗召回数（条）。
+    bm25_topk: int = 30
+    #: 向量粗召回数（条）。
+    vector_topk: int = 30
+    #: 重排候选池下限（条）；实际池大小 = max(top_k * 2, 本值)。
+    rerank_candidates: int = 24
+    #: RRF 融合常数 k（无量纲；越大相邻名次间的分数差越小、融合越平滑）。
+    rrf_k: int = 30
+
+
+@dataclass
+class QueryRewriteConfig:
+    """query 改写模型连接与行为参数。
+
+    base_url/api_key 留空逐项继承 llm 同名字段；model 留空沿用主模型。
+
+    Attributes:
+        base_url: str，改写模型端点（留空继承 llm）
+        api_key: str，密钥（留空继承 llm）
+        model: str，模型名（留空沿用主模型）
+        history_messages: int，喂给 condense 的最近对话条数
+        rewrite_num: int，prompt 要求的改写变体条数
+        max_queries: int，最终查询集封顶（含原 query）
+        max_query_chars: int，单条改写查询字符上限（超限丢弃）
+    """
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    #: 喂给改写（condense）的最近对话消息条数（条）。
+    history_messages: int = 6
+    #: prompt 要求的改写变体条数（条）：改它改变改写 prompt 与查询集规模，需重评。
+    rewrite_num: int = 1
+    #: 最终查询集封顶（条，含原 query）：生成侧最多占 max_queries-1 席，最后 1 席留给原 query。
+    max_queries: int = 2
+    #: 单条改写查询的字符上限（字符）：超过视为 LLM 输出异常并丢弃。
+    max_query_chars: int = 200
+
+
+@dataclass
+class ChunkerConfig:
+    """切块参数（改动改变切块结果 → 配方哈希自动触发全量重索引）。
+
+    Attributes:
+        max_tokens: int，每块最大 token 数
+        overlap_tokens: int，相邻块重叠 token 数
+    """
+
+    #: 每块最大 token 数（token，按 common.utils.tokenization 近似计数）。
+    max_tokens: int = 512
+    #: 相邻块重叠 token 数（token），约为块长的 1/8。
+    overlap_tokens: int = 64
+
+
+@dataclass
+class MinioConfig:
+    """应用统一对象的 MinIO 存储连接（复用依赖栈里的 MinIO 实例）。
+
+    所有对象共用一个 bucket，靠前缀分域：图表原图走 ``rag/images/``，平台文件
+    （论文/上传文件/分析产物/文档/技能包）与工具结果走 ``users/<uid>/``。
+
+    Attributes:
+        endpoint: str，``host:port``（不带 scheme）
+        access_key / secret_key: str，凭证
+        bucket: str，应用统一 bucket（不要用向量库自己的 bucket）
+        secure: bool，是否走 TLS
+    """
+
+    #: MinIO 地址（host:port）。默认对齐 docker-compose 里的服务：
+    #: 该实例原本只服务向量库，现在同时给 BioPilot 放应用对象。
+    endpoint: str = "localhost:9000"
+
+    #: 凭证默认值与 compose 里的 MinIO 一致——那只绑回环，不对外网开放。
+    access_key: str = "minioadmin"
+    secret_key: str = "minioadmin"
+
+    #: 应用统一 bucket：论文、上传文件、分析产物、文档、技能包、图表原图、
+    #: 工具结果外置共用（与向量库自己的内部 bucket 分开）。
+    bucket: str = "biopilot"
+
+    #: 是否用 TLS（本机 compose 走明文）。
+    secure: bool = False
+
+
+@dataclass
+class StorageConfig:
+    """Milvus 向量库连接配置。
+
+    Attributes:
+        uri: str，Milvus 连接地址（本地路径走 Lite，http 走 Standalone）
+        collection: str，集合名
+        batch_size: int，分页遍历每页行数
+        timeout: float，读路径单次 RPC 截止时间（秒）
+        write_timeout: float，写路径单次 RPC 截止时间（秒）
+        minio: MinioConfig，图表原图的对象存储连接
+    """
+
+    #: Milvus 连接地址。本地文件路径 → Milvus Lite（内嵌，单测用）；
+    #: ``http://host:19530`` → Milvus Standalone（生产默认）。
+    uri: str = "http://localhost:19530"
+
+    #: Milvus 集合名（单一集合，对应迁移前的向量库 collection）
+    collection: str = "biopilot"
+
+    #: all_documents 分页遍历每页行数（行；规避单次 query 16384 行上限）。
+    batch_size: int = 1000
+
+    #: 读路径（search / query / 全量遍历 / 统计 / 集合加载）单次 RPC 的超时（秒）。
+    #: 必须设：不设时 pymilvus 走默认重试策略（最多 75 次、退避到 3 秒），服务不可达时
+    #: 一次检索能白等好几分钟。这个值同时管两件事——每次尝试的 gRPC 截止时间，以及整个
+    #: 重试循环的时间预算（pymilvus 从同一个 timeout 参数取两者），所以设了就等于给这次
+    #: 调用封了顶，失败立刻回到上层由熔断器判断。
+    timeout: float = 5.0
+
+    #: 写路径（upsert / flush / delete / 建集合）单次 RPC 的超时（秒）。
+    #: 比读路径宽松：批量入库本来就要若干秒，用读路径那档会把合法写入判成超时。
+    write_timeout: float = 60.0
+
+    #: 图表原图的对象存储（与向量库同属依赖栈，但 bucket 分开）。
+    minio: MinioConfig = field(default_factory=MinioConfig)
+
+
+@dataclass
+class RagToolsConfig:
+    """RAG 工具输出参数。
+
+    Attributes:
+        excerpt_chars: int，单条命中正文摘录上限（字符）
+    """
+
+    #: 单条命中正文摘录上限（字符）。
+    excerpt_chars: int = 400
+
+
+@dataclass
+class RagConfig:
+    """RAG 检索栈配置（按子模块分区，与 config.yaml ``rag:`` 段同构）。
+
+    Attributes:
+        embedding: EmbeddingConfig，嵌入连接
+        rerank: RerankConfig，精排连接
+        retriever: RetrieverConfig，混合检索参数
+        query_rewrite: QueryRewriteConfig，query 改写
+        chunker: ChunkerConfig，切块参数（改动触发配方哈希全量重索引）
+        storage: StorageConfig，向量库连接
+        tools: RagToolsConfig，检索工具输出参数
+        store_images: bool，是否把图表原图存进对象存储（默认存）
+    """
+
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    rerank: RerankConfig = field(default_factory=RerankConfig)
+    retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
+    query_rewrite: QueryRewriteConfig = field(default_factory=QueryRewriteConfig)
+    chunker: ChunkerConfig = field(default_factory=ChunkerConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
+    tools: RagToolsConfig = field(default_factory=RagToolsConfig)
+
+    #: 是否把图表原图存进对象存储。默认存——检索命中媒体块后可以把原图交给带视觉的
+    #: 模型看；关掉即退回「只有文字」，索引不再渲染、也不再写对象。
+    store_images: bool = True
+
+
+# ── memory / agents ─────────────────────────────────────────────────────────
+
+#: 压缩计量方式的合法取值（schema 校验与 ContextSize 共用，避免两处枚举漂移）。
+CONTEXT_SIZE_TYPES = ("tokens", "messages", "fraction")
+
+
+@dataclass
+class ContextSize:
+    """压缩触发或保留量的计量方式。
+
+    Attributes:
+        type: str，计量类型：tokens（绝对 token 数）/ messages（消息条数）/
+            fraction（有效窗口的比例，0~1）
+        value: int | float，对应的数值；fraction 为比例，其余为绝对数
+    """
+
+    type: Literal["tokens", "messages", "fraction"] = "messages"
+    value: int | float = 20
+
+    def __post_init__(self) -> None:
+        """校验类型与数值范围。
+
+        Raises:
+            ValueError: 类型不在三种之内，或数值为负。
+        """
+        if self.type not in CONTEXT_SIZE_TYPES:
+            raise ValueError(f"未知的 ContextSize 类型: {self.type!r}")
+        if self.value < 0:
+            raise ValueError(f"ContextSize 不能为负: {self.value!r}")
+
+
+@dataclass
+class ToolResultArchiveConfig:
+    """大工具结果外置配置。
+
+    Attributes:
+        persist_threshold_chars: int，单条工具结果超过此字符数时外置
+        preview_chars: int，指针里保留的预览字符数
+        local_dir: str，本地回退目录；空串表示 `<workspace>/tool-results`
+    """
+
+    persist_threshold_chars: int = 50000
+    preview_chars: int = 2000
+    local_dir: str = ""
+
+
+@dataclass
+class CompactionSettings:
+    """上下文压缩的触发与保留配置。
+
+    trigger 是列表，任一条件满足即触发（OR 逻辑）；keep 决定压缩后保留多少
+    近期上下文。有效窗口默认就是模型窗口——不再取一半，余量由 fraction 承担。
+
+    Attributes:
+        enabled: bool，压缩总开关
+        trigger: list[ContextSize]，触发条件列表（tokens / messages / fraction）
+        keep: ContextSize，压缩后保留的近期上下文计量
+        trim_tokens_to_summarize: int，送给摘要模型的最大输入 token 数
+        summary_max_words: int，单份摘要的 token 上限
+        summary_model_name: str | None，摘要专用模型名；None 用主模型
+        context_size: int，显式有效窗口；0 表示用模型窗口
+        tool_results: ToolResultArchiveConfig，大工具结果外置配置
+    """
+
+    enabled: bool = True
+
+    #: 任一条件满足即触发；默认在有效窗口用到 80% 时压缩。
+    trigger: list[ContextSize] = field(
+        default_factory=lambda: [ContextSize("fraction", 0.8)])
+
+    #: 压缩后保留最近 20 条消息（tool 消息会连同其 assistant 调用成对保留）。
+    keep: ContextSize = field(
+        default_factory=lambda: ContextSize("messages", 20))
+
+    #: 摘要输入上限：超长历史先按这个预算裁剪，再交给摘要模型。
+    trim_tokens_to_summarize: int = 4000
+
+    #: 单份摘要的 token 上限（字段名沿用历史叫法；实际按 token 计）。
+    summary_max_words: int = 2000
+
+    #: 摘要模型名；None 时沿用主模型，配置后可换轻量模型。
+    summary_model_name: str | None = None
+
+    #: 显式有效窗口（token）；0 表示由模型窗口推导。保留给测试与特殊模型。
+    context_size: int = 0
+
+    #: 大工具结果外置（MinIO 主存 + 本地回退）。
+    tool_results: ToolResultArchiveConfig = field(
+        default_factory=ToolResultArchiveConfig)
+
+    def __post_init__(self) -> None:
+        """把 YAML 里可能出现的裸 dict 归一化成 ContextSize。"""
+        self.normalize()
+
+    def normalize(self) -> "CompactionSettings":
+        """归一化 trigger / keep：接受 dict、单个 dict 或 ContextSize 实例。
+
+        YAML 覆写会把整个 list 替换成裸 dict 列表；`_merge` 不负责实例化列表
+        元素，因此在配置加载完成后必须再调一次本方法。
+
+        Returns:
+            归一化后的自身（便于链式调用）。
+        """
+        if isinstance(self.trigger, dict):
+            self.trigger = [self.trigger]
+        self.trigger = [
+            t if isinstance(t, ContextSize) else ContextSize(**t)
+            for t in self.trigger
+        ]
+        if isinstance(self.keep, dict):
+            self.keep = ContextSize(**self.keep)
+        return self
+
+    def resolve_context_size(self, model_window: int) -> int:
+        """返回实际使用的有效窗口：显式配置优先，否则用模型窗口。
+
+        Args:
+            model_window: 模型的最大上下文窗口（token 数）。
+
+        Returns:
+            压缩判定与 fraction 预算使用的有效窗口。
+        """
+        return self.context_size if self.context_size > 0 else model_window
+
+
+@dataclass
+class MemoryConfig:
+    """记忆系统配置。
+
+    Attributes:
+        consolidation_enabled: bool，记忆整合开关（每轮对话结束后整合一次）
+        debounce_seconds: int，轮末整合的静默窗口（秒）
+        max_delay_seconds: int，连续活跃会话的最大延迟（秒），超时强制执行
+    """
+
+    #: 记忆整合开关。开着即每轮对话结束后跑一次整合（本轮无新消息则不调 LLM）；
+    #: 关掉则整条整合路径不触发，记忆只靠 self-editing 维护。
+    consolidation_enabled: bool = True
+
+    #: 轮末 enqueue 后的静默窗口：连续多轮在窗口内只合并成一次整合。
+    debounce_seconds: int = 30
+
+    #: 会话一直活跃、等不到静默窗口时的强制整合上限。
+    max_delay_seconds: int = 300
+
+
+@dataclass
+class AgentsConfig:
+    """子 agent 配置。
+
+    timeouts 是自由 dict（agent 类型 → 秒数），仅 YAML 可配（dict 无自然 env 形态）。
+    各值按该 agent 完整任务的典型时长留余量设定：note-agent 覆盖含内审重试的纯笔记
+    端到端，paper-agent 覆盖大批量新颖性检索，review-agent 覆盖全文审阅，research-agent
+    覆盖完整研究链路；paper-agent 还要覆盖读整篇与图表问题，bio-agent 要覆盖读数据、
+    多步分析执行与失败重试的整轮。表里没有的类型落回
+    SpawnSubAgentTool.timeout 的类默认（120s）——新增角色时一并补进本表，别让它在表外
+    静默用类默认。某 agent 反复撞帽说明任务时长需要重新评估，而不是继续调大。
+
+    max_turns 是同类自由 dict（agent 类型 → ReAct 轮数上限），仅 YAML 可配；表里没有的
+    类型落回 Agent 的类默认 20 轮。轮数是「一次派发内允许多少次推理-行动」的预算：单次
+    派发要串联多阶段的角色（research-agent 的选题链路含盘点、成稿、idea 卡、外部检索、
+    计划成稿；bio-agent 的分析链路含探查、分步执行与修正重试）在 20 轮内做不完，会以
+    MaxTurnsExceeded 收场且无产物；给这类角色单独提额度，其余保持默认。撞帽本身是信号
+    ——要么任务该拆，要么额度该调。
+
+    Attributes:
+        timeouts: dict[str, int]，agent 类型 → 超时秒数（仅 YAML 可配；按各 agent 完整任务典型时长留余量）
+        max_turns: dict[str, int]，agent 类型 → ReAct 轮数上限（仅 YAML 可配；未命中用类默认 20）
+    """
+
+    timeouts: dict[str, int] = field(
+        default_factory=lambda: {
+            "note-agent": 900, "paper-agent": 420, "review-agent": 300,
+            "research-agent": 1800, "rag-agent": 900,
+            "bio-agent": 1800,
+        })
+
+    #: 只有单次派发内需要串联多阶段的角色才提额度；表外角色一律用 Agent 的默认 20 轮。
+    max_turns: dict[str, int] = field(
+        default_factory=lambda: {"research-agent": 45, "bio-agent": 40})

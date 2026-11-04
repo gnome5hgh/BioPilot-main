@@ -6,7 +6,7 @@
 的 miss/multi 报错:非法输入返回可行动报错文本,不静默吞——让 review-agent 的 LLM
 修正后重试。
 """
-from biopilot.core.tool import SUMMARY_TERMINAL, Tool, ToolResult
+from biopilot.engine.tool import SUMMARY_TERMINAL, Tool, ToolResult
 
 #: verdict 合法值（与下载审查共用）
 VERDICTS = ("pass", "fail")

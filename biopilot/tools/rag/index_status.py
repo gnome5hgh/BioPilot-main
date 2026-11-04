@@ -6,9 +6,9 @@
 
 不写任何东西、不触发重扫。发现不一致时让用户在知识库页重新索引。
 """
-from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.rag.services.rag_service import get_rag_service
-from biopilot.core.tool.services.runtime_context import get_rag_domain
+from biopilot.engine.tool import Tool, ToolResult
+from biopilot.engine.rag.services.rag_service import get_rag_service
+from biopilot.engine.tool.services.runtime_context import get_rag_domain
 
 
 class IndexStatusTool(Tool):

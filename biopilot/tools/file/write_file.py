@@ -4,7 +4,7 @@
 分析产物走 ``/internal/files/artifacts``（不占用户可见名字）。
 """
 from biopilot.common.platform import PlatformError
-from biopilot.core.tool import Tool, ToolResult
+from biopilot.engine.tool import Tool, ToolResult
 from biopilot.tools.file._support import (
     content_type_for, current_run_id, current_user_id, normalize_name, platform_for,
 )

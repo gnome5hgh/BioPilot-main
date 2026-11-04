@@ -6,7 +6,7 @@
 from pathlib import Path
 
 from biopilot.config import BioPilotConfig
-from biopilot.tools.assembly import make_tools
+from biopilot.tools.services.assembly import make_tools
 from biopilot.tools import (
     ReadFileTool, ReadPdfTool, FormatCheckTool, SubmitReviewTool, GlobTool, GrepTool,
     ReadReferenceTool,

@@ -348,7 +348,7 @@ def make_platform_client(config, *, client: httpx.Client | None = None) -> Platf
         绑定当前部署地址与超时的 PlatformClient。
     """
     # 函数内导入：common 层不在模块加载期反向依赖 config 的 dataclass 定义
-    from biopilot.config.schemas.sections import PlatformConfig
+    from biopilot.config.sections import PlatformConfig
 
     default = PlatformConfig()
     platform = getattr(config, "platform", None)

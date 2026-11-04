@@ -95,9 +95,9 @@ cd web && npm install && npm run dev
 
 ## 配置说明
 
-所有可调参数的默认值唯一声明在 `biopilot/config/schemas/sections.py`（dataclass 字段默认值）。**运行时配置的真相源是 MySQL 的 `bio_config`**，管理员在网页「设置」里修改；`.env` / 环境变量只承载进程启动前必须知道的引导项（MySQL/Milvus/MinIO 地址、内部 token、本机目录、配置加密密钥），且优先级最高。本地首次启动会把旧的 `config.yaml` 自动导入数据库，之后只剩引导层（可迁移到 `.env` 后删除）；容器部署没有旧文件可导入，直接用 compose 的环境变量。
+所有可调参数的默认值唯一声明在 `biopilot/config/sections.py`（dataclass 字段默认值）。**运行时配置的真相源是 MySQL 的 `bio_config`**，管理员在网页「设置」里修改；`.env` / 环境变量只承载进程启动前必须知道的引导项（MySQL/Milvus/MinIO 地址、内部 token、本机目录、配置加密密钥），且优先级最高。本地首次启动会把旧的 `config.yaml` 自动导入数据库，之后只剩引导层（可迁移到 `.env` 后删除）；容器部署没有旧文件可导入，直接用 compose 的环境变量。
 
-新增配置项不需要改前端：设置页按 `biopilot/config/services/schema.py` 的字段描述自动渲染。主要配置段：
+新增配置项不需要改前端：设置页按 `biopilot/config/schema.py` 的字段描述自动渲染。主要配置段：
 
 | 配置段 | 用途 |
 |---|---|
@@ -120,14 +120,20 @@ web/             前端（Vue3 + Vite）:登录 / 对话 / 文件 / 文献 / 知
 server/          SpringBoot 3.5（Java 21）:注册登录鉴权 / 业务表 / 内网代理（bio-admin
                  / bio-modules / bio-common 三模块）
 biopilot/
-  webapi/        HTTP/SSE 适配层:进程入口 + 会话装配 + 对话流 + 数据端点（只绑回环/内网）
+  main.py        启动类:配置子命令 + uvicorn
+  api/           FastAPI 装配层:create_app / deps / router / lifespan / 异常映射
+  controller/    路由层:chat / session / settings / model / terminal / kb / internal
+  service/       应用服务:ABC 接口 + impl（SSE、附件、设置、知识库索引、删户、调度）
+  mapper/        SQL 访问层
+  schema/        HTTP 请求/响应 Pydantic 模型
+  domain/        WebConfig / WebSession / RuntimeState / TerminalSocket
   config/        全局可调参数的唯一声明点
-  core/          核心运行层:agent(ReAct 循环) / llm(客户端 + 结构化输出)
+  engine/        agent 运行时:agent(ReAct 循环) / llm(客户端 + 结构化输出)
                  / intent(意图识别) / memory(记忆系统) / security(安全中间件)
                  / skills(Skill 注册表) / tool(Tool 抽象)
                  / rag(RAG 检索栈:解析 → 分块 → 索引 → 混合检索 → 重排)
                  / vision(视觉分析:图表检测 + 提取 + 多模态解读)
-  tools/         面向 agent 的工具集:文件 / 记忆 / RAG / 搜索等（含装配工厂 assembly.py）
+  tools/         面向 agent 的工具集:文件 / 记忆 / RAG / 搜索等（装配工厂在 services/assembly.py）
 
 agents/          各角色 agent 的 AGENT.md + tools.py（插件目录，位于仓库根）
 .biopilot/      运行时数据根与资产目录:skills(流程 skill) / intent(意图知识库) / infra(服务数据卷)
@@ -137,4 +143,4 @@ agents/          各角色 agent 的 AGENT.md + tools.py（插件目录，位于
 
 ## AI 协作入口
 
-仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`web/`、`server/`、`biopilot/` 及其 `config/`、`core/`（再往下十二份）、`tools/`、`webapi/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。
+仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`web/`、`server/`、`biopilot/` 及其 `config/`、`engine/`（再往下各子包各一份）、`tools/`、`api/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。

@@ -5,7 +5,7 @@ import mimetypes
 import unicodedata
 
 from biopilot.common.platform import make_platform_client
-from biopilot.core.tool.services.runtime_context import get_memory_context
+from biopilot.engine.tool.services.runtime_context import get_memory_context
 
 
 def current_user_id() -> str:
