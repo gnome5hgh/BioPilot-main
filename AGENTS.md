@@ -50,7 +50,7 @@ BioPilot/
 - `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（按业务域拆分的模块，外加技术适配层 bio-gateway；域清单以目录为准）、`bio-common`（跨域共享的基础设施模块，按单一关注点拆分）。
 - 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
-- `.biopilot/` 是**运行期数据根**（整体不入库）：`infra/` 是 docker 数据卷，`run/` 是本地启动脚本的 pid 与日志，`user-cache/` 是按用户隔离的派生缓存（附件副本、技能物化）。运行期数据默认落在这里，但可用 `runtime.workspace` / `BIOPILOT_RUNTIME_WORKSPACE` 重定向到仓库外；用户缓存根由 `runtime.user_cache_dir` 单独控制。意图知识库不是运行期数据，已随包放在 `biopilot/engine/intent/data/`。**`infra/` 受路径前缀硬拦、不随 workspace 重定向，删掉等于同时删库与对象存储。**
+- `.biopilot/` 是**运行期数据根**（整体不入库）：`infra/` 是 docker 数据卷，`run/` 是本地启动脚本的 pid 与日志，`user-cache/` 是按用户隔离的派生缓存（附件副本、技能物化）。`run/` 与 `user-cache/` 可丢可重建，不影响任何代码事实；`infra/` 不可删。运行期数据默认落在这里，但可用 `runtime.workspace` / `BIOPILOT_RUNTIME_WORKSPACE` 重定向到仓库外；用户缓存根由 `runtime.user_cache_dir` 单独控制。意图知识库不是运行期数据，已随包放在 `biopilot/engine/intent/data/`。**`infra/` 受路径前缀硬拦、不随 workspace 重定向，删掉等于同时删库与对象存储。**
 - `.agents/skills/` 是给编码代理用的技能，与 BioPilot 运行时的用户技能是**两条不相干的线**。
 - `docs/`、`scripts/`、`tests/` 不入库是既定策略；运行期目录与个人路径不得入库。
 

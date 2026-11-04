@@ -7,9 +7,8 @@
 # 示例句与 rules.yaml 里的高精度模式逐字不重复——同一句话既当示例又当规则会让两边
 # 都失去意义。
 #
-# 领域意图与领域 agent 一一对应：paper / note / research / bioinformatics / index
-# 分别对应 paper-agent / note-agent / research-agent / bio-agent / rag-agent。
-# 其余类别不派发领域角色。类别枚举与工作去向见 docs/adr/0007-intent-recognition.md。
+# 领域意图各对应一个可派发的领域 agent，其余类别不派发领域角色；这张对应关系由
+# 锁定测试守着，不在本文件里维护清单。类别枚举以代码里的 `IntentType` 为准。
 
 classes:
   paper:

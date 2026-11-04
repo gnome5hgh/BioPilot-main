@@ -10,7 +10,7 @@
 
 两份资产由 `biopilot/engine/intent/rules/taxonomy.py` 的 `load_taxonomy` 装载并做 **fail-closed** 校验：类别缺条目、出现未知类别、缺描述、缺示例、规则指向未知类别、模式非法正则、模式与示例逐字重复——都在启动期报错并**点名具体类别**。类别集合必须与 `IntentType` 枚举（11 值）逐项一致。
 
-领域意图与领域 agent 一一对应：`paper` / `note` / `research` / `bioinformatics` / `index` 分别对应 paper-agent / note-agent / research-agent / bio-agent / rag-agent。这张对应关系是责任归属，不是运行时路由——派发仍由 supervisor 自主决定。
+领域意图各对应一个可派发的领域 agent，其余类别不派发领域角色；具体映射以 `IntentType` 与 `tests/agents/test_intent_agent_mapping.py` 为准。这张对应关系是责任归属，不是运行时路由——派发仍由 supervisor 自主决定。
 
 ## 改动这两份资产
 
@@ -27,3 +27,7 @@ conda run -n biopilot python -m pytest tests/intent -q
 ## 题集（评测集）不在这里
 
 标定题集按实验归属放在 `scripts/intent/calibration/goldens/{source,audited}/`——**实验资产、`scripts/` 不入库**，所以本机那份是唯一副本，清理脚本目录时不要连它一起删。类别换代后旧题集需要重标（新类别在旧 18 类里可能没有对应项），不要拿旧标签直接跑新类别。
+
+## 已退役
+
+旧的 `routes.yaml`（18 类例句 + 每条路由的标定阈值）与 `routes_vectors.npz`（路由语料的稠密向量缓存）已随混合路由层退役——判定层现在只有「规则层 + 判定服务」两层，没有阈值概念；需要查旧语料可从 git 历史取回。

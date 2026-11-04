@@ -33,7 +33,9 @@ intent/
 - **判定必须看对话史，assistant 侧要保留**：判定口径是「判最后一条用户消息」，输入是最近若干轮 user / assistant 正文（不含工具结果）。掐掉 assistant 侧，「再下载一篇」这类指代就读不懂。
 - **类别词汇只有一个声明点**：类别枚举即词表，知识库按它做 **fail-closed** 校验——类别缺条目、缺描述、缺示例、规则指向未知类别、模式非法正则、模式与示例逐字重复，都在启动期报错并**点名具体类别**。
 - **只作信号**：产出注入 head 后就不再参与决策；派发、顺序、并行全归 supervisor 自己的 ReAct 循环。
-- **领域意图与领域 agent 一一对应，但不是路由**：`paper` / `note` / `research` / `bioinformatics` / `index` 分别对应 paper-agent / note-agent / research-agent / bio-agent / rag-agent；`memory` / `question` / `chitchat` / `help` / `out_of_scope` / `feedback` 不派发领域角色。这张表是责任归属，`spawn.py` 对它零引用；新增可派发角色时要同时补一个领域意图（`tests/agents/test_intent_agent_mapping.py` 锁住）。
+- **领域意图与领域 agent 一一对应，但不是路由**：每个可派发的领域 agent 恰有一个领域意图，其余类别不派发领域角色；映射与锁定测试见 `tests/agents/test_intent_agent_mapping.py`。这张表是责任归属，`spawn.py` 对它零引用；新增可派发角色时要同时补一个领域意图。
+- **两份文件分工明确**：`taxonomy.yaml` 的口径与示例服务模型判定（模糊地带靠它）；`rules.yaml` 只服务规则层短路（只在有把握时命中）。
+- **口径要写「是什么 / 不包什么」**：只说「是什么」会在相邻类别之间留下重叠，边界才是判定出错的地方。
 - **规则层宁窄勿宽**：写宽会误命中，写窄只是不短路——误命中的代价高于多跑一次模型。示例句不能与规则逐字重复（装载期会拒）。
 
 ## Key Entry Points
