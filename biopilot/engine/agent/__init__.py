@@ -9,10 +9,10 @@
 - ``get_run_state`` / ``get_session_state`` ← ``services/state``（运行期状态容器取用点）
 
 `state` 的两个取用函数在此导出，是为了让 `tools/` 侧不再深引
-`core.agent.services.state` —— 包门面是唯一入口，内部模块布局才可自由调整。
+`engine.agent.services.state` —— 包门面是唯一入口，内部模块布局才可自由调整。
 
-依赖方向声明：本包可依赖 core.llm / core.skills / core.tool / core.common /
-core.memory / core.security / core.intent；反向（它们 import 本包）不被允许。
+依赖方向声明：本包可依赖 engine.llm / engine.skills / engine.tool / engine.common /
+engine.memory / engine.security / engine.intent；反向（它们 import 本包）不被允许。
 """
 
 from biopilot.engine.agent.constants import AgentEventKind

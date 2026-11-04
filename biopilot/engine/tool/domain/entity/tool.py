@@ -1,7 +1,7 @@
 """Tool ABC：工具接口契约与安全元数据。
 
 ``parameters`` 使用 JSON Schema 格式直接喂给 LLM 的 function calling 机制，不做中间
-抽象层，保证与 OpenAI API 兼容；安全元数据的合法取值集合声明在 ``core.constants``。
+抽象层，保证与 OpenAI API 兼容；安全元数据的合法取值集合声明在 ``engine.constants``。
 """
 from abc import ABC, abstractmethod
 

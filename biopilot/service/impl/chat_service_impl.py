@@ -98,6 +98,7 @@ class ChatServiceImpl(ChatService):
         """构造绑定会话的确认回调（传给会话装配）。"""
 
         async def callback(req) -> bool:
+            """把策略引擎的确认请求交给当前会话的确认等待。"""
             return await self._handle_confirm(user_id, conversation_id, req)
         return callback
 

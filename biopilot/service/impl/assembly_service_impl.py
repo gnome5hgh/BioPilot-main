@@ -199,7 +199,7 @@ class AssemblyServiceImpl(AssemblyService):
                     history_messages=config.intent.history_messages)
 
         async def _fail_safe_confirm(req) -> bool:
-            # 无确认回调时的兜底：拒绝（确认永不静默放行）
+            """无确认回调时的兜底：拒绝（确认永不静默放行）。"""
             logger.warning("确认请求无回调，fail-safe 拒绝：%s", req)
             return False
         _web_confirm_callback = confirm_callback or _fail_safe_confirm
@@ -242,17 +242,3 @@ class AssemblyServiceImpl(AssemblyService):
         session.agent._consolidation_queue = session.consolidation_queue
         state._queues[(user_id, conversation_id)] = session.consolidation_queue
         return session.agent
-
-
-_service = AssemblyServiceImpl()
-
-
-async def assemble_web_session(user_id: str, conversation_id: str, config=None,
-                               confirm_callback=None,
-                               project_id: str | None = None,
-                               model_name: str | None = None) -> WebSession:
-    """兼容旧导入路径的模块级装配函数。"""
-    return await _service.assemble(
-        user_id, conversation_id, config=config,
-        confirm_callback=confirm_callback, project_id=project_id,
-        model_name=model_name)

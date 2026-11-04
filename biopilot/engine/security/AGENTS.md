@@ -79,7 +79,7 @@ conda run -n biopilot python -m pytest tests/security -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0002（安全设计）
 - 确认框与 SSE 通道：[`../../api/AGENTS.md`](../../api/AGENTS.md)
 

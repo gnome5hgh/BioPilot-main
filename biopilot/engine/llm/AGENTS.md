@@ -74,7 +74,7 @@ conda run -n biopilot python -m pytest tests/core -k "llm or message or structur
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0006（结构化输出）
 - 会话落盘与回放：[`../memory/AGENTS.md`](../memory/AGENTS.md)
 

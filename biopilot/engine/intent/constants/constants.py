@@ -15,7 +15,7 @@ __all__ = ["INTENT_CLASSES", "INTENT_KB_DIR", "RULES_PATH", "TAXONOMY_PATH"]
 #: 顺序即枚举声明顺序；规则表按自己的声明顺序匹配，与本元组无关。
 INTENT_CLASSES: tuple[str, ...] = tuple(t.value for t in IntentType)
 
-#: 仓库安装根（本文件位于 core/intent/constants/，向上四级即仓库根）。
+#: 仓库安装根（本文件位于 engine/intent/constants/，向上四级即仓库根）。
 #: 随仓库发布的知识资产恒锚此处，不随 BIOPILOT_RUNTIME_WORKSPACE 重定向。
 _INSTALL_ROOT = Path(__file__).resolve().parents[4]
 

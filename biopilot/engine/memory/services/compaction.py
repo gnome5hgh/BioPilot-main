@@ -152,7 +152,7 @@ def estimate_tokens(messages: list[Message]) -> int:
         估算的总 token 数（整数）。
     """
     total = 0
-    # 编码器单点在 core.common.services.tokenization（与 rag 切块共用同一口径）。
+    # 编码器单点在 common.utils.tokenization（与 rag 切块共用同一口径）。
     enc = get_token_encoder()
     for m in messages:
         total += len(enc.encode(_countable_text(m))) + _PROTOCOL_OVERHEAD

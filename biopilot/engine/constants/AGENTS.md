@@ -65,7 +65,7 @@ conda run -n biopilot python -m pytest tests/core tests/security -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 消费方：[`../security/AGENTS.md`](../security/AGENTS.md)、[`../tool/AGENTS.md`](../tool/AGENTS.md)
 - 另一类共享取值：[`../common/AGENTS.md`](../common/AGENTS.md)
 

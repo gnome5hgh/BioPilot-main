@@ -7,7 +7,7 @@
 
 两份资产都随仓库发布（`.biopilot/intent/`）：`taxonomy.yaml` 写各类的判定口径与
 示例句（判定模型看到的 criteria），`rules.yaml` 写规则层的高精度模式。类别
-类别词汇由 `core/intent/constants/` 声明（`INTENT_CLASSES` 从枚举派生），装载时与知识库逐项对齐。
+类别词汇由 `engine/intent/constants/` 声明（`INTENT_CLASSES` 从枚举派生），装载时与知识库逐项对齐。
 """
 from __future__ import annotations
 

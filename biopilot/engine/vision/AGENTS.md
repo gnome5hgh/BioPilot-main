@@ -73,7 +73,7 @@ conda run -n biopilot python -m pytest tests/vision -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0008（图片提取与多模态）
 - 消费方：[`../../tools/AGENTS.md`](../../tools/AGENTS.md)、[`../rag/AGENTS.md`](../rag/AGENTS.md)
 

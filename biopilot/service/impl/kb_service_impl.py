@@ -325,6 +325,7 @@ class KbServiceImpl(KbService):
         state.reindex_running.add(user_id)
 
         async def _runner():
+            """后台跑一轮索引，并按 pending 标记补跑。"""
             try:
                 misses = 0
                 while True:
@@ -450,11 +451,3 @@ class KbServiceImpl(KbService):
     def _paper_id_of(self, doc_key: str) -> str:
         """从文档标识取平台论文 id（检索结果回填用）。"""
         return paper_id_of(doc_key) or Path(doc_key).stem
-
-
-_service = KbServiceImpl()
-
-
-def _index_user_kb_locked(user_id: str, cfg) -> dict:
-    """兼容旧模块级入口：持锁执行一轮索引。"""
-    return _service._index_user_kb_locked(user_id, cfg)

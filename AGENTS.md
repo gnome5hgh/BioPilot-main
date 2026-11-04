@@ -240,7 +240,7 @@ cd server && mvn test -pl bio-admin
 - 当前目录是 `BioPilot` 根工作区 manifest。
 - 前端入口：[`web/AGENTS.md`](web/AGENTS.md)
 - 服务端入口：[`server/AGENTS.md`](server/AGENTS.md)
-- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`config/`](biopilot/config/AGENTS.md) / [`engine/`](biopilot/engine/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`api/`](biopilot/api/AGENTS.md)；`engine/` 之下的子 manifest 见 core manifest）
+- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`config/`](biopilot/config/AGENTS.md) / [`engine/`](biopilot/engine/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`api/`](biopilot/api/AGENTS.md)；`engine/` 之下的子 manifest 见 engine manifest）
 - 插件目录入口：[`agents/AGENTS.md`](agents/AGENTS.md)
 - 资产与数据根入口：[`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)（其下 [`intent/`](.biopilot/intent/AGENTS.md)）
 - 设计文档索引：[`docs/adr/`](docs/adr/)（修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）、[`docs/learning/`](docs/learning/)

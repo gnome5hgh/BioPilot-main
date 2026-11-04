@@ -86,7 +86,7 @@ conda run -n biopilot python -m pytest tests/memory -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0004（记忆系统）
 - 工具封装与装配：[`../../tools/AGENTS.md`](../../tools/AGENTS.md)、[`../../../agents/AGENTS.md`](../../../agents/AGENTS.md)
 

@@ -83,7 +83,7 @@ conda run -n biopilot python -m pytest tests/agent tests/core -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0003（ReAct 多 Agent 架构）
 - 插件契约与角色：[`../../../agents/AGENTS.md`](../../../agents/AGENTS.md)
 - 工具抽象：[`../tool/AGENTS.md`](../tool/AGENTS.md)

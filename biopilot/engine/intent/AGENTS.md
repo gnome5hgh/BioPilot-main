@@ -75,7 +75,7 @@ conda run -n biopilot python -m pytest tests/intent -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0007（意图识别）
 - 知识库资产与入库规则：[`../../../.biopilot/AGENTS.md`](../../../.biopilot/AGENTS.md)
 

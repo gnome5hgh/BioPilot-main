@@ -84,7 +84,7 @@ biopilot config rollback <version>
 ## Verification
 
 ```bash
-conda run -n biopilot python -m pytest tests/core/test_config.py tests/core/test_config_schema.py tests/core/test_config_store.py -q
+conda run -n biopilot python -m pytest tests/engine/test_config.py tests/engine/test_config_schema.py tests/engine/test_config_store.py -q
 ```
 
 ## Routing

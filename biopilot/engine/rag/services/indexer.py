@@ -32,7 +32,7 @@
 残留。纯算法逻辑改动无法被参数枚举，改 ``RECIPE_LOGIC_REVISION`` 手动 +1 兜底。
 
 状态存放在 MySQL 的 ``bio_rag_index_state``（每用户域一行，见
-``core/rag/storage/index_state_store.py``）：运行数据根可被清空或重定向，增量依据
+``engine/rag/storage/index_state_store.py``）：运行数据根可被清空或重定向，增量依据
 必须独立于它。``docs`` 的取值形状保持数值不变（内容摘要派生的浮点指纹），
 外部消费方按数值比对做增量跳过。
 """

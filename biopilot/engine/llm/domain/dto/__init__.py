@@ -6,7 +6,7 @@ token 用量 ``Usage`` 挂在 assistant 上，但本身不是消息，同样是�
 （客户端产出、Agent 与审计消费）。
 
 schema → prompt 渲染与结构化抽取是**服务**（``services/structured.py``），不放这里；
-组件行为参数在 `core/llm/config/`。
+组件行为参数在 `engine/llm/config/`。
 """
 from biopilot.engine.llm.domain.dto.messages import (
     AssistantMessage,

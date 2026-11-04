@@ -78,7 +78,7 @@ conda run -n biopilot python -m pytest tests/core -k "tool" -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 具体工具与装配：[`../../tools/AGENTS.md`](../../tools/AGENTS.md)
 - 安全侧消费：[`../security/AGENTS.md`](../security/AGENTS.md)
 

@@ -3,7 +3,7 @@
 与 `LLMConfig` 那类「全局配置树同构、可经设置页或 env 调整」的可调参数不同：这里是
 **组件自己的行为参数**，由各消费方在调用点各给一套（查询改写要 0 次重试、
 看图分析要 1 次、默认 2 次），不进全局配置。同类先例见 `AgentConfig`
-（`core/agent/config/`）与 `SkillConfig`（`core/skills/config/`）。
+（`engine/agent/config/`）与 `SkillConfig`（`engine/skills/config/`）。
 """
 from dataclasses import dataclass
 

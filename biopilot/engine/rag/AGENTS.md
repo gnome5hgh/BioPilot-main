@@ -87,7 +87,7 @@ conda run -n biopilot python -m pytest tests/rag -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0001（RAG 管线）
 - 消费方工具：[`../../tools/AGENTS.md`](../../tools/AGENTS.md)
 

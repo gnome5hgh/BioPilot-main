@@ -70,7 +70,7 @@ python -m pytest tests/core -k "skill" -q
 
 ## Routing
 
-- 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
+- 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0010（Skill 系统）
 - 内置流程与 agent 资源：[`../../../agents/AGENTS.md`](../../../agents/AGENTS.md)
 - 管理面：[`../../../server/AGENTS.md`](../../../server/AGENTS.md)

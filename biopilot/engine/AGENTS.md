@@ -3,7 +3,7 @@
 ## Scope
 
 - 覆盖 `engine/` 核心运行层。子包内部实现以源码为准。
-- 十个子包各有自己的 manifest（见 Routing）；根 manifest 的硬红线在本层同样成立，这里不重复。
+- 各子包各有自己的 manifest（见 Routing）；根 manifest 的硬红线在本层同样成立，这里不重复。
 
 ## Module Positioning
 
@@ -48,7 +48,7 @@
 
 ## Usage And Change Notes
 
-- **包根只留子包与 manifest**：本层 10 个子包已全部收净（包根无裸 `.py`）。判据是「这个单元有没有自成体系的约定」——真正要避免的是为只有一两个内聚模块、没有独立约定的目录单设一份 manifest。
+- **包根只留子包与 manifest**：本层子包已全部收净（包根无裸 `.py`）。判据是「这个单元有没有自成体系的约定」——真正要避免的是为只有一两个内聚模块、没有独立约定的目录单设一份 manifest。
 - 新增或搬移模块时按本层既有角色选子包（`domain/` / `services/` / `storage/` / `config/` / `constants/`），别把散模块直接堆在包根；搬完把包内 import 改成具体子模块路径（不可经包 `__init__`，那会成环）。
 - 子包之间新增依赖要检查方向：**core 内部允许互相依赖，但对 `tools` / `api` 的出边必须为零**；跨层共享只能依赖 `biopilot/common`。
 

@@ -51,13 +51,13 @@ class AcademicChunker:
     被丢弃的章节不产生块。嵌入模型（Qwen3-Embedding-0.6B 支持 32K 上下文）
     对分块长度没有硬约束，max_tokens=512 是检索粒度的选择：块太大召回噪声多、
     太小语义碎片化；overlap 让相邻块重叠一部分，重叠让跨块语义连贯。token
-    计数用 ``core.common.services.tokenization.TOKEN_ENCODING``（与 core.memory 压缩共用）
+    计数用 ``common.utils.tokenization.TOKEN_ENCODING``（与 engine.memory 压缩共用）
     近似即可，不必精确。
 
     Attributes:
         max_tokens: int，每个块的最大 token 数（检索粒度选择，非模型硬约束）
         overlap_tokens: int，相邻块的重叠 token 数（保持跨块语义连贯）
-        _enc: token 计数器（core.common.services.tokenization 单点共享，近似计数即可）
+        _enc: token 计数器（common.utils.tokenization 单点共享，近似计数即可）
     """
 
     def __init__(self, max_tokens: int, overlap_tokens: int):
@@ -72,8 +72,8 @@ class AcademicChunker:
         """
         self.max_tokens = max_tokens
         self.overlap_tokens = overlap_tokens
-        # 编码器口径单点共享（core.common.services.tokenization/get_token_encoder），与
-        # core.memory 压缩共用；只需近似计数，不必精确。
+        # 编码器口径单点共享（common.utils.tokenization/get_token_encoder），与
+        # engine.memory 压缩共用；只需近似计数，不必精确。
         self._enc = get_token_encoder()
 
     def _is_reference(self, heading: str) -> bool:
