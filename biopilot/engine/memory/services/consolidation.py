@@ -142,7 +142,7 @@ class MemoryConsolidator:
 
     触发是每轮一次（Web 会话在本轮收尾调用）；进度由游标跟踪——游标落库
     （bio_memory_consolidation_cursor 表），跨进程认领取 MySQL 命名锁：同一会话被
-    多实例 webapi 进程同时触达时，只有持锁者消费（防双消费），对端本轮放弃。游标行
+    多实例 api 进程同时触达时，只有持锁者消费（防双消费），对端本轮放弃。游标行
     不存在时按 messages 行数初次回填（进程重启/首启自愈）。
 
     Attributes:

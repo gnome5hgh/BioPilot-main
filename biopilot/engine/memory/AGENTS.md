@@ -61,7 +61,7 @@ memory/
 
 ## Dependencies And Collaboration
 
-- 消费方：`engine/agent`（in-context 窗口与压缩）、`tools/recall/`（长期记忆只读 + 工具结果回取）、`webapi`（轮末 enqueue 与停服 flush）。
+- 消费方：`engine/agent`（in-context 窗口与压缩）、`tools/recall/`（长期记忆只读 + 工具结果回取）、`api`（轮末 enqueue 与停服 flush）。
 - 与 `engine/llm` 的关系是单向的：消费它的消息类型做落盘与回放。
 - 与 RAG 无耦合：记忆检索是 SQL，不用向量。
 

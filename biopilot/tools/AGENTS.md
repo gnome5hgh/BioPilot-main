@@ -21,7 +21,7 @@
 - `recall/` — 只读召回包（`memory_read` 读长期记忆 + `read_tool_result` 取回工具原文，装配给所有 agent）
 - `orchestration/` — 子 agent 派发（唯一的调度工具；按当前约定整文件保留）
 - `skills/` — 加载 skill 正文与资源
-- `assembly.py` — 工具装配工厂（`make_tools`）：实例化工具并注入 `_config`
+- `services/assembly.py` — 工具装配工厂（`make_tools`）：实例化工具并注入 `_config`
 
 工具运行时上下文在 `engine/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在
 `biopilot/common/` 与 `engine/security/`。
@@ -32,7 +32,7 @@
 
 - 为每个工具声明名字、描述、参数 schema、安全元数据与风险档位。
 - 把工具结果（含各种失败）统一成结构化结果回传模型。
-- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `engine/*/services`，装配由 `tools/assembly.py` 负责。
+- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `engine/*/services`，装配由 `tools/services/assembly.py` 负责。
 
 ## Core Logic
 
@@ -46,7 +46,7 @@
 
 ## Key Entry Points
 
-- `assembly.py` — 工具装配工厂（`make_tools`）
+- `services/assembly.py` — 工具装配工厂（`make_tools`）
 - `engine/tool/services/runtime_context.py` — 工具运行时上下文（记忆管理器 + RAG 用户域）
 - `orchestration/spawn.py` — 派发工具与五道闸
 - `recall/` — 只读召回包（长期记忆读取 + 工具结果回取）
@@ -62,7 +62,7 @@
 
 - 依赖 `engine/tool/`（抽象与安全元数据校验）、`engine/constants/`（风险与副作用词汇）、`engine/security/`（中间件在调用前后接管）。
 - 被 `api/` 在装配期取用，被 `engine/agent` 在 ReAct 循环里执行。
-- 各领域工具的真实实现对在对应 core 子包里（记忆在 `engine/memory/`，检索在 `engine/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
+- 各领域工具的真实实现对在对应 engine 子包里（记忆在 `engine/memory/`，检索在 `engine/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
 
 ## Investigation Rule
 
@@ -91,7 +91,7 @@ conda run -n biopilot python -m pytest tests/tools -q
 
 ## References
 
-- [`common/`](common/)
+- [`../common/AGENTS.md`](../common/AGENTS.md)
 - [`orchestration/spawn.py`](orchestration/spawn.py)
 - [`recall/`](recall/)
 - [`../engine/AGENTS.md`](../engine/AGENTS.md)

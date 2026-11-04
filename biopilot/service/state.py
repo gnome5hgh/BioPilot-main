@@ -1,6 +1,6 @@
 """进程级共享状态与知识库常量。
 
-这些变量在旧 ``webapi/app.py`` 里就是模块级全局量；refactor 只搬位置，
+这些变量在重构前的 ``api/app.py`` 里就是模块级全局量；refactor 只搬位置，
 不改变作用域——测试仍按「查找处」替换这里的属性。
 """
 from __future__ import annotations
