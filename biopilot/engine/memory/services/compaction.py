@@ -19,9 +19,9 @@ import json
 import logging
 from dataclasses import replace
 
-from biopilot.config.schemas.sections import CompactionSettings, ContextSize
+from biopilot.config.sections import CompactionSettings, ContextSize
 from biopilot.engine.llm import Message, SystemMessage, UserMessage
-from biopilot.common.core.utils.tokenization import get_token_encoder
+from biopilot.common.utils.tokenization import get_token_encoder
 from biopilot.engine.memory.domain.entity.compaction_result import CompactionResult
 from biopilot.engine.memory.domain.entity.summary import Summary
 from biopilot.engine.memory.domain.entity.task_snapshot import TaskSnapshot

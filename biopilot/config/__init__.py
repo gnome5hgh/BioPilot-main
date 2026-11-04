@@ -32,14 +32,14 @@ env 名约定：字段路径以 ``_`` 连接并大写，前缀 ``BIOPILOT_``。�
 校验）+ ``services/store.py``（MySQL 持久化/加密/历史）；本文件只做再导出，
 消费方一律 ``from biopilot.config import ...``。
 """
-from biopilot.config.services.loader import (
+from biopilot.config.settings import (
     BioPilotConfig,
     db_source_enabled,
     enable_db_source,
     ensure_legacy_import,
     user_cache_root,
 )
-from biopilot.config.schemas.sections import (
+from biopilot.config.sections import (
     AgentsConfig,
     ChunkerConfig,
     CorpusConfig,

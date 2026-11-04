@@ -11,8 +11,8 @@ from typing import Any
 import yaml
 
 from biopilot.config import BioPilotConfig, db_source_enabled
-from biopilot.config.services import store as config_store
-from biopilot.config.services.schema import (
+from biopilot.config import store as config_store
+from biopilot.config.schema import (
     BOOTSTRAP_PATHS,
     ConfigValidationError,
     build_schema,
@@ -27,7 +27,7 @@ from biopilot.config.services.schema import (
     mask_secret,
     validate_patches,
 )
-from biopilot.config.services.store import UNSET
+from biopilot.config.store import UNSET
 
 
 class ConfigSourceUnavailable(RuntimeError):

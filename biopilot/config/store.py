@@ -26,7 +26,7 @@ from typing import Any
 
 import yaml
 
-from biopilot.config.services.schema import (
+from biopilot.config.schema import (
     BOOTSTRAP_PATHS,
     ConfigValidationError,
     SCOPE_GLOBAL,

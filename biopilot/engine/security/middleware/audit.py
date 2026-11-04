@@ -49,7 +49,7 @@ from biopilot.engine.security.middleware.base import (
     SecurityMiddleware, SecurityBlocked, ConfirmRequired,
 )
 from biopilot.engine.security.domain import AuditEntry, ToolContext
-from biopilot.common.core.utils.text import sanitize_surrogates
+from biopilot.common.utils.text import sanitize_surrogates
 
 #: 凭证类键名 → 替换值。这是审计里唯一的脱敏——凭证落日志是真泄露且对取证
 #: 无价值；其余键值（含写入/读出的正文）全量原文保留。

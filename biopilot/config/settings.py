@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from biopilot.config.services.schema import BOOTSTRAP_PATHS, env_name, nest_patches
+from biopilot.config.schema import BOOTSTRAP_PATHS, env_name, nest_patches
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def ensure_legacy_import(legacy_path: str | Path | None = None) -> int | None:
     """
     if not db_source_enabled():
         return None
-    from biopilot.config.services import store as config_store
+    from biopilot.config import store as config_store
 
     config = BioPilotConfig.from_env()
     path = Path(legacy_path) if legacy_path else Path.cwd() / "config.yaml"
@@ -79,7 +79,7 @@ def ensure_legacy_import(legacy_path: str | Path | None = None) -> int | None:
         logger.warning("旧配置导入失败，继续使用当前配置：%s", exc)
         return None
 
-from biopilot.config.schemas.sections import (
+from biopilot.config.sections import (
     AgentsConfig,
     CompactionSettings,
     CorpusConfig,
@@ -255,7 +255,7 @@ class BioPilotConfig:
         Returns:
             叠加了数据库覆盖的配置；数据库不可用时返回 ``base``。
         """
-        from biopilot.config.services import store as config_store
+        from biopilot.config import store as config_store
 
         dsn = base.runtime.memory_dsn
         workspace = base.runtime.workspace

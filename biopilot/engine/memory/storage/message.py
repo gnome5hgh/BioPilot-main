@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from biopilot.common.core.constants import MessageRole
+from biopilot.common.constants import MessageRole
 from biopilot.engine.llm.domain.dto import response_meta_to_dict
 from biopilot.engine.memory.storage.database import MemoryDB
 from biopilot.engine.memory.schemas.stored_message import StoredMessage

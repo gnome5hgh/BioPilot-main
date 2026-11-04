@@ -16,7 +16,7 @@ import os
 from dataclasses import fields, is_dataclass
 from typing import Any
 
-from biopilot.config.schemas.sections import CONTEXT_SIZE_TYPES, ContextSize
+from biopilot.config.sections import CONTEXT_SIZE_TYPES, ContextSize
 
 #: 配置作用域：目前只有全局一份；将来的用户级配置另表存、按 user_id 合并。
 SCOPE_GLOBAL = "global"
@@ -372,7 +372,7 @@ def iter_leaves(node, prefix: tuple[str, ...] = ()):
 def default_map() -> dict[str, Any]:
     """返回全部字段的默认值映射（路径 → 值）。"""
     # 延迟导入：loader 依赖本模块做 DB 覆盖，模块级互相导入会成环。
-    from biopilot.config.services.loader import BioPilotConfig
+    from biopilot.config.settings import BioPilotConfig
 
     return dict(iter_leaves(BioPilotConfig()))
 

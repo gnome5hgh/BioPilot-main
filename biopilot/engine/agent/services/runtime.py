@@ -64,7 +64,7 @@ from biopilot.engine.skills import SkillRegistry
 from biopilot.engine.agent.constants.base_prompt import BASE_PROMPT
 from biopilot.engine.security import ConfirmRequired, SecurityMiddleware
 from biopilot.engine.tool import SUMMARY_TERMINAL, ToolResult
-from biopilot.common.core.utils.text import sanitize_surrogates
+from biopilot.common.utils.text import sanitize_surrogates
 
 #: Agent 与意图识别之间只有一个缝：可选的集成适配器。未装配时整套意图层不存在。
 from biopilot.engine.intent.services.service import IntentService
@@ -599,7 +599,7 @@ class Agent:
         Returns:
             dict: {total, limit, parts: {...}}，parts 键与 head 组装顺序一致。
         """
-        from biopilot.common.core.utils.tokenization import estimate_text_tokens
+        from biopilot.common.utils.tokenization import estimate_text_tokens
         from biopilot.engine.memory.services.compaction import estimate_tokens
 
         parts: dict[str, int] = {}

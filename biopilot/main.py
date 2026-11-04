@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     raw = list(sys.argv[1:] if argv is None else argv)
     if raw and raw[0] == "config":
-        from biopilot.config.services.cli import config_main
+        from biopilot.config.cli import config_main
         return config_main(raw[1:])
 
     parser = argparse.ArgumentParser(

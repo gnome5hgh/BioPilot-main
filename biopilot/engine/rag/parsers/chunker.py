@@ -7,7 +7,7 @@ id，保证索引写入的幂等覆盖（对应 indexer 里的「先删后建」
 import hashlib
 import re
 
-from biopilot.common.core.utils.tokenization import get_token_encoder
+from biopilot.common.utils.tokenization import get_token_encoder
 from biopilot.engine.rag.constants import CHUNK_ID_LEN
 from biopilot.engine.rag.domain import Chunk, Section
 

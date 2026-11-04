@@ -20,7 +20,7 @@ import importlib.util
 from pathlib import Path
 
 from biopilot.engine.agent.config import AgentConfig
-from biopilot.common.core.utils.frontmatter import parse_frontmatter
+from biopilot.common.utils.frontmatter import parse_frontmatter
 from biopilot.engine.tool import Tool, validate_tool
 
 

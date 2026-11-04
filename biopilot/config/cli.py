@@ -17,8 +17,8 @@ import os
 import sys
 
 from biopilot.config import BioPilotConfig, enable_db_source
-from biopilot.config.services import store as config_store
-from biopilot.config.services.export import export_json, export_yaml
+from biopilot.config import store as config_store
+from biopilot.config.export import export_json, export_yaml
 
 
 def _store(config: BioPilotConfig):

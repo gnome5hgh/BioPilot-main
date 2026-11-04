@@ -9,7 +9,7 @@ from urllib.parse import unquote, urlparse
 
 from biopilot.common.platform import PlatformError
 from biopilot.engine.tool import Tool, ToolResult
-from biopilot.common.core.utils.text import normalize_title
+from biopilot.common.utils.text import normalize_title
 from biopilot.tools.file._support import current_run_id, current_user_id, platform_for
 
 

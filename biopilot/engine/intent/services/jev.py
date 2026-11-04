@@ -18,8 +18,8 @@ import time
 
 import httpx
 
-from biopilot.common.core.constants import RETRY_BACKOFF_BASE
-from biopilot.common.core.utils.text import sanitize_surrogates
+from biopilot.common.constants import RETRY_BACKOFF_BASE
+from biopilot.common.utils.text import sanitize_surrogates
 from biopilot.engine.intent.schemas import JevDecision
 
 logger = logging.getLogger(__name__)

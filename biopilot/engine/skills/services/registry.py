@@ -20,7 +20,7 @@ references/、assets/、scripts/ 等资源；**不接受 tools.py**（那是「�
 import logging
 from pathlib import Path
 
-from biopilot.common.core.utils.frontmatter import parse_frontmatter
+from biopilot.common.utils.frontmatter import parse_frontmatter
 from biopilot.engine.skills.config import SkillConfig
 
 logger = logging.getLogger(__name__)

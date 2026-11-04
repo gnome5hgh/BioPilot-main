@@ -9,7 +9,7 @@
 响应信封（``ResponseMeta`` / ``Usage``）挂在 assistant 上但本身不是消息类型，
 放在上一层 `dto/`。
 """
-from biopilot.common.core.constants import MessageRole
+from biopilot.common.constants import MessageRole
 from biopilot.engine.llm.domain.dto.messages.assistant_message import AssistantMessage
 from biopilot.engine.llm.domain.dto.messages.message import Message
 from biopilot.engine.llm.domain.dto.messages.system_message import SystemMessage

@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from biopilot.common.core.constants import MessageRole
+from biopilot.common.constants import MessageRole
 from biopilot.engine.llm.domain.dto.messages.message import Message
 from biopilot.engine.llm.domain.dto.response_meta import ResponseMeta
 

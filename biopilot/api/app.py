@@ -499,7 +499,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             return {"usage": None}
         parts = dict(baseline["parts"])
         try:
-            from biopilot.common.core.utils.tokenization import (
+            from biopilot.common.utils.tokenization import (
                 estimate_text_tokens)
             rows = _shared_db().execute(
                 "SELECT role, content, tool_calls FROM bio_message"
@@ -794,8 +794,8 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         """
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.config.services.schema import ConfigValidationError
-        from biopilot.config.services.store import (
+        from biopilot.config.schema import ConfigValidationError
+        from biopilot.config.store import (
             ConfigSecretDecryptError,
             ConfigSecretKeyMissing,
             ConfigVersionConflict,

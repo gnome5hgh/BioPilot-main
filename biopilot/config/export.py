@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 from biopilot.config import BioPilotConfig
-from biopilot.config.services.schema import (
+from biopilot.config.schema import (
     effective_map,
     is_secret,
     jsonable,

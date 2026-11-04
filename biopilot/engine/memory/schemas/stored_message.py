@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from biopilot.common.core.constants import MessageRole
+from biopilot.common.constants import MessageRole
 from biopilot.engine.llm.domain.dto import ResponseMeta
 
 __all__ = ["StoredMessage"]

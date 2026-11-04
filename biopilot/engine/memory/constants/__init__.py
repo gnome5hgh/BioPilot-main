@@ -2,7 +2,7 @@
 
 工具名集合与播种文案在 `constants.py`；本包只做再导出，消费方一律从
 `biopilot.engine.memory.constants` 取。消息角色 `MessageRole` 被 wire 消息家族与
-本模块的持久化消息共同消费，已归 `biopilot.common.core.constants`。
+本模块的持久化消息共同消费，已归 `biopilot.common.constants`。
 """
 
 from .constants import (
