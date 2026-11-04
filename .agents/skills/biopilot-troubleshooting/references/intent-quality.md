@@ -7,9 +7,9 @@
 - **修法**：阈值改动一律走 `scripts/intent/calibration/apply_calibration.py`（patch `biopilot/config.py`，覆盖 pipeline/bm25/confirm），不手改。
 - **验证**：`scripts/intent/eval/` 意图套件 acc 恢复 0.77 量级。
 
-### 两类贴近时判错（边界仲裁）（已过时 2026-10-14：仲裁层与 `core/intent/pipeline.py` 都已退役）
+### 两类贴近时判错（边界仲裁）（已过时 2026-10-14：仲裁层与 `engine/intent/pipeline.py` 都已退役）
 - **根因**：top-2 业务候选分数贴近且边界仲裁层未生效（仲裁层：贴近时交 LLM 二选一）。
-- **修法**：确认 `biopilot/core/intent/pipeline.py` 中仲裁路径可达；检查是否被指令前缀类改动绕过（指令前缀对意图模型有害，属已知结论）。
+- **修法**：确认 `biopilot/engine/intent/pipeline.py` 中仲裁路径可达；检查是否被指令前缀类改动绕过（指令前缀对意图模型有害，属已知结论）。
 - **验证**：构造边界样例（路由例句库 goldens/），仲裁命中且二选一正确。
 
 ### 澄清从不触发（已过时 2026-10-14：澄清通道整体退役，意图层不再提问；现状见下面「意图层像没生效」条）
@@ -18,7 +18,7 @@
 - **验证**：门禁声明按预期控制澄清是否提问。
 
 ### 路由结果与例句库对不上 / 向量缓存行为异常（已过时 2026-10-14：路由知识库与 `routes_vectors.npz` 已随混合路由退役）
-- **根因**：`.biopilot/intent/routes_vectors.npz`（gitignored 运行时产物，路径声明在 `biopilot/core/intent/routing/route_loader.py`）与路由例句不同步——例句改了缓存没重建。
+- **根因**：`.biopilot/intent/routes_vectors.npz`（gitignored 运行时产物，路径声明在 `biopilot/engine/intent/routing/route_loader.py`）与路由例句不同步——例句改了缓存没重建。
 - **修法**：删除该 npz 重建路由向量缓存，重启会话。
 - **验证**：改例句后路由行为随之变化；缓存文件时间戳晚于例句修改时间。
 

@@ -15,7 +15,7 @@
 
 ```text
 common/
-├─ core/
+├─ engine/
 │  ├─ constants/      # 跨层共享取值与枚举（MessageRole、RETRY_BACKOFF_BASE）
 │  └─ utils/          # text / tokenization / frontmatter 等纯函数
 ├─ net/               # HTTP 客户端的端点绑定（配置端点 host 校验，纯标准库）
@@ -28,14 +28,14 @@ common/
 - **依赖方向**：本包不得 import `core` / `tools` / `webapi` / `cli`；它是最底层。
 - **只放纯函数与数据**：出现业务判断，说明它该去 `core`；平台文件管理（上传/列表/删除/键约定）归 Java。
 - **共享判据是消费方数量**：只有一个消费方的实现留在原处；为了「整齐」搬进来会让这里退化成杂物间。
-- **常量两级布局**：枚举放 `core/constants/enums/<name>.py`（一个枚举一个文件），其余放同层 `constants.py`；`__init__.py` 只做再导出。
+- **常量两级布局**：枚举放 `engine/constants/enums/<name>.py`（一个枚举一个文件），其余放同层 `constants.py`；`__init__.py` 只做再导出。
 - **存储原语仅限通用能力**：只剩本地原子写；对象存储的读写一律经 `platform` 调 Java，或由引擎组件自己的内部存储（图表原图、工具结果外置）持有。
 - **`platform/` 是唯一出站实现**：header、超时与错误映射只写一份；它可以依赖 `httpx`，这是本包「只依赖标准库」的唯一例外。
-- **`net/` 只放端点不变量**：配置端点绑定（请求只准打创建客户端时声明的 host）是 HTTP 客户端的构造约束，不是策略中间件——需要「要不要用户点头」的判定去 `core/security`。外部 URL 的 SSRF 校验归 Java `bio-common-net`，Python 侧不再实现。
+- **`net/` 只放端点不变量**：配置端点绑定（请求只准打创建客户端时声明的 host）是 HTTP 客户端的构造约束，不是策略中间件——需要「要不要用户点头」的判定去 `engine/security`。外部 URL 的 SSRF 校验归 Java `bio-common-net`，Python 侧不再实现。
 
 ## Dependencies And Collaboration
 
-- 被 `core/`、`tools/`、`webapi/` 消费。
+- 被 `engine/`、`tools/`、`webapi/` 消费。
 - 本包只依赖标准库，唯一例外是 `platform/` 的 `httpx`；新增第三方依赖前先确认是否真的需要跨层共享。
 
 ## Investigation Rule

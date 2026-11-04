@@ -3,7 +3,7 @@
 ## Scope
 
 - 覆盖 `.biopilot/intent/`：意图识别**知识库**——随仓库分发的资产，不是运行期数据，也不随运行数据根重定向。
-- 装载与校验在代码侧，见 [`../../biopilot/core/intent/AGENTS.md`](../../biopilot/core/intent/AGENTS.md)。
+- 装载与校验在代码侧，见 [`../../biopilot/engine/intent/AGENTS.md`](../../biopilot/engine/intent/AGENTS.md)。
 
 ## Module Positioning
 
@@ -44,7 +44,7 @@
 
 ## Dependencies And Collaboration
 
-- 被 `biopilot/core/intent/rules/` 装载并做 fail-closed 校验。
+- 被 `biopilot/engine/intent/rules/` 装载并做 fail-closed 校验。
 - 与代码的分工：**词汇与校验在代码，口径与模式在本目录**——改判定行为通常只动这里。
 
 ## Investigation Rule
@@ -69,11 +69,11 @@ conda run -n biopilot python -m pytest tests/intent -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)（.biopilot manifest）
-- 装载、校验与判定：[`../../biopilot/core/intent/AGENTS.md`](../../biopilot/core/intent/AGENTS.md)
+- 装载、校验与判定：[`../../biopilot/engine/intent/AGENTS.md`](../../biopilot/engine/intent/AGENTS.md)
 
 ## References
 
 - [`taxonomy.yaml`](taxonomy.yaml)
 - [`rules.yaml`](rules.yaml)
 - [`README.md`](README.md)
-- [`../../biopilot/core/intent/AGENTS.md`](../../biopilot/core/intent/AGENTS.md)
+- [`../../biopilot/engine/intent/AGENTS.md`](../../biopilot/engine/intent/AGENTS.md)

@@ -54,7 +54,7 @@ def _shared_db():
     """适配层共享的 MemoryDB（懒建；标题更新等轻量 SQL 用）。"""
     global _db_instance
     if _db_instance is None:
-        from biopilot.core.memory.storage.database import MemoryDB
+        from biopilot.engine.memory.storage.database import MemoryDB
         _db_instance = MemoryDB()
     return _db_instance
 
@@ -1166,7 +1166,7 @@ def _drop_paper_index(svc, paper_id: str) -> None:
         svc: RAGService，当前用户域实例。
         paper_id: 平台论文 id。
     """
-    from biopilot.core.rag.constants import paper_doc_key
+    from biopilot.engine.rag.constants import paper_doc_key
     try:
         svc.remove_document(paper_doc_key(paper_id))
     except Exception:
@@ -1188,7 +1188,7 @@ def _sweep_orphan_vectors(svc, counts: dict[str, int],
     Returns:
         tuple[int, dict[str, int]]: (删掉的文档数, 剩余「文档标识 → 块数」)。
     """
-    from biopilot.core.rag.constants import paper_id_of
+    from biopilot.engine.rag.constants import paper_id_of
 
     remaining = dict(counts)
     removed = 0
@@ -1245,7 +1245,7 @@ def _index_user_kb_sync(user_id: str) -> dict:
         skipped=True 表示锁被另一个进程持有，本轮没有做任何事。
     """
     from biopilot.config import BioPilotConfig
-    from biopilot.core.memory.storage.named_lock import NamedLock
+    from biopilot.engine.memory.storage.named_lock import NamedLock
 
     cfg = BioPilotConfig.from_env()
     lock = NamedLock(cfg.runtime.memory_dsn)
@@ -1293,8 +1293,8 @@ def _index_user_kb_locked(user_id: str, cfg) -> dict:
         dict: indexed/failed/removed/orphans/drifted 计数与 finished_at。
     """
     from biopilot.common.platform import PlatformError
-    from biopilot.core.rag.constants import IndexOutcomeStatus, paper_doc_key
-    from biopilot.core.rag.services.rag_service import get_rag_service
+    from biopilot.engine.rag.constants import IndexOutcomeStatus, paper_doc_key
+    from biopilot.engine.rag.services.rag_service import get_rag_service
 
     db = _shared_db()
     svc = get_rag_service(cfg, user_domain=user_id, db=db)
@@ -1518,8 +1518,8 @@ def _users_with_orphan_index(rows: list[dict]) -> set[str]:
     Returns:
         set[str]: 索引里存在已移出论文的用户 id。
     """
-    from biopilot.core.rag.constants import paper_id_of
-    from biopilot.core.rag.storage.index_state_store import list_domain_states
+    from biopilot.engine.rag.constants import paper_id_of
+    from biopilot.engine.rag.storage.index_state_store import list_domain_states
 
     enabled: dict[str, set[str]] = {}
     for row in rows:
@@ -1649,7 +1649,7 @@ def _kb_endpoints(app: FastAPI) -> None:
     import time as _time
 
     from biopilot.config import BioPilotConfig
-    from biopilot.core.rag.services.rag_service import get_rag_service
+    from biopilot.engine.rag.services.rag_service import get_rag_service
 
     def _chunk_view(chunk, score=None) -> dict:
         """把 Chunk 转成前端可渲染的字典（正文截断，避免一次返回整篇）。"""
@@ -1726,7 +1726,7 @@ def _kb_endpoints(app: FastAPI) -> None:
     ) -> dict:
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.core.rag.constants import paper_doc_key
+        from biopilot.engine.rag.constants import paper_doc_key
 
         cfg = BioPilotConfig.from_env()
         svc = get_rag_service(cfg, user_domain=x_user_id, db=_shared_db())
@@ -1754,6 +1754,6 @@ def _paper_id_of(doc_key: str) -> str:
     Returns:
         str: 平台论文 id，或本地文件名（去扩展名）。
     """
-    from biopilot.core.rag.constants import paper_id_of
+    from biopilot.engine.rag.constants import paper_id_of
 
     return paper_id_of(doc_key) or Path(doc_key).stem

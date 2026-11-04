@@ -9,35 +9,35 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from biopilot.config import BioPilotConfig, user_cache_root
-from biopilot.core.agent import Agent
-from biopilot.core.agent import AgentRegistry
-from biopilot.core.skills import (
+from biopilot.engine.agent import Agent
+from biopilot.engine.agent import AgentRegistry
+from biopilot.engine.skills import (
     SkillRegistry,
     apply_pre_approval,
     merge_tools,
     sync_user_skills,
 )
 from biopilot.tools.skills.load_skill import LoadSkillTool
-from biopilot.core.llm import LLMClient
-from biopilot.core.security.services.classifier import build_classifier
-from biopilot.core.security import (
+from biopilot.engine.llm import LLMClient
+from biopilot.engine.security.services.classifier import build_classifier
+from biopilot.engine.security import (
     AuditMiddleware,
     ContentGuardMiddleware, CommandGuardMiddleware, PolicyEngineMiddleware,
 )
-from biopilot.core.llm import StructuredOutput
-from biopilot.core.tool.services.offload import make_tool_result_offloader
-from biopilot.core.tool.services.tool_result_store import make_tool_result_store
-from biopilot.core.memory.storage.database import MemoryDB
-from biopilot.core.memory.services.block_manager import BlockManager
-from biopilot.core.memory.services.message_manager import MessageManager
-from biopilot.core.tool.services.runtime_context import (
+from biopilot.engine.llm import StructuredOutput
+from biopilot.engine.tool.services.offload import make_tool_result_offloader
+from biopilot.engine.tool.services.tool_result_store import make_tool_result_store
+from biopilot.engine.memory.storage.database import MemoryDB
+from biopilot.engine.memory.services.block_manager import BlockManager
+from biopilot.engine.memory.services.message_manager import MessageManager
+from biopilot.engine.tool.services.runtime_context import (
     set_memory_context, MemoryToolsContext)
-from biopilot.core.memory.services.agent_manager import AgentManager
-from biopilot.core.memory.services.consolidation import MemoryConsolidator
-from biopilot.core.memory.services.consolidation import ConsolidationQueue
-from biopilot.core.intent.services.jev import JevClient, JevUnavailable
-from biopilot.core.intent.services.service import IntentService
-from biopilot.core.intent.rules.taxonomy import TaxonomyError, load_taxonomy
+from biopilot.engine.memory.services.agent_manager import AgentManager
+from biopilot.engine.memory.services.consolidation import MemoryConsolidator
+from biopilot.engine.memory.services.consolidation import ConsolidationQueue
+from biopilot.engine.intent.services.jev import JevClient, JevUnavailable
+from biopilot.engine.intent.services.service import IntentService
+from biopilot.engine.intent.rules.taxonomy import TaxonomyError, load_taxonomy
 
 logger = logging.getLogger(__name__)
 

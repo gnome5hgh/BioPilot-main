@@ -21,7 +21,7 @@ plugin-root-manifest                    插件目录
 ## 模板
 
 ```markdown
-# <目录路径，如 src/core/rag>
+# <目录路径，如 src/engine/rag>
 
 ## Scope
 
@@ -116,11 +116,11 @@ plugin-root-manifest                    插件目录
 ## 一个填满的例子（虚构，看密度）
 
 ```markdown
-# src/core/parser
+# src/engine/parser
 
 ## Scope
 
-- 覆盖 `src/core/parser/`：把原始文档转成结构化块。
+- 覆盖 `src/engine/parser/`：把原始文档转成结构化块。
 - 根 manifest 的硬红线在本层同样成立，这里不重复。
 
 ## Module Positioning
@@ -160,8 +160,8 @@ plugin-root-manifest                    插件目录
 
 ## Dependencies And Collaboration
 
-- 依赖：`core/config`（参数）、`core/common`（共享叶子）。
-- 被依赖：`core/index`、`core/retrieve`。
+- 依赖：`engine/config`（参数）、`engine/common`（共享叶子）。
+- 被依赖：`engine/index`、`engine/retrieve`。
 - 禁止方向：本层不得 import 存储与检索——那会让解析耦合到运行环境。
 
 ## Investigation Rule

@@ -45,20 +45,20 @@
 
 ## Usage And Change Notes
 
-- **技能体系见 [`biopilot/core/skills/AGENTS.md`](../biopilot/core/skills/AGENTS.md)**：运行时发现与用户技能物化的唯一说明；内置流程已并入各 agent 的 `AGENT.md`，不再有 skill 资产根。
+- **技能体系见 [`biopilot/engine/skills/AGENTS.md`](../biopilot/engine/skills/AGENTS.md)**：运行时发现与用户技能物化的唯一说明；内置流程已并入各 agent 的 `AGENT.md`，不再有 skill 资产根。
 - **运行期数据可以丢**：清空或重建运行期目录只影响历史与索引，不改变任何代码事实。但它也不是事实源——排查时不要拿它当依据。
 - **`infra/` 不能删**：它是 MySQL / MinIO / Milvus 的物理数据目录，删掉等于同时删库与对象存储。依赖服务若改成外部实例，才可以不再使用这里的卷。
 - `.agents/skills/` 是给编码代理用的技能，与 BioPilot 运行时的用户技能是两条不相干的线。
 
 ## Dependencies And Collaboration
 
-- 被 `biopilot/core/intent/rules/`（装载知识库）与运行时装配（工作区默认值、依赖服务卷路径）消费。
+- 被 `biopilot/engine/intent/rules/`（装载知识库）与运行时装配（工作区默认值、依赖服务卷路径）消费。
 - 运行数据根的位置由运行时配置的 `workspace` 决定，本目录只是默认值；`start.sh` / `stop.sh` 的 pid 与日志固定在本目录的 `run/`（可用 `BIOPILOT_RUN_DIR` 覆盖）。
 
 ## Investigation Rule
 
 1. 先确认要查的是「资产」还是「产物」：资产看 `intent/`，产物只在用户明确要求排查时看。
-2. 意图知识库装载报错看 [`biopilot/core/intent/rules/`](../biopilot/core/intent/rules/)；用户技能不生效看 [`biopilot/core/skills/AGENTS.md`](../biopilot/core/skills/AGENTS.md)。
+2. 意图知识库装载报错看 [`biopilot/engine/intent/rules/`](../biopilot/engine/intent/rules/)；用户技能不生效看 [`biopilot/engine/skills/AGENTS.md`](../biopilot/engine/skills/AGENTS.md)。
 3. 运行数据根的具体子目录名以配置与存储实现为准，不要凭记忆猜。
 4. 文档与代码冲突时以代码事实为准。
 

@@ -29,7 +29,7 @@
 ## Core Logic
 
 - **判据是「一个 agent = 一类产物的责任人」**：每个领域角色独占自己那类产物的读写，其余角色需要时**派发**它，而不是自己装工具。**长期记忆是例外**：写入归轮末后台整合，不设记忆角色，所有 agent 只通过只读召回（`memory_read` / `read_tool_result`）读取。`supervisor` 只编排，不持有任何执行类工具，工具面是 spawn + 只读召回。
-- **通用铁律不重复写**：诚实性协议、交付契约语义、协作语义都已下沉到全 agent 共有的行为基座（`biopilot/core/agent/constants/base_prompt.py`）。`AGENT.md` 只写角色特有契约。
+- **通用铁律不重复写**：诚实性协议、交付契约语义、协作语义都已下沉到全 agent 共有的行为基座（`biopilot/engine/agent/constants/base_prompt.py`）。`AGENT.md` 只写角色特有契约。
 - **权限最小化**：`allowed_spawns` 由派发工具在运行时强制（它同时是可派发清单的派生来源）；叶子角色不递归派发；`supervisor` 不装 skill 工具，这是代码级红线。
 - **一类产物一个责任人，工具面不重复**：沙箱执行只归 `bio-agent`（`run_python` / `run_shell` 是它的独占工具）。不要再建一个纯「代码执行」或「命令执行」的平行角色——它的工具面必然是 bio-agent 的子集，supervisor 在清单里看到两个同类目标只会选错；需要跑代码或命令就派 bio-agent。
 - **命名一律 `<域>-agent`**，`supervisor` 是唯一例外（它是编排层，不是领域责任人）。
@@ -38,8 +38,8 @@
 
 - 各 `agents/<name>/AGENT.md` — 契约与启发式（frontmatter 含名字、描述、可派发清单）
 - 各 `agents/<name>/tools.py` — 模块级工具列表
-- `biopilot/core/agent/services/registry.py` — 插件发现的唯一入口
-- `biopilot/core/agent/constants/base_prompt.py` — 全 agent 共有的行为基座
+- `biopilot/engine/agent/services/registry.py` — 插件发现的唯一入口
+- `biopilot/engine/agent/constants/base_prompt.py` — 全 agent 共有的行为基座
 
 ## Usage And Change Notes
 
@@ -63,7 +63,7 @@
 ## Investigation Rule
 
 1. 先读目标角色的 `AGENT.md`（契约与启发式），再看 `tools.py`（实际能力），最后才看装配层。
-2. 角色拿到或拿不到某个工具，看装配层；派发被拒看 `biopilot/tools/orchestration/spawn.py`；插件没被发现看 `biopilot/core/agent/services/registry.py`。
+2. 角色拿到或拿不到某个工具，看装配层；派发被拒看 `biopilot/tools/orchestration/spawn.py`；插件没被发现看 `biopilot/engine/agent/services/registry.py`。
 3. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands
@@ -81,11 +81,11 @@ conda run -n biopilot python -m pytest tests/agents -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 运行时与注册：[`../biopilot/core/AGENTS.md`](../biopilot/core/AGENTS.md)
+- 运行时与注册：[`../biopilot/engine/AGENTS.md`](../biopilot/engine/AGENTS.md)
 - 运行时 skill 体系：[`../.biopilot/AGENTS.md`](../.biopilot/AGENTS.md)
 
 ## References
 
 - [`supervisor/AGENT.md`](supervisor/AGENT.md)
-- [`AGENT.md` 与 `tools.py` 的加载实现](../biopilot/core/agent/services/registry.py)
-- [`../biopilot/core/agent/constants/base_prompt.py`](../biopilot/core/agent/constants/base_prompt.py)
+- [`AGENT.md` 与 `tools.py` 的加载实现](../biopilot/engine/agent/services/registry.py)
+- [`../biopilot/engine/agent/constants/base_prompt.py`](../biopilot/engine/agent/constants/base_prompt.py)

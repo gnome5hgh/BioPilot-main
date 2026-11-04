@@ -35,8 +35,8 @@ from biopilot.config.services.schema import (
     is_secret,
     validate_value,
 )
-from biopilot.core.memory.storage.database import MemoryDB
-from biopilot.core.memory.storage.named_lock import NamedLock
+from biopilot.engine.memory.storage.database import MemoryDB
+from biopilot.engine.memory.storage.named_lock import NamedLock
 
 logger = logging.getLogger(__name__)
 

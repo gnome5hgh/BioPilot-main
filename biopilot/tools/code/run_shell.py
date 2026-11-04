@@ -8,8 +8,8 @@
 风险档位与 run_python 一致取中档：安全来自墙而非档位，命令层面的额外确认由
 命令防护按命令内容决定，而不是每次调用都弹框。
 """
-from biopilot.core.security.services import sandbox as sb
-from biopilot.core.tool import ToolResult
+from biopilot.engine.security.services import sandbox as sb
+from biopilot.engine.tool import ToolResult
 from biopilot.tools.code.sandboxed import SandboxedTool
 
 

@@ -5,7 +5,7 @@
 复用已实例化工具，并把 ``BioPilotConfig`` 注入 ``_config``。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.core.tool import Tool
+from biopilot.engine.tool import Tool
 
 __all__ = ["make_tools"]
 

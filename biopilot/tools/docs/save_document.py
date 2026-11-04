@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from biopilot.common.platform import PlatformError, make_platform_client
-from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.services.runtime_context import get_memory_context
+from biopilot.engine.tool import Tool, ToolResult
+from biopilot.engine.tool.services.runtime_context import get_memory_context
 from biopilot.tools.file._support import normalize_name
 
 __all__ = ["SaveDocumentTool"]

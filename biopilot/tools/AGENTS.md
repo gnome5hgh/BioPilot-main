@@ -3,7 +3,7 @@
 ## Scope
 
 - 覆盖 `tools/` 原子工具层：**一工具一文件、按域分包**。
-- 工具的实现可以住在别的包（比如读 PDF 在 `core/rag/parsers/`），本层负责把它封成 Tool。
+- 工具的实现可以住在别的包（比如读 PDF 在 `engine/rag/parsers/`），本层负责把它封成 Tool。
 
 ## Module Positioning
 
@@ -23,8 +23,8 @@
 - `skills/` — 加载 skill 正文与资源
 - `assembly.py` — 工具装配工厂（`make_tools`）：实例化工具并注入 `_config`
 
-工具运行时上下文在 `core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在
-`biopilot/common/` 与 `core/security/`。
+工具运行时上下文在 `engine/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在
+`biopilot/common/` 与 `engine/security/`。
 平台数据端口（论文目录/文件/文档）已迁 Java `bio-file`，本包不再保留数据访问 adapter。
 沙箱产物（`run_python` / `run_shell`）经 Java `/internal/files/artifacts` 登记；平台文件字节经 `/internal/attachments/*` 取回，工具不直连 OSS。
 
@@ -32,13 +32,13 @@
 
 - 为每个工具声明名字、描述、参数 schema、安全元数据与风险档位。
 - 把工具结果（含各种失败）统一成结构化结果回传模型。
-- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `core/*/services`，装配由 `tools/assembly.py` 负责。
+- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `engine/*/services`，装配由 `tools/assembly.py` 负责。
 
 ## Core Logic
 
 - **`__init__.py` 统一再导出**：消费方从包门面导入，符号名稳定，内部路径随便拆。
 - **装配一律经装配工厂**：它实例化工具类、复用已实例化工具并注入 `_config`。**agent 拿到什么工具由装配层决定**，工具内部不要自作主张。
-- **安全元数据必填**（字段定义、取值来源与校验在 [`../core/tool/AGENTS.md`](../core/tool/AGENTS.md)）：写 / 删类一律高档位；可重入的批量追加不强求。档位高于会话免问档即逐次确认——**降档不是旁路**。
+- **安全元数据必填**（字段定义、取值来源与校验在 [`../engine/tool/AGENTS.md`](../engine/tool/AGENTS.md)）：写 / 删类一律高档位；可重入的批量追加不强求。档位高于会话免问档即逐次确认——**降档不是旁路**。
 - **来源声明「结果是不是外部数据」**：**只有读外部数据的工具才声明**；自家算出的结构化结果不声明——全标会让标记变成噪声。
 - **参数级的格式声明是中间件的接管开关**：路径 → 路径权威、内容 → 内容防护、命令 → 命令防护。新工具不需要写安全代码，声明格式即可被接管；**声明错格式等于没被接管**。
 - **子 agent 只能经派发工具调用**：派发闸门全在 `orchestration/spawn.py`（未知类型 → 白名单 → 同批去重 → 审稿预算 → 每轮上限）。**顺序与并行归 supervisor 自主，闸门只兜上限**；轮数预算下沉代码，不靠 LLM 自律。同路径写互斥**不在闸里**——写工具按真实写目标登记写占用、跨实例当场拒绝，判定在运行时执行层。
@@ -47,7 +47,7 @@
 ## Key Entry Points
 
 - `assembly.py` — 工具装配工厂（`make_tools`）
-- `core/tool/services/runtime_context.py` — 工具运行时上下文（记忆管理器 + RAG 用户域）
+- `engine/tool/services/runtime_context.py` — 工具运行时上下文（记忆管理器 + RAG 用户域）
 - `orchestration/spawn.py` — 派发工具与五道闸
 - `recall/` — 只读召回包（长期记忆读取 + 工具结果回取）
 - `__init__.py` — 全量再导出
@@ -60,15 +60,15 @@
 
 ## Dependencies And Collaboration
 
-- 依赖 `core/tool/`（抽象与安全元数据校验）、`core/constants/`（风险与副作用词汇）、`core/security/`（中间件在调用前后接管）。
-- 被 `webapi/` 在装配期取用，被 `core/agent` 在 ReAct 循环里执行。
-- 各领域工具的真实实现对在对应 core 子包里（记忆在 `core/memory/`，检索在 `core/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
+- 依赖 `engine/tool/`（抽象与安全元数据校验）、`engine/constants/`（风险与副作用词汇）、`engine/security/`（中间件在调用前后接管）。
+- 被 `webapi/` 在装配期取用，被 `engine/agent` 在 ReAct 循环里执行。
+- 各领域工具的真实实现对在对应 core 子包里（记忆在 `engine/memory/`，检索在 `engine/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
 
 ## Investigation Rule
 
 1. 先看目标工具的文件头与安全元数据声明，再看它的 `execute`。
 2. 装配问题看 `common/`；派发问题看 `orchestration/spawn.py`；长期记忆读取与工具结果回取看 `recall/`。
-3. 工具读 PDF / 抽标题的实现不在本层，在 `core/rag/parsers/`——本层只是把它封成 Tool。
+3. 工具读 PDF / 抽标题的实现不在本层，在 `engine/rag/parsers/`——本层只是把它封成 Tool。
 4. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands
@@ -87,11 +87,11 @@ conda run -n biopilot python -m pytest tests/tools -q
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
 - 插件侧的工具装配：[`../../agents/AGENTS.md`](../../agents/AGENTS.md)
-- 运行层（安全中间件、记忆、意图）：[`../core/AGENTS.md`](../core/AGENTS.md)
+- 运行层（安全中间件、记忆、意图）：[`../engine/AGENTS.md`](../engine/AGENTS.md)
 
 ## References
 
 - [`common/`](common/)
 - [`orchestration/spawn.py`](orchestration/spawn.py)
 - [`recall/`](recall/)
-- [`../core/AGENTS.md`](../core/AGENTS.md)
+- [`../engine/AGENTS.md`](../engine/AGENTS.md)

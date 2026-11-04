@@ -14,8 +14,8 @@ L1（name+description 清单）由 SkillRegistry.skills_block 在装配期注入
   不抛异常打断 ReAct 循环。
 """
 
-from biopilot.core.skills import SkillRegistry
-from biopilot.core.tool import Tool, ToolResult
+from biopilot.engine.skills import SkillRegistry
+from biopilot.engine.tool import Tool, ToolResult
 
 
 class LoadSkillTool(Tool):

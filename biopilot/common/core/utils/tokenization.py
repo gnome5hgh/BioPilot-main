@@ -42,7 +42,7 @@ def estimate_text_tokens(text: str) -> int:
     """估算一段文本的 token 数（不含消息协议开销）。
 
     供上下文用量分解等「非消息列表」场景使用：消息列表走
-    :func:`biopilot.core.memory.services.compaction.estimate_tokens`（含协议
+    :func:`biopilot.engine.memory.services.compaction.estimate_tokens`（含协议
     开销），裸文本片段用本函数即可。
 
     Args:

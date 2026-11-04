@@ -16,9 +16,9 @@ import uuid
 from pathlib import Path
 
 from biopilot.config import user_cache_root
-from biopilot.core.security.services import sandbox as sb
-from biopilot.core.tool import Tool, ToolResult
-from biopilot.core.tool.services.roots import semantic_roots
+from biopilot.engine.security.services import sandbox as sb
+from biopilot.engine.tool import Tool, ToolResult
+from biopilot.engine.tool.services.roots import semantic_roots
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class SandboxedTool(Tool):
         Args:
             files: summary["files"] 列表（就地补 oss_key）。
         """
-        from biopilot.core.tool.services.runtime_context import get_memory_context
+        from biopilot.engine.tool.services.runtime_context import get_memory_context
         ctx = get_memory_context()
         user_id = getattr(ctx, "user_id", None) if ctx is not None else None
         if not user_id or not files:
@@ -197,7 +197,7 @@ class SandboxedTool(Tool):
         if not cfg.security.sandbox.enabled:
             return ToolResult(text="沙箱执行已在配置中关闭（sandbox.enabled=false）")
 
-        from biopilot.core.tool.services.runtime_context import get_memory_context
+        from biopilot.engine.tool.services.runtime_context import get_memory_context
         ctx = get_memory_context()
         policy = self._build_policy(
             cfg,

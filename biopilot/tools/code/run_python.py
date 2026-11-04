@@ -8,8 +8,8 @@
 兜底」编码进档位是混淆两条轴。环境不可用时返回可行动的错误文本（fail-closed），
 绝不退回进程内执行。
 """
-from biopilot.core.security.services import sandbox as sb
-from biopilot.core.tool import ToolResult
+from biopilot.engine.security.services import sandbox as sb
+from biopilot.engine.tool import ToolResult
 from biopilot.tools.code.sandboxed import SandboxedTool
 
 

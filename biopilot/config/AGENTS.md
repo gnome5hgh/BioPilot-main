@@ -59,8 +59,8 @@
 
 ## Dependencies And Collaboration
 
-- 被 `webapi/`（入口与装配）、`core/` 各子包、`tools/` 读取；本包不依赖它们中的任何一个（`store.py` 只依赖 `core/memory/storage/database.py` 的连接池）。
-- 存储表归引擎所有：DDL 在 `core/memory/storage/database.py` 的 `_SCHEMA` 里，不在 `server/script/sql/`。
+- 被 `webapi/`（入口与装配）、`engine/` 各子包、`tools/` 读取；本包不依赖它们中的任何一个（`store.py` 只依赖 `engine/memory/storage/database.py` 的连接池）。
+- 存储表归引擎所有：DDL 在 `engine/memory/storage/database.py` 的 `_SCHEMA` 里，不在 `server/script/sql/`。
 
 ## Investigation Rule
 
@@ -84,7 +84,7 @@ biopilot config rollback <version>
 ## Verification
 
 ```bash
-conda run -n biopilot python -m pytest tests/core/test_config.py tests/core/test_config_schema.py tests/core/test_config_store.py -q
+conda run -n biopilot python -m pytest tests/engine/test_config.py tests/engine/test_config_schema.py tests/engine/test_config_store.py -q
 ```
 
 ## Routing
@@ -92,7 +92,7 @@ conda run -n biopilot python -m pytest tests/core/test_config.py tests/core/test
 - 上级：[`../AGENTS.md`](../AGENTS.md)
 - 装配方：[`../webapi/AGENTS.md`](../webapi/AGENTS.md)
 - 设置接口：[`../webapi/AGENTS.md`](../webapi/AGENTS.md)
-- 运行层的组件参数：[`../core/AGENTS.md`](../core/AGENTS.md)
+- 运行层的组件参数：[`../engine/AGENTS.md`](../engine/AGENTS.md)
 
 ## References
 
