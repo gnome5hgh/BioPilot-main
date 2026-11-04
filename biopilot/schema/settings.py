@@ -14,7 +14,7 @@ class SettingsSnapshotResponse(BaseModel):
     version: int
     values: dict[str, Any]
     sources: dict[str, str]
-    settings_schema: dict[str, Any] = Field(alias="schema")
+    settings_schema: list[dict[str, Any]] = Field(alias="schema")
     warning: str
 
 

@@ -35,6 +35,10 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(terminalRelayHandler, "/api/ws/terminal")
+                // 开发期前端在 5173、服务端在 8080，跨端口握手会被 Spring 默认的
+                // 同源检查（含端口）拒绝；真正的来源校验在下面的拦截器里：只放行
+                // 同 host 且已登录的握手，因此这里可以关闭框架层的端口比较。
+                .setAllowedOrigins("*")
                 .addInterceptors(new HandshakeInterceptor() {
                     @Override
                     public boolean beforeHandshake(ServerHttpRequest request,
