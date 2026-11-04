@@ -35,7 +35,7 @@ common/
 
 ## Dependencies And Collaboration
 
-- 被 `engine/`、`tools/`、`webapi/` 消费。
+- 被 `engine/`、`tools/`、`api/` 消费。
 - 本包只依赖标准库，唯一例外是 `platform/` 的 `httpx`；新增第三方依赖前先确认是否真的需要跨层共享。
 
 ## Investigation Rule

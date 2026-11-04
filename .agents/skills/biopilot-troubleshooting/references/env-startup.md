@@ -61,10 +61,10 @@
 - **修法（已实施）**：各 RPC 传 `rag.storage.timeout`（读路径 5s / 写路径 60s），并在 `rag_retrieve` 边界加检索侧熔断器（`biopilot/engine/rag/services/breaker.py`，冷却 60s，跳闸期间直接返回降级文本）。旧版本上遇到时先升到含 `RetrievalBreaker` 的版本。
 - **验证**：`docker stop milvus-standalone` 后调一次 `rag_retrieve`，应在数秒内返回降级文本，而不是阻塞数十秒；再调一次应瞬时返回（熔断短路）；Milvus 起来后过冷却窗口自动恢复，无需重启进程。
 
-### `biopilot` 启动即 `ImportError: cannot import name ... from 'biopilot.webapi'`
-- **根因**：包门面（`biopilot/webapi/__init__.py`）的 `__all__` 漏再导出某个符号（如 `WebConfig`）——CLI 与测试可能从 `biopilot.webapi.app` 直连绕过门面，测试全绿也挡不住门面缺角。
+### `biopilot` 启动即 `ImportError: cannot import name ... from 'biopilot.api'`
+- **根因**：包门面（`biopilot/api/__init__.py`）的 `__all__` 漏再导出某个符号（如 `WebConfig`）——CLI 与测试可能从 `biopilot.api.app` 直连绕过门面，测试全绿也挡不住门面缺角。
 - **修法**：把缺的符号加进门面的 import 与 `__all__`；新增公开符号时同步维护门面。
-- **验证**：`conda run -n biopilot python -c "from biopilot.webapi import <缺失符号>"`。
+- **验证**：`conda run -n biopilot python -c "from biopilot.api import <缺失符号>"`。
 
 ### 适配层起不来：`memory_dsn 必须是 mysql://... 形式` / 启动即 fail-fast（`BIOPILOT_MEMORY_MYSQL_DSN`）
 - **根因**：`runtime.memory_dsn` 的规范来源是 `BIOPILOT_MEMORY_MYSQL_DSN`（`BIOPILOT_RUNTIME_MEMORY_DSN` 优先）；两者都没有时回落代码默认值 `mysql://root@127.0.0.1:3307/biopilot`。配置库、标题更新、论文/文档端点的共享 `MemoryDB()` 都依赖它。

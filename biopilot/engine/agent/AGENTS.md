@@ -59,7 +59,7 @@ agent/
 ## Dependencies And Collaboration
 
 - 依赖 `engine/llm`（每次模型调用）、`engine/tool`（工具抽象）、`engine/security`（中间件）、`engine/memory`（窗口与记忆块）、`engine/skills`（技能清单）、`engine/intent`（根 agent 的预处理层）。
-- 被 `biopilot/webapi/` 装配、被 `tools/orchestration/` 用来构造子 agent。
+- 被 `biopilot/api/` 装配、被 `tools/orchestration/` 用来构造子 agent。
 - 本包**不**依赖 `tools/` 的具体工具——它们通过注入与抽象协作。
 
 ## Investigation Rule

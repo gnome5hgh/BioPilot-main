@@ -26,7 +26,7 @@
 BioPilot/
 ├─ web/                # 前端（Vue3 + Vite + TS 风格 JS）：登录/对话/文件/文献/知识库/引用库/终端面板/管理
 ├─ server/             # SpringBoot 3（Java 21）：bio-admin(启动装配) bio-modules(业务域+引擎接入) bio-common(通用件)
-├─ biopilot/           # Python 引擎：webapi/(入口+HTTP/SSE 适配层) config/(参数)
+├─ biopilot/           # Python 引擎：api/(入口+HTTP/SSE 适配层) config/(参数)
 │                      #   common/(跨层基础) engine/(agent 运行层) tools/(工具)
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
 ├─ .biopilot/         # 静态资产 intent/ + 服务卷 infra/ + 启动日志/pid run/（运行数据根默认在此，可重定向）
@@ -44,8 +44,8 @@ BioPilot/
 
 ### 当前目录分层含义
 
-- 三层调用链：`web/`（5173，Vite 原样代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 引擎接入）→ `biopilot/webapi/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
-- `biopilot/` 是引擎主包；`webapi/` 是进程入口与 HTTP/SSE 适配层（`entry.py` 入口、`assembly.py` 会话装配），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`engine/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `engine/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
+- 三层调用链：`web/`（5173，Vite 原样代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 引擎接入）→ `biopilot/api/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
+- `biopilot/` 是引擎主包；`api/` 是进程入口与 HTTP/SSE 适配层（`entry.py` 入口、`assembly.py` 会话装配），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`engine/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `engine/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
 - `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（按业务域拆分的模块，外加技术适配层 bio-gateway；域清单以目录为准）、`bio-common`（跨域共享的基础设施模块，按单一关注点拆分）。
 - 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
@@ -137,8 +137,8 @@ BioPilot/
 ## 关键入口
 
 - 仓库规则与阅读路径：`AGENTS.md`
-- 进程入口与装配根：`biopilot/webapi/entry.py`（入口）、`biopilot/webapi/assembly.py`（Web 会话对象图）
-- Web 适配层（agent 运行时 API：SSE/确认/知识库/终端/内部调用）：`biopilot/webapi/app.py`（规则见 [`biopilot/webapi/AGENTS.md`](biopilot/webapi/AGENTS.md)）
+- 进程入口与装配根：`biopilot/api/entry.py`（入口）、`biopilot/api/assembly.py`（Web 会话对象图）
+- Web 适配层（agent 运行时 API：SSE/确认/知识库/终端/内部调用）：`biopilot/api/app.py`（规则见 [`biopilot/api/AGENTS.md`](biopilot/api/AGENTS.md)）
 - SpringBoot 启动类：`server/bio-admin/src/main/java/com/biopilot/admin/`；引擎接入（代理/SSE/终端 WS）：`server/bio-modules/bio-gateway/`
 - 前端入口与路由：`web/src/main.js`、`web/src/router/`
 - 参数声明点：`biopilot/config/schemas/sections.py`
@@ -239,7 +239,7 @@ cd server && mvn test -pl bio-admin
 - 当前目录是 `BioPilot` 根工作区 manifest。
 - 前端入口：[`web/AGENTS.md`](web/AGENTS.md)
 - 服务端入口：[`server/AGENTS.md`](server/AGENTS.md)
-- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`config/`](biopilot/config/AGENTS.md) / [`engine/`](biopilot/engine/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`webapi/`](biopilot/webapi/AGENTS.md)；`engine/` 之下的子 manifest 见 core manifest）
+- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`config/`](biopilot/config/AGENTS.md) / [`engine/`](biopilot/engine/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`api/`](biopilot/api/AGENTS.md)；`engine/` 之下的子 manifest 见 core manifest）
 - 插件目录入口：[`agents/AGENTS.md`](agents/AGENTS.md)
 - 资产与数据根入口：[`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)（其下 [`intent/`](.biopilot/intent/AGENTS.md)）
 - 设计文档索引：[`docs/adr/`](docs/adr/)（修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）、[`docs/learning/`](docs/learning/)

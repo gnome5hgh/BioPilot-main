@@ -20,7 +20,7 @@ from pathlib import Path
 import uuid
 from dataclasses import dataclass
 
-from biopilot.webapi.shell import ShellManager
+from biopilot.api.shell import ShellManager
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import StreamingResponse
 
@@ -715,7 +715,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         """返回设置页所需的全部数据：字段描述 + 有效值 + 来源 + 版本。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.webapi import settings as settings_service
+        from biopilot.api import settings as settings_service
         return await asyncio.to_thread(settings_service.snapshot)
 
     @app.get("/settings/history")
@@ -724,7 +724,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         """返回最近的配置保存历史。"""
         if not x_user_id:
             raise HTTPException(status_code=403, detail="缺少 X-User-Id 请求头")
-        from biopilot.webapi import settings as settings_service
+        from biopilot.api import settings as settings_service
         try:
             return await asyncio.to_thread(settings_service.history, limit)
         except settings_service.ConfigSourceUnavailable as exc:
@@ -739,7 +739,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         version = (body or {}).get("version")
         if not isinstance(version, int):
             raise HTTPException(status_code=422, detail="version 必填且为整数")
-        from biopilot.webapi import settings as settings_service
+        from biopilot.api import settings as settings_service
         try:
             result = await asyncio.to_thread(
                 settings_service.rollback, version, x_user_id)
@@ -800,7 +800,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             ConfigSecretKeyMissing,
             ConfigVersionConflict,
         )
-        from biopilot.webapi import settings as settings_service
+        from biopilot.api import settings as settings_service
 
         try:
             result = await asyncio.to_thread(
@@ -1075,7 +1075,7 @@ async def _default_agent_factory(user_id: str, conversation_id: str,
 
     确认回调与项目归属原样透传——确认走 SSE 往返、project_id 进 agent_state。
     """
-    from biopilot.webapi.assembly import assemble_web_session
+    from biopilot.api.assembly import assemble_web_session
     session = await assemble_web_session(user_id, conversation_id,
                                          confirm_callback=confirm_callback,
                                          project_id=project_id,

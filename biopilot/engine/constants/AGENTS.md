@@ -42,7 +42,7 @@
 
 ## Dependencies And Collaboration
 
-- 被 `engine/security`（判定）、`engine/tool`（声明与校验）、`biopilot/webapi/`（装配期校验）消费。
+- 被 `engine/security`（判定）、`engine/tool`（声明与校验）、`biopilot/api/`（装配期校验）消费。
 - 本包不依赖任何其他子包——它是最底层的词汇表。
 
 ## Investigation Rule

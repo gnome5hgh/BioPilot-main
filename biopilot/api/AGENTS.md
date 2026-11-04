@@ -1,8 +1,8 @@
-# biopilot/webapi
+# biopilot/api
 
 ## Scope
 
-- 覆盖 `biopilot/webapi/`：Python 引擎的 HTTP/SSE 适配层（FastAPI，默认 `127.0.0.1:8300`）。
+- 覆盖 `biopilot/api/`：Python 引擎的 HTTP/SSE 适配层（FastAPI，默认 `127.0.0.1:8300`）。
 - 上游规则见根 `AGENTS.md` 的「Python 与 Java 的职责边界」与 `biopilot/AGENTS.md`。
 
 ## 模块定位
@@ -51,5 +51,5 @@
 ## 测试
 
 ```bash
-conda run -n biopilot python -m pytest tests/webapi -q
+conda run -n biopilot python -m pytest tests/api -q
 ```

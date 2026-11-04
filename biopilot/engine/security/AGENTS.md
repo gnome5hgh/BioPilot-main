@@ -50,7 +50,7 @@ security/
 - **本包不另立风险词汇**：风险等级与副作用取值在 `engine/constants/`（枚举即单一真相源），从这里取，不要复制一份。
 - **不要建 `constants/`**：扫描规则、不可见字符表、伪装系统消息模板、安全命令表、根目标表都只服务各自那一个中间件或服务，**就地声明**才对；真被两处消费了再搬。
 - **未配对代理字符清洗不在这里**：它被多个包横向消费，已归 `biopilot/common/core/utils/text.py`——需要时从那里取，别在本包再实现一份。
-- **中间件的装配顺序在 `biopilot/webapi/assembly.py`**：顺序即执行顺序，改动顺序等于改动语义。
+- **中间件的装配顺序在 `biopilot/api/assembly.py`**：顺序即执行顺序，改动顺序等于改动语义。
 
 ## Dependencies And Collaboration
 
@@ -81,7 +81,7 @@ conda run -n biopilot python -m pytest tests/security -q
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)（core manifest）
 - 设计依据：ADR 0002（安全设计）
-- 确认框与 SSE 通道：[`../../webapi/AGENTS.md`](../../webapi/AGENTS.md)
+- 确认框与 SSE 通道：[`../../api/AGENTS.md`](../../api/AGENTS.md)
 
 ## References
 

@@ -54,7 +54,7 @@
 
 ## Dependencies And Collaboration
 
-- 本层被 `webapi/`（入口与装配）、`tools/`（工具实现）依赖；本层不反向依赖它们。
+- 本层被 `api/`（入口与装配）、`tools/`（工具实现）依赖；本层不反向依赖它们。
 - 子包之间的主要依赖：`agent` → `llm` / `tool` / `skills` / `memory` / `security` / `intent`；`rag` → `vision`；`security` → `biopilot/common` 与 `constants`；`intent` 与 `memory` 互相独立。
 - 与各 agent 通过 `Tool` 抽象协作，不是硬编码调用链。
 

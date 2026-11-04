@@ -61,7 +61,7 @@
 ## Dependencies And Collaboration
 
 - 依赖 `engine/tool/`（抽象与安全元数据校验）、`engine/constants/`（风险与副作用词汇）、`engine/security/`（中间件在调用前后接管）。
-- 被 `webapi/` 在装配期取用，被 `engine/agent` 在 ReAct 循环里执行。
+- 被 `api/` 在装配期取用，被 `engine/agent` 在 ReAct 循环里执行。
 - 各领域工具的真实实现对在对应 core 子包里（记忆在 `engine/memory/`，检索在 `engine/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
 
 ## Investigation Rule

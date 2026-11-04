@@ -1,6 +1,6 @@
 """Web 会话装配：把配置、记忆、安全、意图与工具组装成可运行的 supervisor。
 
-`assemble_web_session` 是引擎唯一的会话装配入口；进程入口在 `webapi/entry.py`，
+`assemble_web_session` 是引擎唯一的会话装配入口；进程入口在 `api/entry.py`，
 按用户与会话装配对象图、注入确认回调与项目归属。
 """
 import asyncio

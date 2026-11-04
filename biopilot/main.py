@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     # 只为 --help 与参数校验；入口不接受业务旗标，结果不参与分派
     _ = parser.parse_args(raw)
 
-    from biopilot.webapi import run_server
+    from biopilot.api import run_server
     run_server()
     return 0
 
