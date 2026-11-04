@@ -4,6 +4,10 @@
 这条；结构常量与算法契约（正则、重试退避基数、提示词文案）留在各自的消费处就地
 声明。类别**不分组**：曾经那张「意图 → 业务/系统」的映射只服务已删的派发过滤，
 没有运行时消费者；每个类别该派给谁由 `rules_block` 的文案与 supervisor 的判断承担。
+
+知识库是**随包发布的代码资产**（`engine/intent/data/`），不是运行期数据：它与
+`IntentType` 做 fail-closed 校验，必须与枚举同版本演进，因此跟着 wheel 走，不随
+运行数据根重定向。
 """
 from pathlib import Path
 
@@ -15,12 +19,8 @@ __all__ = ["INTENT_CLASSES", "INTENT_KB_DIR", "RULES_PATH", "TAXONOMY_PATH"]
 #: 顺序即枚举声明顺序；规则表按自己的声明顺序匹配，与本元组无关。
 INTENT_CLASSES: tuple[str, ...] = tuple(t.value for t in IntentType)
 
-#: 仓库安装根（本文件位于 engine/intent/constants/，向上四级即仓库根）。
-#: 随仓库发布的知识资产恒锚此处，不随 BIOPILOT_RUNTIME_WORKSPACE 重定向。
-_INSTALL_ROOT = Path(__file__).resolve().parents[4]
-
-#: 知识库目录：随仓库发布的意图知识资产（类别口径/示例句、规则模式）
-INTENT_KB_DIR = _INSTALL_ROOT / ".biopilot" / "intent"
+#: 知识库目录（本文件位于 engine/intent/constants/，向上一级即 intent/ 包根）。
+INTENT_KB_DIR = Path(__file__).resolve().parents[1] / "data"
 
 #: 类别知识库与规则表的默认路径（单测与生产共用；显式传参可指向替身文件）
 TAXONOMY_PATH = INTENT_KB_DIR / "taxonomy.yaml"

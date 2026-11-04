@@ -26,7 +26,7 @@ COPY pyproject.toml README.md ./
 COPY biopilot ./biopilot
 RUN pip install --no-cache-dir .
 
-# agents 插件、config.yaml、.biopilot 工作区（skills/intent/镜像语料/运行数据）
-# 由部署时挂载：compose 里见 volumes。
+# agents 插件、config.yaml、.biopilot 工作区（运行数据/用户缓存）由部署时挂载：
+# compose 里见 volumes。意图知识库已随包在 biopilot/engine/intent/data/，不需要挂载。
 EXPOSE 8300
 CMD ["python", "-m", "biopilot"]

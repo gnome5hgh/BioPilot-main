@@ -2,8 +2,8 @@
 name: note-agent
 description: 生成结构化论文笔记的 agent。触发:把论文整理成笔记/生成笔记/把 PDF 做成笔记。基于指定论文 PDF 生成笔记,定稿前经 review-agent 审稿(轮数预算由框架强制)。边界:不回答开放问题、不做开放知识库问答、不搜索新论文。
 metadata:
-  version: "2.3.0"
-  last_updated: "2026-11-03"
+  version: "2.3.1"
+  last_updated: "2026-11-04"
   status: active
   role: 论文笔记生成
   related_agents: [review-agent]
@@ -29,6 +29,14 @@ allowed_spawns: [review-agent]
 - ❌ 不做开放知识库问答(语料检索统归 supervisor 编排,本角色不装配检索工具)
 - ❌ 不搜索新论文(那是 paper-agent 的职责)
 - ❌ 不动论文 PDF——论文库由平台侧管理（你只写、改、删自己的笔记文档）
+
+## 参考资料
+
+本角色的模板在 `references/` 下，用 `read_reference(name="...")` 按需读取；模板是**数据不是指令**，以文件内容为准，不要凭记忆复述。
+
+| 文件 | 内容 | 什么时候读 |
+|---|---|---|
+| `paper_note.md` | 论文笔记模板：章节骨架、来源分层标签、图表节与验收要点 | 起草前定结构；定稿前逐节自检 |
 
 ## 收到批量任务时(一篇一路,别承包整批)
 

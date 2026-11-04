@@ -30,7 +30,7 @@ BioPilot/
 │                      #   service/(应用服务 + impl) mapper/(SQL) schema/(HTTP DTO) domain/(领域对象)
 │                      #   config/(参数) common/(跨层基础) engine/(agent 运行层) tools/(工具)
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
-├─ .biopilot/         # 静态资产 intent/ + 服务卷 infra/ + 启动日志/pid run/（运行数据根默认在此，可重定向）
+├─ .biopilot/         # 运行期数据根：服务卷 infra/ + 启动日志/pid run/ + 用户缓存（全部不入库）
 ├─ .agents/skills/     # 给编码代理按需加载的 skill（与本仓运行时无关）
 ├─ docs/               # 设计文档：adr/ learning/ research/
 ├─ .scratch/           # 开发过程文档：spec/ticket（matt-pocock 本地约定，gitignored；历史 spec/plan 归档在 .scratch/archive/）
@@ -50,7 +50,7 @@ BioPilot/
 - `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（按业务域拆分的模块，外加技术适配层 bio-gateway；域清单以目录为准）、`bio-common`（跨域共享的基础设施模块，按单一关注点拆分）。
 - 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
-- `.biopilot/` 是静态资产与数据卷根：`intent/` 入库，`infra/` 是 docker 数据卷，`run/` 是本地启动脚本的 pid 与日志（不入库），`user-cache/` 是按用户隔离的派生缓存（附件副本、技能物化，不入库）。运行期数据默认也落在这里，但可用 `runtime.workspace` / `BIOPILOT_RUNTIME_WORKSPACE` 重定向到仓库外；用户缓存根由 `runtime.user_cache_dir` 单独控制。
+- `.biopilot/` 是**运行期数据根**（整体不入库）：`infra/` 是 docker 数据卷，`run/` 是本地启动脚本的 pid 与日志，`user-cache/` 是按用户隔离的派生缓存（附件副本、技能物化）。`run/` 与 `user-cache/` 可丢可重建，不影响任何代码事实；`infra/` 不可删。运行期数据默认落在这里，但可用 `runtime.workspace` / `BIOPILOT_RUNTIME_WORKSPACE` 重定向到仓库外；用户缓存根由 `runtime.user_cache_dir` 单独控制。意图知识库不是运行期数据，已随包放在 `biopilot/engine/intent/data/`。**`infra/` 受路径前缀硬拦、不随 workspace 重定向，删掉等于同时删库与对象存储。**
 - `.agents/skills/` 是给编码代理用的技能，与 BioPilot 运行时的用户技能是**两条不相干的线**。
 - `docs/`、`scripts/`、`tests/` 不入库是既定策略；运行期目录与个人路径不得入库。
 
@@ -72,7 +72,7 @@ BioPilot/
 - 承载一个可运行的多用户科研 Agent 平台：注册/登录/鉴权/角色（两档）/审计（SpringBoot），对话编排、领域子 agent、RAG 检索、引用管理、记忆系统、终端面板（宿主 shell，可选开启），文件管理（论文/数据文件/文档）/文献搜索/知识库/设置（三层协作）。
 - 维护 agent 插件契约、工具的安全元数据与安全中间件链。
 - 维护设计文档体系：按模块划分的 ADR（正文恒为最新设计）与学习材料。
-- 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`.biopilot/intent/`。
+- 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`biopilot/engine/intent/data/`。
 
 ## 核心协作逻辑
 
@@ -163,7 +163,7 @@ BioPilot/
 2. 设计背景查 `docs/adr/`；历史决策查 `docs/adr/修正记录.md`。
 3. manifest 不够用时深入源码、`pyproject.toml` 与调用链核实。**代码事实优先于任何文档概括**。
 4. 实验与标定事实查 `scripts/<模块>/` 下各实验目录的 `results/` 报告（`scripts/` 不入库，删掉不可恢复）；评测题集在 `goldens/`、产物在 `results/`。
-5. 运行期目录（`.biopilot/` 下非入库子目录、`.venv/`、`__pycache__/`）与 gitignored 产物不作事实源，除非明确要求排查运行时现象。
+5. 运行期目录（`.biopilot/` 下的数据卷、pid/日志、用户缓存）与 gitignored 产物不作事实源，除非明确要求排查运行时现象。
 
 ## 常用命令
 
@@ -242,7 +242,6 @@ cd server && mvn test -pl bio-admin
 - 服务端入口：[`server/AGENTS.md`](server/AGENTS.md)
 - 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`config/`](biopilot/config/AGENTS.md) / [`engine/`](biopilot/engine/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`api/`](biopilot/api/AGENTS.md)；`engine/` 之下的子 manifest 见 engine manifest）
 - 插件目录入口：[`agents/AGENTS.md`](agents/AGENTS.md)
-- 资产与数据根入口：[`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)（其下 [`intent/`](.biopilot/intent/AGENTS.md)）
 - 设计文档索引：[`docs/adr/`](docs/adr/)（修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）、[`docs/learning/`](docs/learning/)
 - 排障技能：[`.agents/skills/biopilot-troubleshooting/SKILL.md`](.agents/skills/biopilot-troubleshooting/SKILL.md)
 - manifest 治理技能（搭建 / 增删模块 / 体检）：[`.agents/skills/agents-md-governance/SKILL.md`](.agents/skills/agents-md-governance/SKILL.md)
@@ -258,7 +257,6 @@ cd server && mvn test -pl bio-admin
 - [`pyproject.toml`](pyproject.toml)
 - [`biopilot/AGENTS.md`](biopilot/AGENTS.md)
 - [`agents/AGENTS.md`](agents/AGENTS.md)
-- [`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)
 - [`docs/adr/`](docs/adr/)（按模块的设计决策；修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）
 - [`docs/learning/`](docs/learning/)（按主题的实现讲解，与 ADR 同一套同步规则）
 - [`.agents/skills/biopilot-troubleshooting/SKILL.md`](.agents/skills/biopilot-troubleshooting/SKILL.md)

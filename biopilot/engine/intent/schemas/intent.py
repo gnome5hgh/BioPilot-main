@@ -16,7 +16,7 @@ class IntentOutput(BaseModel):
     """一轮判定的产出：类别 + 把握 + 实体 + 来源。
 
     Attributes:
-        intent: IntentType，本轮类别（10 值之一）。
+        intent: IntentType，本轮类别（11 值之一）。
         confidence: float | None，判定把握。规则命中是确定性的，记 1.0；判定服务给的
             是它选中项的概率。**没有判定消费者**，只作展示与排查线索。
         entities: dict[str, str]，确定性抽取的实体（pdf_path / arxiv_id / doi /
