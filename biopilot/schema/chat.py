@@ -1,8 +1,6 @@
 """对话与确认端点的 HTTP 契约。"""
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -43,16 +41,3 @@ class ConfirmResponse(BaseModel):
     """确认回传结果。"""
 
     status: str = "ok"
-
-
-class StreamFrame(BaseModel):
-    """SSE 帧的形状（仅作文档；流式端点仍直接输出 dict）。"""
-
-    model_config = ConfigDict(extra="allow")
-
-    type: str
-    text: str = ""
-    agent_type: str = ""
-    tool_name: str = ""
-    completion: str = ""
-    duration_ms: Any = None

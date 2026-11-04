@@ -1,6 +1,6 @@
 """RunPythonTool：在一次性容器的沙箱里跑一段 Python 代码。
 
-工具本身不做隔离——墙由 ``core/security/services/sandbox.py`` 砌（断网、论文库
+工具本身不做隔离——墙由 ``engine/security/services/sandbox.py`` 砌（断网、论文库
 只读、一个临时目录可写）。本工具负责声明参数与风险档位，其余执行尾部在
 ``sandboxed.py`` 里与 run_shell 共用。
 

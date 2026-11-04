@@ -65,4 +65,5 @@ async def internal_schedule_run(
     services: ServiceContainer = Depends(get_services),
 ) -> dict:
     """Java 调度器投递到期任务：立即返回，后台跑一轮 agent。"""
-    return services.schedule.run(user_id, req)
+    return services.schedule.run(
+        user_id, req.task_id, req.conversation_id, req.task)

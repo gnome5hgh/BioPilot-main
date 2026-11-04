@@ -20,7 +20,7 @@ class KbService(ABC):
         """触发重建。"""
 
     @abstractmethod
-    async def search(self, user_id: str, req) -> dict:
+    async def search(self, user_id: str, query: str, top_k) -> dict:
         """试检索。"""
 
     @abstractmethod

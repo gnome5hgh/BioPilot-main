@@ -21,9 +21,9 @@ from biopilot.config.schema import BOOTSTRAP_PATHS, env_name, nest_patches
 
 logger = logging.getLogger(__name__)
 
-#: 仓库安装根（本文件位于 biopilot/config/services/，向上三级即仓库根）。
+#: 仓库安装根（本文件位于 biopilot/config/，向上两级即仓库根）。
 #: 相对路径的缓存目录按它解析，避免随启动 cwd 漂移。
-_INSTALL_ROOT = Path(__file__).resolve().parents[3]
+_INSTALL_ROOT = Path(__file__).resolve().parents[2]
 
 #: 进程级开关：只有真正的引擎入口（Web 适配层）打开数据库配置源。
 #: 测试、评测脚本、一次性运维脚本默认仍走文件链路，不给它们加 MySQL 依赖。

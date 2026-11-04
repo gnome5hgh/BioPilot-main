@@ -5,7 +5,6 @@ import asyncio
 import logging
 
 from biopilot.domain.runtime_state import RuntimeState
-from biopilot.schema.internal import ScheduleRunRequest
 from biopilot.service import state
 from biopilot.service.errors import RequestValidationError
 from biopilot.service.schedule_service import ScheduleService
@@ -43,11 +42,12 @@ class ScheduleServiceImpl(ScheduleService):
         self._runtime = runtime
         self._agent_factory = agent_factory
 
-    def run(self, user_id: str, req: ScheduleRunRequest) -> dict:
+    def run(self, user_id: str, task_id: str, conversation_id: str,
+            task: str) -> dict:
         """去重后后台执行一轮定时任务，HTTP 立即返回。"""
-        conversation_id = str(req.conversation_id or "")
-        task = str(req.task or "")
-        task_id = str(req.task_id or "")
+        conversation_id = str(conversation_id or "")
+        task = str(task or "")
+        task_id = str(task_id or "")
         if not conversation_id or not task:
             raise RequestValidationError("conversation_id 与 task 必填")
         key = task_id or f"{user_id}:{conversation_id}:{task[:32]}"

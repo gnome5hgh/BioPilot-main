@@ -33,8 +33,3 @@ def update_user_message_meta(db, user_id: str, conversation_id: str,
         " AND role='user' AND LEFT(content, ?)=?"
         " ORDER BY seq DESC LIMIT 1",
         (meta_json, conversation_id, user_id, prefix_len, prefix))
-
-
-def delete_by_user(db, table: str, user_id: str):
-    """删除某张表里属于该用户的全部行（删户清理用）。"""
-    return db.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))

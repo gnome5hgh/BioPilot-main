@@ -24,7 +24,7 @@ from biopilot.config.schema import (
     validate_patches,
 )
 from biopilot.config.store import UNSET
-from biopilot.service.errors import ConfigSourceUnavailable
+from biopilot.service.errors import ConfigSourceUnavailable, NotFoundError
 from biopilot.service.settings_service import SettingsService
 
 
@@ -215,7 +215,11 @@ class SettingsServiceImpl(SettingsService):
         """回滚到指定历史版本。"""
         _require_db()
         config = BioPilotConfig.from_env()
-        new_version = config_store.get_store(
-            config.runtime.memory_dsn, config.runtime.workspace
-        ).rollback(version, updated_by=updated_by)
+        try:
+            new_version = config_store.get_store(
+                config.runtime.memory_dsn, config.runtime.workspace
+            ).rollback(version, updated_by=updated_by)
+        except ValueError as exc:
+            # 旧接口把「历史版本不存在」映射为 404；领域异常交给统一映射层。
+            raise NotFoundError(str(exc)) from exc
         return {"status": "ok", "version": new_version}

@@ -56,7 +56,7 @@
 
 ## Dependencies And Collaboration
 
-- 每个角色声明自己的工具；装配层（`biopilot/api/assembly.py`）决定谁装哪些工具与回调。
+- 每个角色声明自己的工具；装配层（`biopilot/service/impl/assembly_service_impl.py`）决定谁装哪些工具与回调。
 - 角色之间不直接调用，全部经 supervisor 派发。
 - 角色的 `description` 会被自动收进**每个可派发角色**的 system 消息里的可派发清单——清单由该角色自己的 `allowed_spawns` 派生，没有 `allowed_spawns` 的叶子角色不生成该块。派发方按能力选型，**没有「意图 → 子 agent」映射表要维护**。
 

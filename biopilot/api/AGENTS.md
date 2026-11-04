@@ -19,7 +19,6 @@
 - `router.py` — 汇总全部 controller 的 `APIRouter`。
 - `lifespan.py` — 启动后台回收/对账，停服 flush 整合队列并结束终端 shell。
 - `exception_handlers.py` — 服务层与配置层异常 → HTTP 响应。
-- `assembly.py` / `settings.py` / `shell.py` — 仅保留为旧导入路径的薄壳，实现已迁到 `service/impl/`。
 
 ## 分层约定
 

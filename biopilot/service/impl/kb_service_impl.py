@@ -367,13 +367,13 @@ class KbServiceImpl(KbService):
         return {"status": "started",
                 "already_running": user_id in state.reindex_running}
 
-    async def search(self, user_id: str, req) -> dict:
+    async def search(self, user_id: str, query: str, top_k) -> dict:
         """试检索：混合 BM25 + 向量，索引持锁时快速失败。"""
-        query = (getattr(req, "query", "") or "").strip()
+        query = (query or "").strip()
         if not query:
             raise RequestValidationError("query 不能为空")
         try:
-            top_k = int(getattr(req, "top_k", 8) or 8)
+            top_k = int(top_k or 8)
         except (TypeError, ValueError):
             top_k = 8
         top_k = max(1, min(top_k, 30))

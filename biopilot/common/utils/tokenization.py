@@ -1,9 +1,9 @@
-# biopilot/common/core/utils/tokenization.py
+# biopilot/common/utils/tokenization.py
 """Token 计数编码单点共享。
 
 RAG 切块（``rag/parsers/chunker.py``）与 core.memory 上下文压缩
 （``core/memory/services/compaction.py``）共用同一 tiktoken 编码口径：改 ``TOKEN_ENCODING``
-会同时改变切块边界（需重建索引）与压缩 token 估算。放在 ``biopilot/common/core/utils/``
+会同时改变切块边界（需重建索引）与压缩 token 估算。放在 ``biopilot/common/utils/``
 作共享叶子模块——``rag`` 与 ``core.memory`` 都向下依赖它，不存在反向依赖。
 
 tiktoken 只在 :func:`get_token_encoder` **函数内**惰性 import：模块级 import 会让

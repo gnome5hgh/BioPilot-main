@@ -1,4 +1,4 @@
-# biopilot/common/core/utils/text.py
+# biopilot/common/utils/text.py
 """信任边界文本清洗与轻量规范化工具。
 
 与内容扫描（scanner.py）同属"信任边界输入清洗"：在外部输入进入模型前统一

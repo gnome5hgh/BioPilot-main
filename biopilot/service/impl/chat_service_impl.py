@@ -10,7 +10,6 @@ from pathlib import Path
 
 from biopilot.domain.runtime_state import RuntimeState
 from biopilot.domain.web_config import WebConfig
-from biopilot.schema.chat import ChatStreamRequest, ConfirmRequest
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.service.attachment_service import AttachmentService
@@ -102,22 +101,24 @@ class ChatServiceImpl(ChatService):
             return await self._handle_confirm(user_id, conversation_id, req)
         return callback
 
-    async def confirm(self, user_id: str, req: ConfirmRequest) -> dict:
+    async def confirm(self, user_id: str, conversation_id: str, req_id: str,
+                      approved: bool) -> dict:
         """回传确认决定（approved=true/false），唤醒等待中的 run。"""
         fut = self._runtime.pending_confirms.get(
-            (user_id, req.conversation_id, req.req_id))
+            (user_id, conversation_id, req_id))
         if fut is None or fut.done():
             raise NotFoundError("确认请求不存在或已结算")
-        fut.set_result(bool(req.approved))
+        fut.set_result(bool(approved))
         return {"status": "ok"}
 
-    async def stream(self, user_id: str, req: ChatStreamRequest,
+    async def stream(self, user_id: str, task: str, conversation_id: str,
+                     project_id: str | None, attachments: list[dict],
                      is_disconnected: Callable[[], Awaitable[bool]]
                      ) -> AsyncIterator[str]:
         """对话流：SSE 帧序列（token/tool/round/done）。"""
-        task = req.task.strip()
-        conversation_id = req.conversation_id.strip()
-        project_id = req.project_id or None
+        task = task.strip()
+        conversation_id = conversation_id.strip()
+        project_id = project_id or None
         if not task or not conversation_id:
             raise RequestValidationError("task 与 conversation_id 必填")
 
@@ -135,7 +136,7 @@ class ChatServiceImpl(ChatService):
 
         # 附件：平台文件按 id 注入任务文本；本地副本只给沙箱一次性读取用。
         attachments = self._attachments.resolve(
-            user_id, [a.model_dump() for a in req.attachments], conversation_id)
+            user_id, attachments, conversation_id)
         attachment_meta = self._attachments.meta(attachments)
         # 用户原话先留一份：标题与历史展示都只取原话
         user_task = task
@@ -183,11 +184,13 @@ class ChatServiceImpl(ChatService):
             self._runtime.user_runs.get(user_id, 0) + 1)
 
         async def stream_chat() -> AsyncIterator[str]:
+            """把一轮 run 的事件桥接成 SSE 帧。"""
             queue: asyncio.Queue = asyncio.Queue()
             # 注册活动流：确认请求投递到这里（无活动流时确认按拒绝处理）
             self._runtime.active_queues[(user_id, conversation_id)] = queue
 
             def on_event(event) -> None:
+                """线程安全地把 Agent 事件投进当前流的队列。"""
                 # stream_callback 是同步回调（Agent 线程内直接调）：线程安全投递
                 queue.put_nowait({
                     "type": str(getattr(event, "kind", "content")).replace(
@@ -200,6 +203,7 @@ class ChatServiceImpl(ChatService):
                 })
 
             async def run_task() -> str:
+                """执行一轮 run，并在收尾时回填附件元数据。"""
                 # 标题在 run 开始时就落库；用用户原话，不用注入清单
                 await self._session.autotitle(
                     user_id, conversation_id, user_task)
@@ -234,6 +238,7 @@ class ChatServiceImpl(ChatService):
                     await asyncio.sleep(0.3)
 
             async def drain() -> AsyncIterator[str]:
+                """把队列事件转成 SSE 帧，并在 run 结束后补发收尾帧。"""
                 nonlocal run_handle
                 run_handle = asyncio.create_task(run_task())
                 watcher = asyncio.create_task(watch_disconnect())

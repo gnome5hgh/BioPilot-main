@@ -16,7 +16,7 @@ def update_name(db, title: str, agent_id: str, user_id: str):
         (title, agent_id, user_id))
 
 
-def delete_for_conversation(db, agent_id: str, user_id: str):
+def delete_for_conversation(db, user_id: str, agent_id: str):
     """删除一个会话的 agent_state 行。"""
     return db.execute(
         "DELETE FROM bio_agent_state WHERE agent_id=? AND user_id=?",

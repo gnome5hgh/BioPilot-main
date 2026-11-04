@@ -34,7 +34,7 @@ async def kb_search(
     services: ServiceContainer = Depends(get_services),
 ) -> dict:
     """知识库试检索。"""
-    return await services.kb.search(user_id, req)
+    return await services.kb.search(user_id, req.query, req.top_k)
 
 
 @router.get("/papers/{paper_id}/chunks", response_model=KbChunksResponse)

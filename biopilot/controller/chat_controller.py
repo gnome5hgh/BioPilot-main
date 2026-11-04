@@ -18,7 +18,8 @@ async def chat_confirm(
     services: ServiceContainer = Depends(get_services),
 ) -> dict:
     """回传确认决定（approved=true/false），唤醒等待中的 run。"""
-    return await services.chat.confirm(user_id, req)
+    return await services.chat.confirm(
+        user_id, req.conversation_id, req.req_id, req.approved)
 
 
 @router.post("/stream")
@@ -30,5 +31,6 @@ async def chat_stream(
 ) -> StreamingResponse:
     """对话流：SSE 帧序列（token/tool/round/done）。"""
     iterator = await services.chat.stream(
-        user_id, req, request.is_disconnected)
+        user_id, req.task, req.conversation_id, req.project_id,
+        [a.model_dump() for a in req.attachments], request.is_disconnected)
     return StreamingResponse(iterator, media_type="text/event-stream")

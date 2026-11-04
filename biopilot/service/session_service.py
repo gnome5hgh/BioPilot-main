@@ -26,7 +26,3 @@ class SessionService(ABC):
     @abstractmethod
     def invalidate_agents(self) -> None:
         """丢弃全部缓存的 Agent（设置保存后调用）。"""
-
-    @abstractmethod
-    def purge_runtime_for_user(self, target_id: str) -> None:
-        """删户后丢弃该用户的进程内缓存。"""

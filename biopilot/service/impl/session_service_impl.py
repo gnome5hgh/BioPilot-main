@@ -63,7 +63,7 @@ class SessionServiceImpl(SessionService):
         db = shared_db()
         message_mapper.delete_for_conversation(db, user_id, conversation_id)
         gone = agent_state_mapper.delete_for_conversation(
-            db, conversation_id, user_id)
+            db, user_id, conversation_id)
         self._runtime.agents.pop(
             (user_id, conversation_id, state.user_models.get(user_id)), None)
         # 键含模型名（会话内可切换模型），按用户+会话整体清
@@ -112,15 +112,4 @@ class SessionServiceImpl(SessionService):
         """丢弃全部缓存的 Agent：设置保存后下一轮按新配置重新装配。"""
         self._runtime.agents.clear()
         self._runtime.agent_last_used.clear()
-        self._runtime.usage_baseline.clear()
-
-    def purge_runtime_for_user(self, target_id: str) -> None:
-        """删户后丢弃该用户的进程内缓存。"""
-        for key in [k for k in self._runtime.agents if k[0] == target_id]:
-            self._runtime.agents.pop(key, None)
-            self._runtime.agent_last_used.pop(key, None)
-        for key in [k for k in state._queues if k[0] == target_id]:
-            state._queues.pop(key, None)
-        state.user_models.pop(target_id, None)
-        self._runtime.user_runs.pop(target_id, None)
         self._runtime.usage_baseline.clear()
