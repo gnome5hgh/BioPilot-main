@@ -302,16 +302,16 @@ class SecurityConfig:
     #: 语义判定层（判定网关；端点或密钥缺失即整层不装配）
     classifier: "ClassifierConfig" = field(default_factory=lambda: ClassifierConfig())
 
-    #: 沙箱代码执行（run_python 的容器政策来源）
+    #: 沙箱执行（run_python / run_shell 的容器政策来源）
     sandbox: "SandboxConfig" = field(default_factory=lambda: SandboxConfig())
 
 
 @dataclass
 class SandboxConfig:
-    """沙箱代码执行配置（run_python/bio-agent 依赖；缺它整条链路不可用）。
+    """沙箱执行配置（run_python / run_shell 依赖；缺它整条链路不可用）。
 
     Attributes:
-        enabled: bool，总开关（关掉时 run_python 直接返回未启用文本）
+        enabled: bool，总开关（关掉时两个执行工具直接返回未启用文本）
         image: str，沙箱镜像名（须预先构建：docker build -f docker/sandbox.Dockerfile）
         network: bool，容器是否联网（默认 False = 断网，分析依赖须预装进镜像）
         read_roots: list[str]，额外只读挂载的语义根名（挂到 /corpus/<根名>）

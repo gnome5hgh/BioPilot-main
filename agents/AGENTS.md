@@ -18,7 +18,7 @@
 - `research-agent/` — 选题域：语料盘点、综述与缺口、选题卡、研究计划
 - `review-agent/` — 审查域：笔记审查、选题产物审查（文献检索与筛选由 paper-agent 自己完成）
 - `rag-agent/` — 语料索引域：检索、入库、删除后收敛、索引体检
-- `bio-agent/` — 数据分析域：沙箱代码执行（唯一持有 `run_python` 的角色）、数据检查、统计与差异分析、单细胞流程、可视化与报告入库
+- `bio-agent/` — 数据分析域：沙箱代码与命令执行（唯一持有 `run_python` / `run_shell` 的角色）、数据检查、统计与差异分析、单细胞流程、可视化与报告入库
 
 ## Responsibilities
 
@@ -31,7 +31,7 @@
 - **判据是「一个 agent = 一类产物的责任人」**：每个领域角色独占自己那类产物的读写，其余角色需要时**派发**它，而不是自己装工具。**长期记忆是例外**：写入归轮末后台整合，不设记忆角色，所有 agent 只通过只读召回（`memory_read` / `read_tool_result`）读取。`supervisor` 只编排，不持有任何执行类工具，工具面是 spawn + 只读召回。
 - **通用铁律不重复写**：诚实性协议、交付契约语义、协作语义都已下沉到全 agent 共有的行为基座（`biopilot/core/agent/constants/base_prompt.py`）。`AGENT.md` 只写角色特有契约。
 - **权限最小化**：`allowed_spawns` 由派发工具在运行时强制（它同时是可派发清单的派生来源）；叶子角色不递归派发；`supervisor` 不装 skill 工具，这是代码级红线。
-- **一类产物一个责任人，工具面不重复**：沙箱执行只归 `bio-agent`（`run_python` 是它的独占工具）。不要再建一个纯「代码执行」的平行角色——它的工具面必然是 bio-agent 的子集，supervisor 在清单里看到两个同类目标只会选错；需要跑代码就派 bio-agent。
+- **一类产物一个责任人，工具面不重复**：沙箱执行只归 `bio-agent`（`run_python` / `run_shell` 是它的独占工具）。不要再建一个纯「代码执行」或「命令执行」的平行角色——它的工具面必然是 bio-agent 的子集，supervisor 在清单里看到两个同类目标只会选错；需要跑代码或命令就派 bio-agent。
 - **命名一律 `<域>-agent`**，`supervisor` 是唯一例外（它是编排层，不是领域责任人）。
 
 ## Key Entry Points

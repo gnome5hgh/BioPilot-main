@@ -417,6 +417,7 @@ function prettyTool(name) {
     view_image: '查看图表',
     save_document: '保存文档',
     run_python: '执行分析代码',
+    run_shell: '执行沙箱命令',
     fetch_pdf: '下载论文',
     glob: '查找文件',
     grep: '搜索文件内容',

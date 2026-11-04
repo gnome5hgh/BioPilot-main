@@ -114,6 +114,7 @@ ACTIVITY_LABELS: dict[str, tuple[str, str]] = {
     "memory_read": ("📖 读块", "次"),
     "save_document": ("📄 成稿入库", "次"),
     "run_python": ("🐍 沙箱执行", "次"),
+    "run_shell": ("💻 沙箱执行", "次"),
     "read_tool_result": ("📄 取回", "次"),
     # ── 编排与技能 ──
     "spawn_sub_agent": ("🤖 子任务", "次"),

@@ -560,7 +560,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
         user_task = task
         if attachments:
             lines = [f"{_ATTACHMENT_HEADER}（用 kind + id 调 read_file/read_pdf；"
-                     "run_python 里用 /corpus/uploads/ 下的沙箱路径）："]
+                     "run_python / run_shell 里用 /corpus/uploads/ 下的沙箱路径）："]
             for a in attachments:
                 kind = "paper" if a.get("paper_id") else "file"
                 obj_id = a.get("paper_id") or a.get("file_id") or ""

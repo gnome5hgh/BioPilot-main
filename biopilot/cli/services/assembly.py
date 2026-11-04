@@ -522,7 +522,7 @@ def main(argv: list[str] | None = None) -> int | None:
         AuditMiddleware(db=db),
         # 语义判定层按配置构造：未启用或缺端点即 None（整层不装配）
         ContentGuardMiddleware(classifier=build_classifier(config)),
-        # 命令防护：零工具声明 format="shell_command" 时是纯 no-op（为将来的 shell 工具留的缝）
+        # 命令防护：接管 run_shell 声明为 format="shell_command" 的命令文本；其余工具无此声明即 no-op
         CommandGuardMiddleware(),
         PolicyEngineMiddleware(confirm_above=config.runtime.confirm_above),
     ]
