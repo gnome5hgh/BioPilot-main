@@ -29,4 +29,4 @@ RUN pip install --no-cache-dir .
 # agents 插件、config.yaml、.biopilot 工作区（skills/intent/镜像语料/运行数据）
 # 由部署时挂载：compose 里见 volumes。
 EXPOSE 8300
-CMD ["python", "-m", "biopilot", "--web"]
+CMD ["python", "-m", "biopilot"]

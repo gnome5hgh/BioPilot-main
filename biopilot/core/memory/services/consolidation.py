@@ -1,6 +1,6 @@
 """记忆整合：把每轮对话沉淀进记忆块，并提供轮末 debounce 队列。
 
-REPL 每轮对话结束后调 consolidate()：读取游标之后的新消息 + 全部可写块的当前
+Web 会话每轮对话结束后调 consolidate()：读取游标之后的新消息 + 全部可写块的当前
 内容 → LLM 输出记忆编辑指令 → 全量预验证 → 经 BlockManager 应用进记忆块。喂入
 旧值是「不产生矛盾条目」的前提——模型看不到旧内容就无从判断新信息推翻了哪一条。
 
@@ -45,7 +45,7 @@ _PREFIX_TARGETS = ("feedback", "project", "reference")
 _WRITABLE_LABELS = frozenset({"profile", "assistant"})
 _WRITABLE_PREFIXES = tuple(f"{target}_" for target in _PREFIX_TARGETS)
 
-#: 连续失败多少次后强制推进游标：同一批坏编辑若反复失败，每个 REPL 轮次都会
+#: 连续失败多少次后强制推进游标：同一批坏编辑若反复失败，每个对话轮次都会
 #: 重新尝试，不推进就把管道卡死。推进即放弃这批消息（已如实记日志）。
 _MAX_CONSECUTIVE_FAILURES = 3
 
@@ -140,9 +140,9 @@ def _edit_key(edit: MemoryEdit) -> tuple:
 class MemoryConsolidator:
     """记忆整合器：把每轮对话沉淀进记忆块。
 
-    触发是每轮一次（REPL 在本轮收尾调用）；进度由游标跟踪——游标落库
-    （bio_memory_consolidation_cursor 表），跨进程认领取 MySQL 命名锁：同一会话被 web 进程
-    与 REPL 进程同时触达时，只有持锁者消费（防双消费），对端本轮放弃。游标行
+    触发是每轮一次（Web 会话在本轮收尾调用）；进度由游标跟踪——游标落库
+    （bio_memory_consolidation_cursor 表），跨进程认领取 MySQL 命名锁：同一会话被
+    多实例 webapi 进程同时触达时，只有持锁者消费（防双消费），对端本轮放弃。游标行
     不存在时按 messages 行数初次回填（进程重启/首启自愈）。
 
     Attributes:
@@ -348,7 +348,7 @@ class MemoryConsolidator:
         self._failures += 1
         logger.warning("整合失败（连败第 %d 次）: %s", self._failures, reason)
         if self._failures >= _MAX_CONSECUTIVE_FAILURES:
-            # 同一批坏编辑反复失败：不推进的话每个 REPL 轮次都会重试，管道被卡住。
+            # 同一批坏编辑反复失败：不推进的话每个对话轮次都会重试，管道被卡住。
             # 计数归零：放弃的这一批到此为止，下一批内容应当重新获得完整的重试额度。
             logger.warning("整合连续失败 %d 次，跳过这批消息推进游标",
                            self._failures)

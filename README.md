@@ -1,14 +1,6 @@
 # BioPilot
 
-实验室私有部署的多用户生信科研 Agent 平台：网页端登录使用，围绕「读论文 → 做笔记 → 追问题」的科研工作流，提供多 Agent 协作、RAG 知识库检索、引用管理与记忆系统；数据按用户隔离（MySQL 行级 + OSS 前缀 + 独立向量 collection）。也可以单机 REPL 方式使用，两种方式同库互通。
-
-## 两种使用方式
-
-| | 网页平台（多用户） | 本地 REPL（单人） |
-|---|---|---|
-| 启动 | 三层各一进程（见下） | `biopilot` 一条命令 |
-| 登录 | 注册账号，数据按 user_id 隔离 | 无需登录 |
-| 适合 | 实验室共用部署 | 个人机器、开发调试 |
+实验室私有部署的多用户生信科研 Agent 平台：网页端登录使用，围绕「读论文 → 做笔记 → 追问题」的科研工作流，提供多 Agent 协作、RAG 知识库检索、引用管理与记忆系统；数据按用户隔离（MySQL 行级 + OSS 前缀 + 独立向量 collection）。
 
 ## 功能特性
 
@@ -17,7 +9,7 @@
 - **RAG 检索栈**：本地版面解析 PDF（PyMuPDF 还原章节与坐标，不依赖外部服务）→ 学术分块（按节切 + 句界滑窗，丢弃参考文献/样板章节残渣）→ Milvus 向量 + BM25 混合检索 → RRF 融合 → 云端重排
 - **引用库**：平台侧的文献条目集合（从文件管理勾选论文/手工维护），支持 author-year / GB/T 7714 复制与 `.bib` 导出；不参与 agent 溯源
 - **视觉分析**：PDF 图表区域检测与提取，原图入 MinIO 对象存储，多模态模型看图解读
-- **记忆系统**：对话持久化 + 分层记忆块 + 后台 debounce 记忆整合 + 会话回放（`--resume`）
+- **记忆系统**：对话持久化 + 分层记忆块 + 后台 debounce 记忆整合 + 会话历史与上下文用量
 - **Skills 机制**：用户技能按 `user_id` 隔离（`bio_skill` 表 + OSS `users/<uid>/skills/`）；内置流程已并入各 agent 的 `AGENT.md`
 - **文献检索**：平台内置 Europe PMC + 管理员在设置页配置的 MCP 检索源；前端文献页与 agent 共用 Java 侧聚合结果
 
@@ -45,11 +37,11 @@ cp .env.example .env
 docker compose up -d
 curl http://localhost:9091/healthz   # → OK
 
-# 4. 启动交互式 REPL（启动预检会自动探测依赖服务）
-biopilot
+# 4. 启动全套平台（适配层 + SpringBoot + 前端）
+./start.sh
 ```
 
-REPL 内置斜杠命令：`/help` 查看命令、`/skill` 管理 skills、`/version` 查看版本。历史会话可用 `biopilot --resume` 回放。
+浏览器打开 `http://localhost:5173` 注册使用。
 
 `docker/*.Dockerfile` 默认用阿里云镜像装 apt 包与 PyPI 依赖（直连官方源在国内常见只有几十 kB/s）。人在海外或想换别的源，用同名环境变量覆盖后重建：
 
@@ -63,7 +55,7 @@ PIP_INDEX_URL=https://pypi.org/simple APT_MIRROR=deb.debian.org docker compose b
 docker compose up -d                       # MySQL + MinIO + Milvus（首启自动建库建表）
 
 # ① Python 适配层（8300；DSN 环境变量必带）
-BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3307/biopilot" biopilot --web
+BIOPILOT_MEMORY_MYSQL_DSN="mysql://root@127.0.0.1:3307/biopilot" biopilot
 
 # ② SpringBoot（8080；首次先 cd server && mvn install -DskipTests）
 cd server/bio-admin && mvn spring-boot:run
@@ -97,7 +89,7 @@ cd web && npm install && npm run dev
 6. 产物目录不需要配置：笔记定稿进网页文档编辑器，论文由平台 OSS 提供；分析与研究产物默认落在 .biopilot 工作区。
 7. 验证：
    - python -m pytest tests/ -q（单测用 Milvus Lite 内嵌，不依赖服务栈）
-   - 启动 biopilot，确认没有「依赖服务未就绪」这类警告
+   - 启动 ./start.sh，确认适配层 / 服务端 / 前端均就绪
 8. 每一步做完向我汇报。任何一步失败，把原始报错贴给我并说明你的修复方案，不要静默跳过或降级处理。
 ```
 
@@ -128,16 +120,14 @@ web/             前端（Vue3 + Vite）:登录 / 对话 / 文件 / 文献 / 知
 server/          SpringBoot 3.5（Java 21）:注册登录鉴权 / 业务表 / 内网代理（bio-admin
                  / bio-modules / bio-common 三模块）
 biopilot/
-  webapi/        HTTP/SSE 适配层:对话流 + 数据端点 + 资源闸（只绑回环/内网）
-  cli/           装配根:对象图组装 + 启动预检（REPL 与 web 会话共用同一套装配）
+  webapi/        HTTP/SSE 适配层:进程入口 + 会话装配 + 对话流 + 数据端点（只绑回环/内网）
   config/        全局可调参数的唯一声明点
   core/          核心运行层:agent(ReAct 循环) / llm(客户端 + 结构化输出)
                  / intent(意图识别) / memory(记忆系统) / security(安全中间件)
                  / skills(Skill 注册表) / tool(Tool 抽象)
                  / rag(RAG 检索栈:解析 → 分块 → 索引 → 混合检索 → 重排)
                  / vision(视觉分析:图表检测 + 提取 + 多模态解读)
-  tools/         面向 agent 的工具集:文件 / 记忆 / RAG / 搜索等
-  terminal/      终端交互层:REPL + 活动流渲染 + 确认中心 + 会话回放
+  tools/         面向 agent 的工具集:文件 / 记忆 / RAG / 搜索等（含装配工厂 assembly.py）
 
 agents/          各角色 agent 的 AGENT.md + tools.py（插件目录，位于仓库根）
 .biopilot/      运行时数据根与资产目录:skills(流程 skill) / intent(意图知识库) / infra(服务数据卷)
@@ -147,4 +137,4 @@ agents/          各角色 agent 的 AGENT.md + tools.py（插件目录，位于
 
 ## AI 协作入口
 
-仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`web/`、`server/`、`biopilot/` 及其 `cli/`、`config/`、`core/`（再往下十二份）、`tools/`、`terminal/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。
+仓库根的 `AGENTS.md` 是面向所有 AI 编码代理（ZCode / Claude Code / Codex 等）的治理 manifest——只写**规则**（该怎么做、什么不许做、去哪里找），不写字段表、文件清单这类会被代码改活的现状快照。`web/`、`server/`、`biopilot/` 及其 `config/`、`core/`（再往下十二份）、`tools/`、`webapi/`，以及 `agents/`、`.biopilot/`（再往下 `skills/`、`intent/`）各有一份子 manifest 写就地约定。注意：客户端只**自动注入其中一份**（从当前目录向上找到的第一份），所以改某个模块前要按 AGENTS.md 的 Routing 主动读它那份。`CLAUDE.md` 是 Claude Code 的入口薄指针（本地维护、不入库）。事实优先级：源码与测试 > AGENTS.md 及各级子 manifest > `docs/` 设计文档。

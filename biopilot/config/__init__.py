@@ -14,7 +14,7 @@
 配置树与设置页的字段描述同构：
 ``runtime`` / ``corpus`` / ``intent`` / ``rag{embedding, rerank,
 retriever, query_rewrite, chunker, storage, tools}`` / ``memory`` /
-``session`` / ``agents{timeouts}`` / ``security`` / ``compaction``，外加保留的顶层
+``agents{timeouts}`` / ``security`` / ``compaction``，外加保留的顶层
 ``llm`` / ``vision``；平台后端连接在 ``platform`` 段。
 
 env 名约定：字段路径以 ``_`` 连接并大写，前缀 ``BIOPILOT_``。例如
@@ -57,7 +57,6 @@ from biopilot.config.schemas.sections import (
     RerankConfig,
     RetrieverConfig,
     RuntimeConfig,
-    SessionConfig,
     MinioConfig,
     StorageConfig,
     VisionLLMConfig,
@@ -88,6 +87,5 @@ __all__ = [
     "StorageConfig",
     "RagToolsConfig",
     "MemoryConfig",
-    "SessionConfig",
     "AgentsConfig",
 ]

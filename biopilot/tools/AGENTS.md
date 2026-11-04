@@ -21,9 +21,10 @@
 - `recall/` — 只读召回包（`memory_read` 读长期记忆 + `read_tool_result` 取回工具原文，装配给所有 agent）
 - `orchestration/` — 子 agent 派发（唯一的调度工具；按当前约定整文件保留）
 - `skills/` — 加载 skill 正文与资源
+- `assembly.py` — 工具装配工厂（`make_tools`）：实例化工具并注入 `_config`
 
-工具装配不在本包：`make_tools` 在 `cli/services/tool_assembly.py`；工具运行时上下文在
-`core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在 `biopilot/common/` 与 `core/security/`。
+工具运行时上下文在 `core/tool/services/runtime_context.py`；通用原子写/文本/HTTP 在
+`biopilot/common/` 与 `core/security/`。
 平台数据端口（论文目录/文件/文档）已迁 Java `bio-file`，本包不再保留数据访问 adapter。
 沙箱产物（`run_python` / `run_shell`）经 Java `/internal/files/artifacts` 登记；平台文件字节经 `/internal/attachments/*` 取回，工具不直连 OSS。
 
@@ -31,13 +32,12 @@
 
 - 为每个工具声明名字、描述、参数 schema、安全元数据与风险档位。
 - 把工具结果（含各种失败）统一成结构化结果回传模型。
-- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `core/*/services`，装配由 `cli/services/tool_assembly.py` 负责。
+- 工具只做「声明 + 调用 + 降级」；业务语义下沉 `core/*/services`，装配由 `tools/assembly.py` 负责。
 
 ## Core Logic
 
 - **`__init__.py` 统一再导出**：消费方从包门面导入，符号名稳定，内部路径随便拆。
-- **装配一律经装配工厂**：它按语义根提示生成目录提示、给写工具盖上默认写根、注入配置。**agent 拿到什么工具由装配层决定**，工具内部不要自作主张。
-- **默认写根只是兜底**：任务文本点名了保存位置就用它（下载类工具有专门的落点参数，其余显式传目录或路径），只有没指定时才落到默认根。工具描述要在动作发生处写清这一点。
+- **装配一律经装配工厂**：它实例化工具类、复用已实例化工具并注入 `_config`。**agent 拿到什么工具由装配层决定**，工具内部不要自作主张。
 - **安全元数据必填**（字段定义、取值来源与校验在 [`../core/tool/AGENTS.md`](../core/tool/AGENTS.md)）：写 / 删类一律高档位；可重入的批量追加不强求。档位高于会话免问档即逐次确认——**降档不是旁路**。
 - **来源声明「结果是不是外部数据」**：**只有读外部数据的工具才声明**；自家算出的结构化结果不声明——全标会让标记变成噪声。
 - **参数级的格式声明是中间件的接管开关**：路径 → 路径权威、内容 → 内容防护、命令 → 命令防护。新工具不需要写安全代码，声明格式即可被接管；**声明错格式等于没被接管**。
@@ -46,7 +46,7 @@
 
 ## Key Entry Points
 
-- `cli/services/tool_assembly.py` — 工具装配工厂（`make_tools`）
+- `assembly.py` — 工具装配工厂（`make_tools`）
 - `core/tool/services/runtime_context.py` — 工具运行时上下文（记忆管理器 + RAG 用户域）
 - `orchestration/spawn.py` — 派发工具与五道闸
 - `recall/` — 只读召回包（长期记忆读取 + 工具结果回取）
@@ -61,7 +61,7 @@
 ## Dependencies And Collaboration
 
 - 依赖 `core/tool/`（抽象与安全元数据校验）、`core/constants/`（风险与副作用词汇）、`core/security/`（中间件在调用前后接管）。
-- 被 `cli/` 在装配期取用，被 `core/agent` 在 ReAct 循环里执行。
+- 被 `webapi/` 在装配期取用，被 `core/agent` 在 ReAct 循环里执行。
 - 各领域工具的真实实现对在对应 core 子包里（记忆在 `core/memory/`，检索在 `core/rag/`）；引用库是平台功能（Java），Python 侧没有引用工具。
 
 ## Investigation Rule

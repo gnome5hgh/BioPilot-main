@@ -4,7 +4,7 @@
 真相源是 MySQL 的 ``bio_config``（设置页写入稀疏覆盖），环境变量优先级最高；
 ``config.yaml`` 只保留启动引导项。分区与配置路径顶层同名：
 ``runtime`` / ``platform`` / ``corpus`` / ``intent`` / ``rag{...}`` / ``memory`` /
-``session`` / ``agents`` / ``security`` / ``compaction``，外加保留顶层的
+``agents`` / ``security`` / ``compaction``，外加保留顶层的
 ``llm`` / ``vision``。
 
 加载与派生逻辑在 ``loader.py``（递归合并、env 派生、数据库覆盖），字段描述与
@@ -582,7 +582,7 @@ class RagConfig:
     store_images: bool = True
 
 
-# ── memory / session / agents ───────────────────────────────────────────────
+# ── memory / agents ─────────────────────────────────────────────────────────
 
 #: 压缩计量方式的合法取值（schema 校验与 ContextSize 共用，避免两处枚举漂移）。
 CONTEXT_SIZE_TYPES = ("tokens", "messages", "fraction")
@@ -726,24 +726,6 @@ class MemoryConfig:
 
     #: 会话一直活跃、等不到静默窗口时的强制整合上限。
     max_delay_seconds: int = 300
-
-
-@dataclass
-class SessionConfig:
-    """会话恢复配置。
-
-    Attributes:
-        resume_replay: bool，--resume 时是否把历史回放进终端滚动区
-        resume_replay_limit: int，回放条数上限（0 = 整窗）
-    """
-
-    #: 会话恢复时把历史对话回放进终端滚动区。--resume 恢复的是模型上下文，
-    #: 屏幕上否则不留任何痕迹（用户会以为恢复失败）；见 terminal/resume.py。
-    #: 置 False 则只恢复上下文、不显示历史。
-    resume_replay: bool = True
-
-    #: 回放条数上限（取窗口末尾 N 条）。0 = 回放整个 in-context 窗口。
-    resume_replay_limit: int = 0
 
 
 @dataclass

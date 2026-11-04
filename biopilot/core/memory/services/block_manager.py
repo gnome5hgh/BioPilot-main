@@ -48,7 +48,7 @@ class BlockManager:
         Args:
             db: 数据库连接（需已初始化）。
             user_id: 归属用户（行级隔离键，必填）。装配层传网关携带的 user_id
-                （信任边界：内网带入即真相），REPL 传 "local"。
+                （信任边界：内网带入即真相）。
 
         Raises:
             ValueError: user_id 缺失或为空——多用户隔离的键不允许缺省。

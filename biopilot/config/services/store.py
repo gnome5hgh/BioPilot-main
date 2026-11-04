@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 UNSET = object()
 
 #: 进程内快照缓存：工具调用会频繁读配置，不能每次打一次库。5 秒足够让
-#: 另一个进程（REPL/脚本）的修改被看见，保存时会主动失效本进程缓存。
+#: 另一个进程（Web 服务/运维脚本）的修改被看见，保存时会主动失效本进程缓存。
 _CACHE_TTL_SECONDS = 5.0
 
 _cache_lock = threading.Lock()

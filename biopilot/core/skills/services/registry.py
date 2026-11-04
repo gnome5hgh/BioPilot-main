@@ -42,7 +42,7 @@ class SkillRegistry:
         body = registry.load_body("write-note")         # L2 正文
 
     Note: 构造有副作用——读取并解析全部 SKILL.md，非法值抛 ValueError 终止构造。
-        进程内按用户构造（web 会话装配时），REPL 构造一次。
+        进程内按用户构造（web 会话装配时）。
 
     Attributes:
         _skills: dict[str, SkillConfig]，skill 名 → 配置

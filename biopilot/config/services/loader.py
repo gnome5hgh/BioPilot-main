@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 #: 相对路径的缓存目录按它解析，避免随启动 cwd 漂移。
 _INSTALL_ROOT = Path(__file__).resolve().parents[3]
 
-#: 进程级开关：只有真正的引擎入口（``--web`` 与 REPL）打开数据库配置源。
+#: 进程级开关：只有真正的引擎入口（Web 适配层）打开数据库配置源。
 #: 测试、评测脚本、一次性运维脚本默认仍走文件链路，不给它们加 MySQL 依赖。
 _DB_SOURCE_ENABLED = False
 
@@ -56,8 +56,8 @@ def db_source_enabled() -> bool:
 def ensure_legacy_import(legacy_path: str | Path | None = None) -> int | None:
     """引擎入口调用：数据库里还没有配置时，把旧 ``config.yaml`` 一次性导入。
 
-    导入后旧文件会被改写成「只含引导层」并留一份 ``.bak``。只由 ``--web`` 与
-    REPL 入口调用——普通脚本/测试读配置时**不**触发文件改写。
+    导入后旧文件会被改写成「只含引导层」并留一份 ``.bak``。只由 Web 适配层入口
+    调用——普通脚本/测试读配置时**不**触发文件改写。
 
     Args:
         legacy_path: 旧配置路径；None 时取当前目录的 ``config.yaml``。
@@ -91,7 +91,6 @@ from biopilot.config.schemas.sections import (
     RuntimeConfig,
     ClassifierConfig,
     SecurityConfig,
-    SessionConfig,
     VisionLLMConfig,
 )
 
@@ -183,7 +182,6 @@ class BioPilotConfig:
         security: SecurityConfig，安全模块（预批准名单）
         rag: RagConfig，RAG 检索栈
         memory: MemoryConfig，记忆系统
-        session: SessionConfig，会话恢复
         agents: AgentsConfig，子 agent 配置
         compaction: CompactionSettings，上下文压缩
     """
@@ -214,9 +212,6 @@ class BioPilotConfig:
 
     #: 记忆系统（consolidation 后台整合）
     memory: MemoryConfig = field(default_factory=MemoryConfig)
-
-    #: 会话恢复（屏上历史回放）
-    session: SessionConfig = field(default_factory=SessionConfig)
 
     #: 子 agent 配置（timeouts 为 YAML-only 自由 dict）
     agents: AgentsConfig = field(default_factory=AgentsConfig)

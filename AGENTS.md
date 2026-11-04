@@ -26,8 +26,8 @@
 BioPilot/
 ├─ web/                # 前端（Vue3 + Vite + TS 风格 JS）：登录/对话/文件/文献/知识库/引用库/终端面板/管理
 ├─ server/             # SpringBoot 3（Java 21）：bio-admin(启动装配) bio-modules(业务域+引擎接入) bio-common(通用件)
-├─ biopilot/           # Python 引擎：cli/(装配) config/(参数) common/(跨层基础) core/(agent 运行层)
-│                      #   tools/ terminal/ webapi/(HTTP/SSE 适配层)
+├─ biopilot/           # Python 引擎：webapi/(入口+HTTP/SSE 适配层) config/(参数)
+│                      #   common/(跨层基础) core/(agent 运行层) tools/(工具)
 ├─ agents/             # Agent 插件：AGENT.md（契约）+ tools.py
 ├─ .biopilot/         # 静态资产 intent/ + 服务卷 infra/ + 启动日志/pid run/（运行数据根默认在此，可重定向）
 ├─ .agents/skills/     # 给编码代理按需加载的 skill（与本仓运行时无关）
@@ -45,7 +45,7 @@ BioPilot/
 ### 当前目录分层含义
 
 - 三层调用链：`web/`（5173，Vite 原样代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 引擎接入）→ `biopilot/webapi/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
-- `biopilot/` 是引擎主包；`cli/` 是装配根（`--web` 分流到适配层），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`core/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `core/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
+- `biopilot/` 是引擎主包；`webapi/` 是进程入口与 HTTP/SSE 适配层（`entry.py` 入口、`assembly.py` 会话装配），`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`core/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `core/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
 - `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（按业务域拆分的模块，外加技术适配层 bio-gateway；域清单以目录为准）、`bio-common`（跨域共享的基础设施模块，按单一关注点拆分）。
 - 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
@@ -62,9 +62,9 @@ BioPilot/
 
 ## 环境与依赖
 
-- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。可在设置页填写（加密存 `bio_config_secret`），也可走环境变量。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
+- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。可在设置页填写（加密存 `bio_config_secret`），也可走环境变量。LLM key 留空时首次会话装配失败（进程仍可启动，便于在设置页补配）；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
 - `corpus.analysis_dir` / `corpus.research_dir` 这类**个人路径没有默认值、必须显式配**（留空则回落到 `<workspace>/analysis` / `<workspace>/research`）。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。笔记与论文**不落本地语料目录**：笔记定稿进文档编辑器，论文由平台 OSS + `bio_file`（paper 行）提供。
-- 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 与 LLM key 是**硬依赖**：不可达/未配置即启动 fail-fast（真相源不能静默降级）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
+- 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 是**硬依赖**：不可达即启动 fail-fast；LLM key 未配置时首次会话装配失败（不阻塞设置页）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
 
 ## 仓库职责
 
@@ -137,7 +137,7 @@ BioPilot/
 ## 关键入口
 
 - 仓库规则与阅读路径：`AGENTS.md`
-- 装配根（REPL 与 web 会话共用对象图）：`biopilot/cli/services/assembly.py`；启动预检：`biopilot/cli/services/bootstrap.py`
+- 进程入口与装配根：`biopilot/webapi/entry.py`（入口）、`biopilot/webapi/assembly.py`（Web 会话对象图）
 - Web 适配层（agent 运行时 API：SSE/确认/知识库/终端/内部调用）：`biopilot/webapi/app.py`（规则见 [`biopilot/webapi/AGENTS.md`](biopilot/webapi/AGENTS.md)）
 - SpringBoot 启动类：`server/bio-admin/src/main/java/com/biopilot/admin/`；引擎接入（代理/SSE/终端 WS）：`server/bio-modules/bio-gateway/`
 - 前端入口与路由：`web/src/main.js`、`web/src/router/`
@@ -176,11 +176,8 @@ conda run -n biopilot python -m pytest tests/ -v
 # 单个测试
 conda run -n biopilot python -m pytest tests/agent/test_agent.py::TestExecTool -v
 
-# 依赖服务栈（Milvus Standalone + MinIO + MySQL）；REPL 启动时会自动拉起，此命令用于手动管理
+# 依赖服务栈（Milvus Standalone + MinIO + MySQL）；./start.sh 会先拉起，此命令用于手动管理
 docker compose up -d
-
-# 交互式 REPL（⚠️ 不能经 conda run：它不转发 stdin，REPL 会立即 EOF 退出）
-conda activate biopilot && biopilot     # 等价：python -m biopilot（同一 env 内）
 
 # Web 平台一键启动（容器 + 适配层 + SpringBoot + 前端，含就绪探测与日志跟随）
 ./start.sh        # 停止：./stop.sh（容器与数据保留）；前端 http://localhost:5173
@@ -198,8 +195,8 @@ biopilot config rollback <version>    # 回滚到历史版本
 cd server && mvn test -pl bio-admin
 ```
 
-- 启动时自动探测依赖服务，未起则自动 `docker compose up -d` 并等待健康；失败只警告不阻塞。跳过预检：`BIOPILOT_SKIP_BOOTSTRAP=1`。
-- 非交互命令（测试 / 脚本 / 安装）**一律经 `conda run -n biopilot`**，不要用裸 `python` 或 `pip`。唯一例外就是上面的交互式 REPL。
+- 依赖服务由 `./start.sh` 或 `docker compose` 负责拉起；引擎进程本身不再自动探测/拉起容器。
+- 非交互命令（测试 / 脚本 / 安装）**一律经 `conda run -n biopilot`**，不要用裸 `python` 或 `pip`。
 - Python 适配层与引擎都通过 `BIOPILOT_MEMORY_MYSQL_DSN`（或显式的 `BIOPILOT_RUNTIME_MEMORY_DSN`）拿 DSN：标题更新、论文/文档端点的轻量 SQL 以及配置库本身都依赖它，启动时务必带上。
 
 ## 统一编码规范
@@ -242,7 +239,7 @@ cd server && mvn test -pl bio-admin
 - 当前目录是 `BioPilot` 根工作区 manifest。
 - 前端入口：[`web/AGENTS.md`](web/AGENTS.md)
 - 服务端入口：[`server/AGENTS.md`](server/AGENTS.md)
-- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`cli/`](biopilot/cli/AGENTS.md) / [`config/`](biopilot/config/AGENTS.md) / [`core/`](biopilot/core/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`terminal/`](biopilot/terminal/AGENTS.md)；`core/` 之下的子 manifest 见 core manifest）
+- 引擎主包入口：[`biopilot/AGENTS.md`](biopilot/AGENTS.md)（其下 [`config/`](biopilot/config/AGENTS.md) / [`core/`](biopilot/core/AGENTS.md) / [`tools/`](biopilot/tools/AGENTS.md) / [`webapi/`](biopilot/webapi/AGENTS.md)；`core/` 之下的子 manifest 见 core manifest）
 - 插件目录入口：[`agents/AGENTS.md`](agents/AGENTS.md)
 - 资产与数据根入口：[`.biopilot/AGENTS.md`](.biopilot/AGENTS.md)（其下 [`intent/`](.biopilot/intent/AGENTS.md)）
 - 设计文档索引：[`docs/adr/`](docs/adr/)（修正史：[`docs/adr/修正记录.md`](docs/adr/修正记录.md)）、[`docs/learning/`](docs/learning/)

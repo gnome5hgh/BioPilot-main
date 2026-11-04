@@ -2,11 +2,6 @@
 
 按报错关键词 Ctrl-F 定位。条目按发现顺序追加，不重排。
 
-### 「biopilot 起来就退出了」且无报错（REPL EOF）
-- **根因**：REPL 经 `conda run` 启动，stdin 未转发 → `input()` 立即 EOF。
-- **修法**：`conda activate biopilot` 后直接运行 `biopilot`（等价 `python -m biopilot`），不经 `conda run`。
-- **验证**：REPL 提示符出现且可交互输入。
-
 ### `SyntaxError` / `compile()` 报错但代码看起来没问题（Python 3.13 代理字符）
 - **根因**：用系统 `python3`（3.13）跑了项目代码；3.13 对含代理字符的 docstring 的 `compile()` 更严格，3.11（项目 env）可通过。
 - **修法**：改用 `conda run -n biopilot python …`；脚本内的 shebang/调用链一并检查。
@@ -33,10 +28,10 @@
 - **修法**：任务侧「同类 N 件 → N 路 spawn，一个对象一个子 agent」——每路各有独立预算，即便底层串行也各自等得起。
 - **验证**：单个子 agent 的 `read_pdf` 不连续跑多个不同 path；单篇精读子任务不撞超时帽。
 
-### 启动报「LLM API key 未配置」
+### 对话时报「LLM API key 未配置」
 - **根因**：设置页「对话模型」未填密钥，且无环境变量 `BIOPILOT_LLM_API_KEY`；新环境常缺。
 - **修法**：在设置页填 `llm.api_key`（加密存 `bio_config_secret`），或写 `.env` 的 `BIOPILOT_LLM_API_KEY`；RAG 的 key 独立配 `rag.embedding.api_key` 或 `BIOPILOT_RAG_EMBEDDING_API_KEY`。
-- **验证**：启动不再报 key 错误，进入正常对话。
+- **验证**：对话不再报 key 错误，正常返回回答。
 
 ### 检索只有 BM25 结果 / 稠密路静默消失
 - **根因**：`rag.embedding.api_key` 未配——设计为软降级（路由退纯 BM25、检索跳稠密路），只警告不报错。
@@ -47,11 +42,6 @@
 - **根因**：旧版本重启后 BM25 索引未恢复；已在 `biopilot/core/rag/services/retriever.py`（BM25 进程级裸 rebuild，自向量库重建）修复。命中此症状说明代码是旧版本。
 - **修法**：更新到含裸 rebuild 的版本；临时绕过可触发一次任意查询（首查即重建）。
 - **验证**：重启后首次查询结果与重启前一致；`retriever.py` 中存在 rebuild 恢复逻辑。
-
-### 想跳过启动时的服务预检（BIOPILOT_SKIP_BOOTSTRAP）
-- **根因**：启动自动探测 Milvus，服务未起时会拉起 docker（可能很慢或失败刷屏）。
-- **修法**：`BIOPILOT_SKIP_BOOTSTRAP=1` 跳过预检；服务失败本就只警告不阻塞（软依赖降级）。
-- **验证**：设变量后启动秒进 REPL，无服务探测输出。
 
 ### 改了设置页/配置文件里的一个字段，程序行为完全没变（无报错、静默不生效）
 - **根因**：①优先级固定为「默认值 < `bio_config` < `config.yaml` 引导层 < 环境变量」，设置页对 `source=env` 的字段只读，env 会压过数据库；②数据库覆盖有 5 秒进程内缓存，另一个进程的修改不是瞬间可见；③`rag.*` 与 `platform.search_timeout/transfer_timeout` 被进程级单例捕获，页面标「需重启」；④迁移后 `config.yaml` 里的运行时字段不再参与加载，只认引导层。
@@ -71,7 +61,7 @@
 - **修法（已实施）**：各 RPC 传 `rag.storage.timeout`（读路径 5s / 写路径 60s），并在 `rag_retrieve` 边界加检索侧熔断器（`biopilot/core/rag/services/breaker.py`，冷却 60s，跳闸期间直接返回降级文本）。旧版本上遇到时先升到含 `RetrievalBreaker` 的版本。
 - **验证**：`docker stop milvus-standalone` 后调一次 `rag_retrieve`，应在数秒内返回降级文本，而不是阻塞数十秒；再调一次应瞬时返回（熔断短路）；Milvus 起来后过冷却窗口自动恢复，无需重启进程。
 
-### `biopilot --web` 启动即 `ImportError: cannot import name ... from 'biopilot.webapi'`
+### `biopilot` 启动即 `ImportError: cannot import name ... from 'biopilot.webapi'`
 - **根因**：包门面（`biopilot/webapi/__init__.py`）的 `__all__` 漏再导出某个符号（如 `WebConfig`）——CLI 与测试可能从 `biopilot.webapi.app` 直连绕过门面，测试全绿也挡不住门面缺角。
 - **修法**：把缺的符号加进门面的 import 与 `__all__`；新增公开符号时同步维护门面。
 - **验证**：`conda run -n biopilot python -c "from biopilot.webapi import <缺失符号>"`。
