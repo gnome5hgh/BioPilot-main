@@ -5,10 +5,9 @@
 `biopilot/engine/intent/data/taxonomy.yaml` 的键逐项一致（装载期 fail-closed 校验，
 见 `taxonomy.py`）。
 
-**领域意图与领域 agent 一一对应**：`paper` / `note` / `research` / `bioinformatics` /
-`index` 分别对应 paper-agent / note-agent / research-agent / bio-agent / rag-agent。
-这张对应关系是责任归属，不是运行时路由——派发仍由 supervisor 按能力自主决定，
-`spawn.py` 对意图零引用。
+**领域意图各对应一个可派发的领域 agent**，其余类别不派发领域角色；映射由
+`tests/agents/test_intent_agent_mapping.py` 锁定。这张对应关系是责任归属，不是
+运行时路由——派发仍由 supervisor 按能力自主决定，`spawn.py` 对意图零引用。
 """
 from enum import StrEnum
 

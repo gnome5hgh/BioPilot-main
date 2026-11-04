@@ -24,7 +24,7 @@ intent/
 ## Responsibilities
 
 - 用两层判定产出单类别信号（+ 置信度、来源、确定性实体）。
-- 装载并校验随仓库发布的意图知识库。
+- 装载并校验随包发布的意图知识库。
 - 在根 agent 构造 head 时按需注入判定结果。
 
 ## Core Logic
@@ -56,14 +56,14 @@ intent/
 
 ## Dependencies And Collaboration
 
-- 消费方只有根 agent：由 CLI 装配时构造并注入，`None` 即「关」；**子 agent 一律不做意图识别**。
+- 消费方只有根 agent：由 Web 会话装配时构造并注入，`None` 即「关」；**子 agent 一律不做意图识别**。
 - 与 `tools/orchestration/` 零耦合：spawn 不读意图，也不要为它引入依赖。
 
 ## Investigation Rule
 
 1. 先确认开关是否打开——意图层在本机默认是关的，先看清「没生效」是不是配置所致。
 2. 集成缝与规则块看 `services/`；判定客户端看 `services/`；实体抽取与知识库校验看 `rules/`；数据模型看 `schemas/`。
-3. 标定与评测题集在 `scripts/intent/calibration/`（不入库，删掉不可恢复）。
+3. 标定原始题集在 `scripts/intent/calibration/`、按现行类别重标的评测集在 `scripts/intent/eval/`（都不入库，删掉不可恢复）。
 4. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands

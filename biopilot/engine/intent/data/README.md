@@ -26,7 +26,7 @@ conda run -n biopilot python -m pytest tests/intent -q
 
 ## 题集（评测集）不在这里
 
-标定题集按实验归属放在 `scripts/intent/calibration/goldens/{source,audited}/`——**实验资产、`scripts/` 不入库**，所以本机那份是唯一副本，清理脚本目录时不要连它一起删。类别换代后旧题集需要重标（新类别在旧 18 类里可能没有对应项），不要拿旧标签直接跑新类别。
+标定原始题集按实验归属放在 `scripts/intent/calibration/goldens/{source,audited}/`，按现行类别重标的评测集在 `scripts/intent/eval/goldens/`——**实验资产、`scripts/` 不入库**，所以本机那几份是唯一副本，清理脚本目录时不要连它们一起删。类别换代后旧题集需要重标（新类别在旧 18 类里可能没有对应项），不要拿旧标签直接跑新类别。
 
 ## 已退役
 
