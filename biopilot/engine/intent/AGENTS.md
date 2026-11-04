@@ -15,6 +15,7 @@
 ```text
 intent/
 ├─ constants/   # 类别枚举（词表唯一声明点）、知识库路径
+├─ data/        # 知识库资产：taxonomy.yaml / rules.yaml / README（随包发布）
 ├─ schemas/     # 产出契约与判定结果、知识库的数据模型
 ├─ rules/       # 实体抽取 + 知识库装载与 fail-closed 校验
 └─ services/    # 判定服务客户端 + 集成缝（注入 head 的唯一钩子）
@@ -32,6 +33,8 @@ intent/
 - **判定必须看对话史，assistant 侧要保留**：判定口径是「判最后一条用户消息」，输入是最近若干轮 user / assistant 正文（不含工具结果）。掐掉 assistant 侧，「再下载一篇」这类指代就读不懂。
 - **类别词汇只有一个声明点**：类别枚举即词表，知识库按它做 **fail-closed** 校验——类别缺条目、缺描述、缺示例、规则指向未知类别、模式非法正则、模式与示例逐字重复，都在启动期报错并**点名具体类别**。
 - **只作信号**：产出注入 head 后就不再参与决策；派发、顺序、并行全归 supervisor 自己的 ReAct 循环。
+- **领域意图与领域 agent 一一对应，但不是路由**：`paper` / `note` / `research` / `bioinformatics` / `index` 分别对应 paper-agent / note-agent / research-agent / bio-agent / rag-agent；`memory` / `question` / `chitchat` / `help` / `out_of_scope` / `feedback` 不派发领域角色。这张表是责任归属，`spawn.py` 对它零引用；新增可派发角色时要同时补一个领域意图（`tests/agents/test_intent_agent_mapping.py` 锁住）。
+- **规则层宁窄勿宽**：写宽会误命中，写窄只是不短路——误命中的代价高于多跑一次模型。示例句不能与规则逐字重复（装载期会拒）。
 
 ## Key Entry Points
 
@@ -46,7 +49,7 @@ intent/
 - **判定服务不可用就整层不装配**：它依赖账户侧先完成绑定，启动探测失败（或密钥缺失）的后果是「意图层关闭」，**不是启动失败**，也不要留半套。
 - **任何失败都退回规则层**，绝不抛进 ReAct 循环。
 - 新增或改名类别要同时改枚举、知识库与校验三处。
-- **知识库是随仓库分发的资产**（两份：判定口径与示例、高精度规则），不是运行期数据，也不跟随运行数据根重定向；不要在代码里另写一份类别说明。
+- **知识库是随包发布的代码资产**（`data/` 下两份：判定口径与示例、高精度规则），不是运行期数据，也不跟随运行数据根重定向；不要在代码里另写一份类别说明。非 editable 安装靠 `pyproject.toml` 的 `package-data` 把 `data/*.yaml` 带进 wheel。
 - **旧实现不要复活**：混合路由器与稠密/稀疏编码、LLM 兜底面、跨轮状态机与追问检测、路由知识库与向量缓存都已整体退役。旧文档里的描述不作论据。
 
 ## Dependencies And Collaboration
@@ -77,11 +80,12 @@ conda run -n biopilot python -m pytest tests/intent -q
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)（engine manifest）
 - 设计依据：ADR 0007（意图识别）
-- 知识库资产与入库规则：[`../../../.biopilot/AGENTS.md`](../../../.biopilot/AGENTS.md)
+- 仓库规则：[`../../../AGENTS.md`](../../../AGENTS.md)
 
 ## References
 
+- [`data/`](data/)
 - [`rules/`](rules/)
 - [`services/`](services/)
 - [`schemas/`](schemas/)
-- [`../../../.biopilot/AGENTS.md`](../../../.biopilot/AGENTS.md)
+- [`../../../AGENTS.md`](../../../AGENTS.md)

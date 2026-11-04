@@ -157,7 +157,8 @@ services:
       # 与 .biopilot 卷一起持久化；生产建议显式配置并备份。
       BIOPILOT_CONFIG_KEY: ${BIOPILOT_CONFIG_KEY:-}
     volumes:
-      # 运行期数据默认取仓库内 .biopilot；宿主可用 BIOPILOT_RUNTIME_WORKSPACE 指到仓库外
+      # 运行期数据默认取仓库内 .biopilot；宿主可用 BIOPILOT_RUNTIME_WORKSPACE 指到仓库外。
+      # 意图知识库随包在镜像内（biopilot/engine/intent/data/），不从这个卷提供。
       - ${BIOPILOT_RUNTIME_WORKSPACE:-./.biopilot}:/app/.biopilot
       - ./agents:/app/agents:ro
     depends_on:

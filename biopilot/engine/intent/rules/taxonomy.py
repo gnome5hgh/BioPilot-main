@@ -5,9 +5,9 @@
 所以知识库的完整性必须**装载期 fail-closed**：类别缺条目、缺描述、规则指向
 未知类别，都在启动时明确报错并**指出是哪个类别**——不许跑到某一轮才静默走偏。
 
-两份资产都随仓库发布（`.biopilot/intent/`）：`taxonomy.yaml` 写各类的判定口径与
-示例句（判定模型看到的 criteria），`rules.yaml` 写规则层的高精度模式。类别
-类别词汇由 `engine/intent/constants/` 声明（`INTENT_CLASSES` 从枚举派生），装载时与知识库逐项对齐。
+两份资产都随包发布（`engine/intent/data/`）：`taxonomy.yaml` 写各类的判定口径与
+示例句（判定模型看到的 criteria），`rules.yaml` 写规则层的高精度模式。类别词汇由
+`engine/intent/constants/` 声明（`INTENT_CLASSES` 从枚举派生），装载时与知识库逐项对齐。
 """
 from __future__ import annotations
 

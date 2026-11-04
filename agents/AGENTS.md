@@ -44,6 +44,7 @@
 ## Usage And Change Notes
 
 - **每个插件的必需文件是 `AGENT.md`（YAML frontmatter + Markdown 正文）与 `tools.py`（模块级工具列表）**；可选 `references/` 目录存放本角色的参考资料（模板等），由 `tools.py` 里的 `ReadReferenceTool` 读取——注册表不扫描该目录。
+- **有 `references/` 就必须在 `AGENT.md` 里列清单**：加一个「参考资料」节，逐个写文件名与用途。只把模板藏在目录里，模型不知道它存在，等于没给；测试会扫目录断言每个文件都被点名、且该角色装了 `read_reference`。
 - **`name` 必须与目录名一致**，`allowed_spawns` 只能引用已存在的角色。这两条注册期不校验，写错要到运行时才暴露。
 - **正文是契约，不是流程**：派发类角色用五段式（身份 / 边界 / 能力 / 交付契约 / 方法启发式），审查角色按角色裁剪。**不在 `AGENT.md` 里写跨 agent 的编排序列**——编排由 LLM 运行时自主决定。
 - **内置流程写在 `AGENT.md` 里**：写笔记、写选题计划、两套审查的具体步骤已并入对应角色的 `AGENT.md`（不再经 skill 加载）；产物模板放在该角色 `references/` 下，用 `read_reference` 读取。审查方持有写作方模板的副本，两份一致性由测试锁定。
@@ -82,7 +83,7 @@ conda run -n biopilot python -m pytest tests/agents -q
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
 - 运行时与注册：[`../biopilot/engine/AGENTS.md`](../biopilot/engine/AGENTS.md)
-- 运行时 skill 体系：[`../.biopilot/AGENTS.md`](../.biopilot/AGENTS.md)
+- 运行时 skill 体系：[`../biopilot/engine/skills/AGENTS.md`](../biopilot/engine/skills/AGENTS.md)
 
 ## References
 

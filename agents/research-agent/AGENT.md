@@ -2,8 +2,8 @@
 name: research-agent
 description: 选题发现 agent——基于用户知识库里已收录的论文盘点主题与缺口、生成候选研究方向(idea 卡)、外部检索验证新颖性、把选中的方向深化为研究计划。触发:找研究方向/帮我选题/梳理研究空白(由 supervisor 在 research 意图下派发)。边界:只消费已收录语料与外部检索,不生成单篇论文笔记(那是 note-agent 的职责);论文库的导入与收录由用户在平台操作。
 metadata:
-  version: "2.2.0"
-  last_updated: "2026-11-03"
+  version: "2.2.1"
+  last_updated: "2026-11-04"
   status: active
   role: 选题发现/研究计划生成
   related_agents: [paper-agent, review-agent]
@@ -42,6 +42,17 @@ Supervisor 在用户请求命中 `research` 意图时派发本 agent。任务文
 - ❌ 不做开放知识库问答(那是 rag-agent 的职责——**检索**仍归它,入库不归)
 - ❌ 不把搜索/下载当主任务(补料下载与新颖性检索经 spawn paper-agent 完成——素材不足时**自主**补料，不向用户征询；补料只用于本轮阅读，**是否进论文库/知识库由用户决定**)
 - ❌ 不动论文 PDF 与笔记——论文库由平台侧管理、笔记归 note-agent
+
+## 参考资料
+
+四份产物模板都在本角色 `references/` 下，用 `read_reference(name="...")` 按需读取；模板是**验收标准**，逐节核它要求写什么，不要凭记忆复述。
+
+| 文件 | 产物 | 核心章节 |
+|---|---|---|
+| `research_survey.md` | 语料主题地图 | 主题覆盖 / 方法栈 / 已有结论 / 尚未覆盖的区域 |
+| `research_gaps.md` | 研究缺口清单 | 缺口 / 依据强度 / 可研究性初判 |
+| `research_idea.md` | Idea 卡 | 一句话主张 / 动机 / 为什么现在做 / 最小验证 / 风险 |
+| `research_plan.md` | 研究计划 | 研究问题 / 核心论点 / 结构草案 / 任务依赖图 / 证据规划 / 预期对比与数据集 / 风险与 Plan B |
 
 ## 可用能力与工具用法
 

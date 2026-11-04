@@ -9,7 +9,7 @@
 | `biopilot/engine/security/` | 策略轴语义：唯一确认决策点、fail-safe 默认值、审计完整性。这里错 = 安全回归，且往往静默 |
 | `biopilot/engine/memory/` 的存储与并发语义 | SQL 是真相源：删 SQL 行、绕过持锁事务、拿摘要替换历史，都是静默数据损坏 |
 | 装配层：`biopilot/service/impl/assembly_service_impl.py`、工具注册表、`agents/*/tools.py` | 装配错 = 权限最小化被破（supervisor 拿到执行工具、领域工具装错人），且不报错 |
-| 提示层契约：`agents/*/AGENT.md`、`.biopilot/skills/` | 改坏不报错、只静默失效；任何改动必须能说出「哪个行为会因此变化」 |
+| 提示层契约：`agents/*/AGENT.md`、`biopilot/engine/intent/data/` | 改坏不报错、只静默失效；任何改动必须能说出「哪个行为会因此变化」 |
 
 ## 可跳过路径
 

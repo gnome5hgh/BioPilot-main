@@ -5,7 +5,7 @@
 `rules/`（规则层：实体抽取 + 知识库装载校验）、`services/`（判定服务客户端 + 集成缝）。
 
 集成缝是 `IntentService`（Agent 只持一个可选的它，`None` 即「关」）；类别与规则
-来自知识库 `.biopilot/intent/`，由 `rules.taxonomy.load_taxonomy` 装载并做 fail-closed 校验。
+来自包内知识库 `engine/intent/data/`，由 `rules.taxonomy.load_taxonomy` 装载并做 fail-closed 校验。
 """
 from biopilot.engine.intent.constants import INTENT_CLASSES, IntentStep, IntentType
 from biopilot.engine.intent.rules.entities import extract_entities
