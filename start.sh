@@ -72,7 +72,7 @@ log "依赖容器就绪"
 if alive "$RUN_DIR/webapi.pid"; then
   log "适配层已在跑（pid $(cat "$RUN_DIR/webapi.pid")）"
 else
-  (cd "$ROOT" && nohup "$PY_BIN" --web >"$RUN_DIR/webapi.log" 2>&1 & echo $! >"$RUN_DIR/webapi.pid")
+  (cd "$ROOT" && nohup "$PY_BIN" >"$RUN_DIR/webapi.log" 2>&1 & echo $! >"$RUN_DIR/webapi.pid")
   log "适配层启动中（日志 $RUN_DIR/webapi.log）"
 fi
 

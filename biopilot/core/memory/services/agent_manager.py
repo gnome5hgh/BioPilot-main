@@ -95,7 +95,7 @@ class AgentManager:
         Args:
             agent_id: 唯一标识符。
             user_id: 归属用户（行级隔离的键）。必填——适配层传网关携带的 user_id
-                （信任边界：内网带入即真相，引擎不二次鉴权），REPL 传 "local"。
+                （信任边界：内网带入即真相，引擎不二次鉴权）。
             name: 可选的 agent 名称（可后续更新）。
 
         Returns:
@@ -206,7 +206,7 @@ class AgentManager:
 
         Returns:
             dict 列表，每项含：
-                - agent_id: 会话标识（--resume 的目标 id）
+                - agent_id: 会话标识（会话列表与恢复的目标 id）
                 - created_at: 会话创建时间
                 - message_count: 该会话落盘消息总数
                 - preview: 首条用户消息的截断预览（无消息则为空串）

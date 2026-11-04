@@ -9,7 +9,7 @@ from biopilot.core.tool.services.runtime_context import get_memory_context
 
 
 def current_user_id() -> str:
-    """取当前 run 的归属用户；未绑定上下文时回退 ``local``（REPL/单机）。"""
+    """取当前 run 的归属用户；未绑定上下文时回退 ``local``（单机脚本/测试）。"""
     ctx = get_memory_context()
     return str(getattr(ctx, "user_id", None) or "local")
 

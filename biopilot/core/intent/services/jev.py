@@ -175,8 +175,7 @@ class JevClient:
                         instructions: str) -> dict:
         """发一次 `/evaluate` 并返回响应 JSON；失败抛 JevUnavailable。
 
-        每次调用新建一个 `AsyncClient`：客户端不做跨调用复用，是因为探测发生在
-        CLI 启动（`asyncio.run` 的临时循环）而真实判定发生在 REPL 的主循环里——
+        每次调用新建一个 `AsyncClient`：探测与真实判定可能发生在不同的时间点，
         跨事件循环复用连接池是错的，而这个层每轮最多一次调用，重连成本可忽略。
 
         Args:

@@ -729,24 +729,6 @@ class MemoryConfig:
 
 
 @dataclass
-class SessionConfig:
-    """会话恢复配置。
-
-    Attributes:
-        resume_replay: bool，--resume 时是否把历史回放进终端滚动区
-        resume_replay_limit: int，回放条数上限（0 = 整窗）
-    """
-
-    #: 会话恢复时把历史对话回放进终端滚动区。--resume 恢复的是模型上下文，
-    #: 屏幕上否则不留任何痕迹（用户会以为恢复失败）；见 terminal/resume.py。
-    #: 置 False 则只恢复上下文、不显示历史。
-    resume_replay: bool = True
-
-    #: 回放条数上限（取窗口末尾 N 条）。0 = 回放整个 in-context 窗口。
-    resume_replay_limit: int = 0
-
-
-@dataclass
 class AgentsConfig:
     """子 agent 配置。
 

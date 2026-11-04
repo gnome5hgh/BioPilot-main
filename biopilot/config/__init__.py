@@ -57,7 +57,6 @@ from biopilot.config.schemas.sections import (
     RerankConfig,
     RetrieverConfig,
     RuntimeConfig,
-    SessionConfig,
     MinioConfig,
     StorageConfig,
     VisionLLMConfig,
@@ -88,6 +87,5 @@ __all__ = [
     "StorageConfig",
     "RagToolsConfig",
     "MemoryConfig",
-    "SessionConfig",
     "AgentsConfig",
 ]

@@ -44,6 +44,8 @@
 ## 关键入口
 
 - `app.py` — `create_app()` 工厂；对话流、会话、知识库、终端、内部端点。
+- `assembly.py` — `assemble_web_session()`：唯一的会话对象图装配（配置 → 记忆 → 安全 → 意图 → Agent）。
+- `entry.py` — 进程入口：`biopilot` / `python -m biopilot`，`config` 子命令或启动 Web 适配层。
 - `shell.py` — 按 `user_id` 复用的宿主终端 PTY 会话。
 
 ## 测试

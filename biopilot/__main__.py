@@ -1,5 +1,5 @@
-"""python -m biopilot — 启动交互式 CLI REPL。"""
-from biopilot.cli import main
+"""python -m biopilot — 启动 Web 适配层。"""
+from biopilot.webapi.entry import main
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

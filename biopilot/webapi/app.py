@@ -4,7 +4,7 @@ SSE 桥接约定：
     - 事件帧：``data: {"type": "token"|"tool"|"round"|"done"|"error", ...}``
     - 流结束帧 type=done 恒发出（含异常路径）——客户端据此判断可复用连接。
     - 客户端断开（Request.is_disconnected）→ 取消 run（复用 Agent 的取消级联，
-      与 REPL Ctrl-C 同路径），不留悬挂任务占会话运行锁。
+      与用户取消同一路径），不留悬挂任务占会话运行锁。
 
 装配策略：进程内字典按 (user_id, conversation_id) 缓存
 Agent 实例，工厂函数 ``agent_factory`` 可注入替换（测试用 fake Agent 直打 S1 缝）。
@@ -621,7 +621,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
                     # 全局并发闸（run 粒度）：多用户在途 run 总上限，批量派发占不满外部资源
                     async with llm_gate:
                         answer = await agent.run(task, stream_callback=on_event)
-                    # 轮末整合：与 REPL 同语义（一轮对话结束 → 沉淀进记忆）；
+                    # 轮末整合：一轮对话结束 → 沉淀进记忆；
                     # 只 enqueue，防抖与游标推进由队列/DB 锁自理
                     queue = getattr(agent, "_consolidation_queue", None)
                     if queue is not None:
@@ -641,7 +641,7 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
             run_handle: asyncio.Task | None = None
 
             async def watch_disconnect() -> None:
-                """客户端断开 → 取消 run（复用取消级联，与 REPL Ctrl-C 同路径）。"""
+                """客户端断开 → 取消 run（复用取消级联，与用户取消同一路径）。"""
                 while True:
                     if await request.is_disconnected():
                         if run_handle is not None:
@@ -1071,11 +1071,11 @@ def create_app(agent_factory=None, config: WebConfig | None = None) -> FastAPI:
 async def _default_agent_factory(user_id: str, conversation_id: str,
                                  confirm_callback=None, project_id: str | None = None):
     # 模型选择读模块级 user_models（端点写入）——不进工厂签名，注入替身契约不变
-    """真实装配：委托 assembly 的 web 会话装配（与 REPL 同一套对象图）。
+    """真实装配：委托 webapi.assembly 装配一次 Web 会话。
 
     确认回调与项目归属原样透传——确认走 SSE 往返、project_id 进 agent_state。
     """
-    from biopilot.cli.services.assembly import assemble_web_session
+    from biopilot.webapi.assembly import assemble_web_session
     session = await assemble_web_session(user_id, conversation_id,
                                          confirm_callback=confirm_callback,
                                          project_id=project_id,

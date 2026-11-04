@@ -28,7 +28,7 @@ def _store(config: BioPilotConfig):
 
 
 def _updated_by() -> str:
-    """命令行操作人：优先取终端注入的用户，否则记为 cli。"""
+    """命令行操作人：优先取环境变量指定的用户，否则记为 cli。"""
     return os.environ.get("BIOPILOT_USER_ID") or "cli"
 
 

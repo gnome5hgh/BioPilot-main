@@ -8,7 +8,7 @@ MCP 多源与管理员新增检索源都在 Java 侧实现。下载用 FetchPdfT
 需要用户拿主意时把问题写进最终回答（问用户不需要工具），不自行猜。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.cli.services.tool_assembly import make_tools
+from biopilot.tools.assembly import make_tools
 from biopilot.tools import (
     FetchPdfTool, DeleteFileTool, GlobTool, GrepTool, ReadPdfTool,
     SearchLiteratureTool,

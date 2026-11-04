@@ -83,7 +83,6 @@ GROUP_LAYOUT: list[dict[str, str]] = [
     {"key": "agents", "label": "子代理", "description": "各角色的超时与 ReAct 轮数预算。"},
     {"key": "runtime", "label": "运行时", "description": "多模型清单、安全档位与网页终端开关。"},
     {"key": "platform", "label": "平台后端", "description": "Java 平台内部调用的超时参数。"},
-    {"key": "session", "label": "终端会话", "description": "REPL 恢复时的历史回放行为。"},
     {"key": "bootstrap", "label": "部署引导", "description": "由环境变量提供、页面只读；换部署时在这里核对。"},
 ]
 
@@ -116,9 +115,6 @@ SECTION_LAYOUT: dict[str, list[dict[str, str]]] = {
     ],
     "memory": [
         {"key": "memory", "label": "记忆整合", "description": "轮末后台整合的开关与节流。"},
-    ],
-    "session": [
-        {"key": "session", "label": "终端恢复", "description": "只影响 REPL；网页会话不受影响。"},
     ],
     "agents": [
         {"key": "agents", "label": "子代理预算", "description": "表内没有的角色使用类默认值。"},
@@ -243,12 +239,10 @@ FIELD_META: dict[str, dict[str, str]] = {
     "rag.storage.minio.bucket": {"label": "对象存储桶"},
     "rag.storage.minio.secure": {"label": "MinIO TLS"},
     "rag.tools.excerpt_chars": {"label": "摘要字符数"},
-    # ── memory / session / agents ──
+    # ── memory / agents ──
     "memory.consolidation_enabled": {"label": "启用记忆整合"},
     "memory.debounce_seconds": {"label": "静默窗口（秒）"},
     "memory.max_delay_seconds": {"label": "最大延迟（秒）"},
-    "session.resume_replay": {"label": "终端回放历史"},
-    "session.resume_replay_limit": {"label": "回放条数上限", "help": "0 = 回放整个窗口。"},
     "agents.timeouts": {"label": "子代理超时", "help": "JSON 对象：角色名 → 秒数；表外角色用类默认值。"},
     "agents.max_turns": {"label": "子代理轮数", "help": "JSON 对象：角色名 → ReAct 轮数上限。"},
     # ── compaction ──
@@ -309,7 +303,6 @@ _NUMERIC_RULES: dict[str, tuple[float | None, float | None, bool]] = {
     "rag.tools.excerpt_chars": (0, None, False),
     "memory.debounce_seconds": (0, None, False),
     "memory.max_delay_seconds": (0, None, False),
-    "session.resume_replay_limit": (0, None, False),
     "compaction.keep.value": (0, None, False),
     "compaction.trim_tokens_to_summarize": (0, None, False),
     "compaction.summary_max_words": (1, None, False),

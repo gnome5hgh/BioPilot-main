@@ -56,7 +56,7 @@ def set_memory_context(ctx: MemoryToolsContext | None):
     """绑定当前任务（及其子任务）的记忆上下文，返回复位令牌。
 
     调用方若在嵌套场景（run 内 spawn 的子 run）绑定，收尾必须用返回的 token
-    调 ContextVar.reset 还原外层绑定；顶层绑定（装配期/单会话 REPL）可不复位。
+    调 ContextVar.reset 还原外层绑定；顶层绑定（装配期/单会话进程）可不复位。
 
     Args:
         ctx: MemoryToolsContext | None，要绑定的上下文；None 清空（测试隔离用）

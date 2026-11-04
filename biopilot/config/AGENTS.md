@@ -47,7 +47,7 @@
 - `services/schema.py` 的 `build_schema` / `validate_patches` — 设置页契约与写入校验
 - `services/store.py` 的 `ConfigStore` — MySQL 持久化、加密、历史
 - `biopilot/webapi/settings.py` — 设置接口的服务端逻辑
-- `biopilot/cli/services/config_cli.py` — `biopilot config import|export|history|rollback`
+- `biopilot/config/services/cli.py` — `biopilot config import|export|history|rollback`
 
 ## Usage And Change Notes
 
@@ -58,7 +58,7 @@
 
 ## Dependencies And Collaboration
 
-- 被 `cli/`（装配）、`core/` 各子包、`tools/`、`terminal/`、`webapi/` 读取；本包不依赖它们中的任何一个（`store.py` 只依赖 `core/memory/storage/database.py` 的连接池）。
+- 被 `webapi/`（入口与装配）、`core/` 各子包、`tools/` 读取；本包不依赖它们中的任何一个（`store.py` 只依赖 `core/memory/storage/database.py` 的连接池）。
 - 存储表归引擎所有：DDL 在 `core/memory/storage/database.py` 的 `_SCHEMA` 里，不在 `server/script/sql/`。
 
 ## Investigation Rule
@@ -89,7 +89,7 @@ conda run -n biopilot python -m pytest tests/core/test_config.py tests/core/test
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 装配方：[`../cli/AGENTS.md`](../cli/AGENTS.md)
+- 装配方：[`../webapi/AGENTS.md`](../webapi/AGENTS.md)
 - 设置接口：[`../webapi/AGENTS.md`](../webapi/AGENTS.md)
 - 运行层的组件参数：[`../core/AGENTS.md`](../core/AGENTS.md)
 

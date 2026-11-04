@@ -5,8 +5,8 @@
 
 - 构造期：中间件链、agent_type / session_id / instance_id / has_human_confirm；
 - 调用期传入：`tools`、`confirm_callback`、`stream_sink` —— 这三样在真实流程里会被构造后
-  替换（spawn 用 `_wrap_confirm_callback` 把用户确认等待排除出超时预算；REPL 在
-  renderer 造好之后才把流式回调挂到 supervisor；测试直接整表换 `tools`）。按值
+  替换（spawn 用 `_wrap_confirm_callback` 把用户确认等待排除出超时预算；Web 适配层在
+  装配好之后才把流式回调挂到 supervisor；测试直接整表换 `tools`）。按值
   捕获会拿到过期引用，所以每次调用由调用方现取现传。
 
 管道主体是「查工具 → 解析参数 → 引用形状校验 → before 钩子 → 执行 → 逆序 after 钩子
@@ -110,7 +110,7 @@ class ToolExecutor:
                 标准输入并发读会竞态）；None = 非并发路径
             tools: dict，本次调用的工具表（调用方现取——它可能被整表替换）
             confirm_callback: 用户确认回调（调用方现取——spawn 会把它包一层）
-            stream_sink: 事件回调（调用方现取——REPL 在构造之后才挂上）；None 时
+            stream_sink: 事件回调（调用方现取——Web 适配层在装配之后才注入）；None 时
                 零开销：既不解析参数用于展示，也不发事件
 
         Returns:

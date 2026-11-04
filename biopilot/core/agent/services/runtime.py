@@ -168,7 +168,7 @@ class Agent:
         intent_service: "IntentService | None" = None,
         session_id: str | None = None,
         conversation_id: str | None = None,
-        user_id: str = "local",   # 归属用户（行级隔离）；REPL 默认本地，spawn 显式继承父值
+        user_id: str = "local",   # 归属用户（行级隔离）；单机脚本默认 local，spawn 显式继承父值
         memory=None,                # Memory | None
         agent_manager=None,         # AgentManager | None
         block_manager=None,         # BlockManager | None
@@ -326,7 +326,7 @@ class Agent:
 
         #: 工具执行管道（中间件洋葱 + 三把锁 + 参数解析 + tool_end 收口）。
         #: 只注入构造后不变的依赖；tools / confirm_callback / 流式回调在调用期现取
-        #: ——它们会被替换（spawn 包装确认回调、REPL 之后挂渲染器、测试换工具表）。
+        #: ——它们会被替换（spawn 包装确认回调、Web 适配层注入流式回调、测试换工具表）。
         self.tool_executor = ToolExecutor(
             middleware=self.security_middleware,
             agent_type=self.agent_type,
@@ -548,7 +548,7 @@ class Agent:
         """
         执行 ReAct 循环（跨进程会话运行互斥的入口），返回 LLM 的最终文本回答。
 
-        同一会话（conversation_id）被两路并发触达（网页双开标签、网页与 REPL 同发）
+        同一会话（conversation_id）被两路并发触达（网页双开标签、多实例同发）
         时，持 MySQL 命名锁 `run:{conversation_id}` 串行化：拿不到锁的一方按
         「错误一律降级为文本」红线返回「会话正在运行中」提示，绝不交错执行——
         两个 run 交错会互相踩掉 in-context 窗口与消息落盘。锁覆盖 run 本体全
@@ -627,7 +627,7 @@ class Agent:
 
         多会话进程（web 适配层）里每个 Agent 持有自己的 MemoryToolsContext：
         绑定用 ContextVar、finally 复位——嵌套 spawn 的子 run 各绑各的、退出
-        还原父绑定；单会话 REPL 语义不变（绑定值即装配期那一份）。
+        还原父绑定；单会话进程语义不变（绑定值即装配期那一份）。
 
         Args:
             task: 用户任务文本。
