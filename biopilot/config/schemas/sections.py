@@ -4,7 +4,7 @@
 真相源是 MySQL 的 ``bio_config``（设置页写入稀疏覆盖），环境变量优先级最高；
 ``config.yaml`` 只保留启动引导项。分区与配置路径顶层同名：
 ``runtime`` / ``platform`` / ``corpus`` / ``intent`` / ``rag{...}`` / ``memory`` /
-``session`` / ``agents`` / ``security`` / ``compaction``，外加保留顶层的
+``agents`` / ``security`` / ``compaction``，外加保留顶层的
 ``llm`` / ``vision``。
 
 加载与派生逻辑在 ``loader.py``（递归合并、env 派生、数据库覆盖），字段描述与
@@ -582,7 +582,7 @@ class RagConfig:
     store_images: bool = True
 
 
-# ── memory / session / agents ───────────────────────────────────────────────
+# ── memory / agents ─────────────────────────────────────────────────────────
 
 #: 压缩计量方式的合法取值（schema 校验与 ContextSize 共用，避免两处枚举漂移）。
 CONTEXT_SIZE_TYPES = ("tokens", "messages", "fraction")

@@ -25,7 +25,8 @@ def main(argv: list[str] | None = None) -> int:
         prog="biopilot",
         description="BioPilot 引擎 Web 适配层（HTTP/SSE）",
         epilog="配置管理：biopilot config import|export|history|rollback")
-    parser.parse_args(raw)
+    # 只为 --help 与参数校验；入口不接受业务旗标，结果不参与分派
+    _ = parser.parse_args(raw)
 
     from biopilot.webapi import run_server
     run_server()

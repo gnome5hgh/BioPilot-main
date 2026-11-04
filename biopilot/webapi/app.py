@@ -1123,7 +1123,7 @@ async def _execute_scheduled(user_id: str, conversation_id: str, task: str,
 
 
 def run_server(config: WebConfig | None = None) -> None:
-    """阻塞启动 uvicorn（`biopilot web` 子命令的实现体）。"""
+    """阻塞启动 uvicorn（`biopilot` / `python -m biopilot` 的实现体）。"""
     import uvicorn
     from biopilot.config import enable_db_source, ensure_legacy_import
 

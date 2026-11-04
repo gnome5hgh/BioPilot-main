@@ -62,9 +62,9 @@ BioPilot/
 
 ## 环境与依赖
 
-- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。可在设置页填写（加密存 `bio_config_secret`），也可走环境变量。LLM key 留空即启动 fail-fast；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
+- 两类 API key 都必须由用户提供：LLM（`llm.api_key` / `BIOPILOT_LLM_API_KEY`）、RAG 嵌入与精排（`rag.embedding.api_key` / `BIOPILOT_RAG_EMBEDDING_API_KEY`）。可在设置页填写（加密存 `bio_config_secret`），也可走环境变量。LLM key 留空时首次会话装配失败（进程仍可启动，便于在设置页补配）；RAG key 留空不崩，但检索退纯 BM25、索引明确报错、图表视觉描述不可用。
 - `corpus.analysis_dir` / `corpus.research_dir` 这类**个人路径没有默认值、必须显式配**（留空则回落到 `<workspace>/analysis` / `<workspace>/research`）。用户给不出就如实说，不要猜、不要填占位值、不要静默跳过。笔记与论文**不落本地语料目录**：笔记定稿进文档编辑器，论文由平台 OSS + `bio_file`（paper 行）提供。
-- 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 与 LLM key 是**硬依赖**：不可达/未配置即启动 fail-fast（真相源不能静默降级）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
+- 检索栈（Milvus/MinIO）是**软依赖**：不可达只警告降级、不阻塞启动；记忆库 MySQL 是**硬依赖**：不可达即启动 fail-fast；LLM key 未配置时首次会话装配失败（不阻塞设置页）。单测连 compose 的 biopilot-mysql（`biopilot_test` 库）；`scripts/rag/rag_eval/` 的评测要连 Standalone 与 MinIO。
 
 ## 仓库职责
 

@@ -17,6 +17,7 @@
 - `services/loader.py` — 加载链（默认值 < `bio_config` < `config.yaml` 引导层 < env）、递归合并、env 派生、路径绝对化
 - `services/schema.py` — 字段描述（路径/标签/类型/密钥/重启标识）、引导层白名单、写入校验
 - `services/store.py` — `bio_config` / `bio_config_secret` / `bio_config_history` 的读写、AES-GCM 密钥加密、乐观锁、历史回滚、旧 YAML 导入
+- `services/cli.py` — `biopilot config import|export|history|rollback` 运维命令
 
 ## Responsibilities
 
