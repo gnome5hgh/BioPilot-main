@@ -10,9 +10,7 @@ from biopilot.engine.memory.schemas.stored_message import StoredMessage
 from biopilot.engine.memory.schemas.agent import AgentState
 from biopilot.engine.memory.domain.dto.memory_edit import MemoryEdit
 from biopilot.engine.memory.domain.dto.memory_edit_batch import MemoryEditBatch
-from biopilot.engine.memory.domain.entity.compaction_result import CompactionResult
 from biopilot.engine.memory.domain.entity.summary import Summary
-from biopilot.engine.memory.domain.entity.task_snapshot import TaskSnapshot
 from biopilot.engine.memory.storage.database import MemoryDB
 from biopilot.engine.memory.services.block_manager import BlockManager
 from biopilot.engine.memory.services.message_manager import MessageManager
@@ -26,7 +24,7 @@ __all__ = [
     "BaseBlock", "Block", "Memory", "StoredMessage",
     "AgentState", "MemoryDB",
     "MemoryEdit", "MemoryEditBatch",
-    "CompactionResult", "Summary", "TaskSnapshot",
+    "Summary",
     "BlockManager", "MessageManager",
     "AgentManager",
     "CompactionSettings", "ContextSize", "MemoryConsolidator", "constants",

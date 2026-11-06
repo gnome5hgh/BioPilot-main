@@ -683,7 +683,7 @@ class Agent:
             3. 从 MessageManager 加载该会话的 in-context 消息（跨轮回放），当前
                user task 落盘；消息归属 self.window（in-context 窗口）
             4. 调用 LLM 前检查压缩（compaction.should_compress → run_compaction
-               驱逐旧对话 + 插摘要与任务快照，只改 in-context 窗口、不删 SQL），随后调用 LLM
+               驱逐旧对话 + 插摘要（含第 9、10 节边界），只改 in-context 窗口、不删 SQL），随后调用 LLM
             5. 如果无 tool_calls → 顺序执行各中间件的 on_finish 钩子，最终回答
                落盘后返回改写后的 content（LLM 判定任务完成）
             6. 如果有 tool_calls → 并发执行（gather，结果按调用顺序返回），将
@@ -733,9 +733,9 @@ class Agent:
             #: 末尾当前 user task(恒末位——否则 LLM 会把回放历史里的旧任务误当当前任务)。
             messages = list(head[:-1]) + self.window.messages + [head[-1]]
 
-            # 压缩检查:只改 in-context 窗口(驱逐旧对话 + 插摘要 + 追加任务快照),
+            # 压缩检查:只改 in-context 窗口(驱逐旧对话 + 插摘要),
             # SQL 原始消息由 MessageManager 保留(供审计/排障)。取用户原话、
-            # 生成摘要与快照、失败降级全部在 run_compaction 内部完成。
+            # 生成摘要(含第 9、10 节边界)、失败降级全部在 run_compaction 内部完成。
             # structured 未注入(摘要生成器缺失) 时压缩不触发,避免无谓的失败重试。
             if self._needs_compaction(messages) and self.structured is not None:
                 # 截断续写与压缩重建互斥:压缩可能驱逐"半截+续写提示"(in-context 重建),先弃掉累积器里的半截——续写无参照即完整重答,避免「半截 + 完整重答」重复交付。
@@ -745,15 +745,15 @@ class Agent:
                     self.window.messages, self.compaction, self.structured,
                     context_window=self.llm.context_window,
                     summary_structured=self.summary_structured)
-                # 整体替换窗口：摘要与快照先落盘、id 列表更新为「摘要 + 保留尾部 +
-                # 快照」——压缩产物跨轮持久，下轮回放摘要、不回放被驱逐旧消息
+                # 整体替换窗口：摘要先落盘、id 列表更新为「摘要 + 保留尾部」——
+                # 压缩产物跨轮持久，下轮回放摘要、不回放被驱逐旧消息
                 # (SQL 原始消息仍全量保留，供审计/排障)。「认领旧 id」与「替换」的
                 # 先后关系封在 replace 内。摘要失败时的确定性降级已在
                 # run_compaction 内部处理，这里只负责把结果写回。
                 if new_window is not None:
                     self.window.replace(new_window)
 
-                # 重新组装，让本轮刚产出的摘要与快照立刻生效。
+                # 重新组装，让本轮刚产出的摘要（含边界节）立刻生效。
                 messages = list(head[:-1]) + self.window.messages + [head[-1]]
 
             # 流式门控：挂了 stream_callback 才走 chat_stream（否则保持 chat()）。
