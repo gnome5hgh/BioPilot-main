@@ -3,6 +3,7 @@ package com.biopilot.file.mapper;
 import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.biopilot.file.domain.BioFile;
+import com.biopilot.file.domain.PaperIndexStatus;
 import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
@@ -111,6 +112,12 @@ public interface BioFileMapper extends BaseMapper<BioFile> {
     List<BioFile> listForAgent(@Param("userId") String userId,
                                @Param("kind") String kind,
                                @Param("limit") int limit);
+
+    /** 引擎索引状态表的跨栈只读（唯一落点与写者在引擎；展示用）。 */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT paper_id, indexed, index_status, index_error, indexed_at,"
+            + " chunk_count FROM bio_rag_paper_status WHERE user_id=#{userId}")
+    List<PaperIndexStatus> listPaperStatusForAgent(@Param("userId") String userId);
 
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT * FROM bio_file WHERE user_id=#{userId}"

@@ -68,15 +68,21 @@ class CatalogFlowTest {
                 + "run_id VARCHAR(64) NULL, conversation_id VARCHAR(64) NULL,"
                 + "title VARCHAR(500) NULL, authors VARCHAR(1000) NULL,"
                 + "year VARCHAR(10) NULL, journal VARCHAR(300) NULL,"
-                + "kb_enabled TINYINT NULL, indexed INTEGER NULL,"
-                + "index_status VARCHAR(20) NULL, index_error VARCHAR(500) NULL,"
-                + "indexed_at VARCHAR(40) NULL, chunk_count INT NULL,"
+                + "kb_enabled TINYINT NULL,"
                 + "citation_id VARCHAR(64) NULL, created_at VARCHAR(40) NOT NULL,"
                 + "updated_at VARCHAR(40) NULL, seq BIGINT NOT NULL AUTO_INCREMENT,"
                 + "PRIMARY KEY (id), UNIQUE KEY uk_file_seq (seq),"
                 + "UNIQUE KEY uk_file_name (user_id, name_key),"
                 + "KEY idx_file_user_kind (user_id, kind, seq),"
-                + "KEY idx_file_kb (user_id, kind, kb_enabled, index_status))");
+                + "KEY idx_file_kb (user_id, kind, kb_enabled))");
+        // 引擎侧索引状态表：清单/概览只读它（唯一落点在引擎）
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_rag_paper_status ("
+                + "user_id VARCHAR(191) NOT NULL, paper_id VARCHAR(64) NOT NULL,"
+                + "index_status VARCHAR(20) NOT NULL, indexed TINYINT NOT NULL DEFAULT 0,"
+                + "index_error VARCHAR(500) NULL, indexed_at VARCHAR(40) NULL,"
+                + "chunk_count INT NOT NULL DEFAULT 0, updated_at VARCHAR(40) NOT NULL,"
+                + "PRIMARY KEY (user_id, paper_id),"
+                + "KEY idx_paper_status_state (user_id, index_status))");
         jdbc.execute("CREATE TABLE IF NOT EXISTS bio_oss_gc ("
                 + "id BIGINT NOT NULL AUTO_INCREMENT, oss_key VARCHAR(500) NOT NULL,"
                 + "reason VARCHAR(32) NOT NULL, attempts INT NOT NULL DEFAULT 0,"
@@ -97,6 +103,7 @@ class CatalogFlowTest {
 
     private void truncateAll() {
         jdbc.execute("TRUNCATE TABLE bio_file");
+        jdbc.execute("TRUNCATE TABLE bio_rag_paper_status");
         jdbc.execute("TRUNCATE TABLE bio_oss_gc");
     }
 
@@ -222,7 +229,7 @@ class CatalogFlowTest {
 
     @Test
     @Order(5)
-    void kb_overview_counts_come_from_platform_table() {
+    void kb_overview_counts_come_from_engine_status_table() {
         String token = tokenFor("catalog-kb");
         long uid = jdbc.queryForObject(
                 "SELECT user_id FROM sys_user WHERE user_name=?", Long.class, "catalog-kb");
@@ -249,7 +256,7 @@ class CatalogFlowTest {
         assertThat(body.get("queued")).isEqualTo(1);
         assertThat(body.get("failed")).isEqualTo(1);
         assertThat(body.get("not_added")).isEqualTo(1);
-        // 未勾选行即使残留 chunk_count/indexed 也不计入统计
+        // 未勾选行即使状态行残留 indexed/chunk_count 也不计入统计（勾选是展示真相）
         assertThat(body.get("chunks")).isEqualTo(12);
         assertThat(body.get("last_indexed_at")).isEqualTo("2026-01-02T00:00:00Z");
         assertThat(body.get("collection")).isEqualTo("biopilot_" + uid);
@@ -265,15 +272,20 @@ class CatalogFlowTest {
 
     private void insertKbPaper(String id, long userId, int kb, String status,
                                String indexedAt, int chunks) {
+        // bio_file 只造勾选与身份列；索引状态落在引擎状态表（清单/概览 LEFT JOIN 读它）
         jdbc.update("INSERT INTO bio_file (id, user_id, kind, name, name_key, oss_key,"
                         + " size_bytes, content_type, version, source, title,"
-                        + " indexed, kb_enabled, index_status, indexed_at,"
-                        + " chunk_count, created_at, updated_at)"
-                        + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        + " kb_enabled, created_at, updated_at)"
+                        + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 id, String.valueOf(userId), "paper", id + ".pdf", (id + ".pdf").toLowerCase(),
                 "users/" + userId + "/papers/" + id + "/a.pdf", 10,
-                "application/pdf", 1, "paper", "t",
-                "indexed".equals(status) ? 1 : 0, kb, status, indexedAt, chunks,
+                "application/pdf", 1, "paper", "t", kb,
                 "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+        jdbc.update("INSERT INTO bio_rag_paper_status (user_id, paper_id, index_status,"
+                        + " indexed, indexed_at, chunk_count, updated_at)"
+                        + " VALUES (?,?,?,?,?,?,?)",
+                String.valueOf(userId), id, status,
+                "indexed".equals(status) ? 1 : 0, indexedAt, chunks,
+                "2026-01-01T00:00:00Z");
     }
 }

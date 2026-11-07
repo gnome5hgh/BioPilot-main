@@ -140,9 +140,24 @@ public class AgentInternalClient {
         return get("/internal/kb/runtime", userId, Duration.ofSeconds(2));
     }
 
-    /** 唤醒索引器：状态已由 Java 在数据库里写好，这里只触发一次扫描。 */
+    /** 唤醒索引器：索引状态由引擎在自己的状态表里维护，这里只触发一次扫描。 */
     public void kbSync(long userId) {
         post("/internal/kb/sync", userId, Map.of());
+    }
+
+    /**
+     * 唤醒索引器并携带要重排为 queued 的论文（索引状态唯一落点在引擎侧）。
+     *
+     * @param userId          归属用户。
+     * @param retryPaperIds   用户显式重试的论文（通常是 failed）。
+     * @param requeuePaperIds 标题变更等需要重建的论文。
+     */
+    public void kbSync(long userId, java.util.List<String> retryPaperIds,
+                       java.util.List<String> requeuePaperIds) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("retry_paper_ids", retryPaperIds == null ? java.util.List.of() : retryPaperIds);
+        body.put("requeue_paper_ids", requeuePaperIds == null ? java.util.List.of() : requeuePaperIds);
+        post("/internal/kb/sync", userId, body);
     }
 
     /**

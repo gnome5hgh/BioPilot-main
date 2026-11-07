@@ -19,12 +19,7 @@ CREATE TABLE IF NOT EXISTS bio_file (
     authors         VARCHAR(1000) NULL COMMENT '论文作者',
     year            VARCHAR(10)  NULL COMMENT '论文年份',
     journal         VARCHAR(300) NULL COMMENT '论文期刊/会议',
-    kb_enabled      TINYINT      NULL COMMENT '是否加入知识库（仅 paper）',
-    indexed         INTEGER      NULL COMMENT '兼容字段：1=已进知识库且索引成功',
-    index_status    VARCHAR(20)  NULL COMMENT '索引状态（仅 paper）',
-    index_error     VARCHAR(500) NULL COMMENT '最近一次索引失败原因',
-    indexed_at      VARCHAR(40)  NULL COMMENT '最近一次索引成功时间',
-    chunk_count     INT          NULL COMMENT '分块数',
+    kb_enabled      TINYINT      NULL COMMENT '是否加入知识库（仅 paper；索引状态在引擎的 bio_rag_paper_status）',
     citation_id     VARCHAR(64)  NULL COMMENT '引用库行 id（仅 paper）',
     created_at      VARCHAR(40)  NOT NULL COMMENT '创建时间',
     updated_at      VARCHAR(40)  NULL COMMENT '更新时间',
@@ -34,7 +29,7 @@ CREATE TABLE IF NOT EXISTS bio_file (
     UNIQUE KEY uk_file_name (user_id, name_key),
     KEY idx_file_user_kind (user_id, kind, seq),
     KEY idx_file_run (user_id, run_id),
-    KEY idx_file_kb (user_id, kind, kb_enabled, index_status)
+    KEY idx_file_kb (user_id, kind, kb_enabled)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一文件表';
 
 CREATE TABLE IF NOT EXISTS bio_oss_gc (

@@ -2,24 +2,21 @@ package com.biopilot.kb.service.impl;
 
 import com.biopilot.common.web.http.AgentInternalClient;
 import com.biopilot.file.service.PaperRequeueHook;
-import com.biopilot.kb.service.KbStateService;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
-/** 文件域标题变化 → 知识库域重排该篇并唤醒引擎。 */
+/** 文件域标题变化 → 通知引擎把该篇重排为 queued 并唤醒索引（状态落点在引擎表）。 */
 @Component
 public class KbPaperRequeueHook implements PaperRequeueHook {
 
-    private final KbStateService state;
     private final AgentInternalClient internal;
 
-    public KbPaperRequeueHook(KbStateService state, AgentInternalClient internal) {
-        this.state = state;
+    public KbPaperRequeueHook(AgentInternalClient internal) {
         this.internal = internal;
     }
 
     @Override
     public void onPaperTitleChanged(long userId, String paperId) {
-        state.requeue(String.valueOf(userId), paperId);
-        internal.kbSync(userId);
+        internal.kbSync(userId, List.of(), List.of(paperId));
     }
 }

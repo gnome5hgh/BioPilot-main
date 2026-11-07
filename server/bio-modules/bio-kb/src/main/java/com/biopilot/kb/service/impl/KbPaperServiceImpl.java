@@ -12,20 +12,25 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 /**
- * 知识库勾选与清单：直接操作 {@code bio_paper} 的 kb 列。
+ * 知识库勾选与清单：Java 只写勾选真相 {@code kb_enabled}，索引状态一律只读。
  *
- * <p>这里用显式 {@code user_id} 的 SQL 而不是 MyBatis 租户插件，与
- * {@code KbStateService} 同一套写法：知识库状态的读写方包括引擎内部调用，
- * 没有浏览器登录态，租户插件不可依赖。</p>
+ * <p>索引状态（排队/索引中/成功/失败、块数）的唯一落点是引擎的
+ * {@code bio_rag_paper_status} 表（引擎独占写），本模块清单查询以 LEFT JOIN
+ * 带出用于展示；重试与标题变更重建经 {@code /internal/kb/sync} 携带论文 id
+ * 通知引擎，由引擎改自己的状态表。这里用显式 {@code user_id} 的 SQL 而不是
+ * MyBatis 租户插件，与跨栈只读引擎表的登记约定一致。</p>
  */
 @Service
 public class KbPaperServiceImpl implements KbPaperService {
 
     private static final String SELECT_PAPERS =
-            "SELECT id, title, name AS file_name, oss_key, size_bytes, indexed, kb_enabled,"
-                    + " citation_id, authors, year, journal, index_status, index_error,"
-                    + " indexed_at, chunk_count, created_at"
-                    + " FROM bio_file WHERE kind='paper' AND user_id=? ORDER BY seq DESC";
+            "SELECT f.id, f.title, f.name AS file_name, f.oss_key, f.size_bytes,"
+                    + " s.indexed, f.kb_enabled, f.citation_id, f.authors, f.year,"
+                    + " f.journal, s.index_status, s.index_error, s.indexed_at,"
+                    + " s.chunk_count, f.created_at"
+                    + " FROM bio_file f LEFT JOIN bio_rag_paper_status s"
+                    + " ON s.user_id=f.user_id AND s.paper_id=f.id"
+                    + " WHERE f.kind='paper' AND f.user_id=? ORDER BY f.seq DESC";
 
     private final JdbcTemplate jdbc;
     private final AgentInternalClient internal;
@@ -75,36 +80,41 @@ public class KbPaperServiceImpl implements KbPaperService {
         if (ids.isEmpty()) {
             return 0;
         }
-        List<Object> args = new ArrayList<>();
-        args.add(String.valueOf(userId));
-        args.addAll(ids);
-        int count = jdbc.update(
-                "UPDATE bio_file SET index_status='queued', index_error=NULL"
-                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
-                        + " AND id IN (" + placeholders(ids.size()) + ")",
-                args.toArray());
-        internal.kbSync(userId);
-        return count;
+        // 重试 = 通知引擎把状态行重排为 queued（状态唯一落点在引擎表）。
+        // 返回值是「确在本人知识库里的论文数」——不存在/未勾选的 id 不冒充成功；
+        // 引擎侧是否重排成功由状态表展示，这里只对通知范围负责。
+        Integer known = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM bio_file WHERE kind='paper' AND user_id=?"
+                        + " AND kb_enabled=1 AND id IN (" + placeholders(ids.size()) + ")",
+                Integer.class, prepended(String.valueOf(userId), ids).toArray());
+        internal.kbSync(userId, ids, List.of());
+        return known == null ? 0 : known;
     }
 
-    /** 勾选与状态复位同一条 UPDATE：移出时把索引派生列一起清空。 */
+    /** user_id 打头的参数列表（IN 查询的实参顺序：先 user_id 再 ids）。 */
+    private static List<Object> prepended(String userId, List<String> ids) {
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        args.addAll(ids);
+        return args;
+    }
+
+    /** 勾选迁移只写 kb_enabled；索引派生状态由引擎在自己的表里收敛。 */
     private int updateKb(long userId, List<String> ids, boolean enabled) {
         List<Object> args = new ArrayList<>();
         args.add(String.valueOf(userId));
         args.addAll(ids);
         if (!enabled) {
             return jdbc.update(
-                    "UPDATE bio_file SET kb_enabled=0, indexed=0, index_status='not_added',"
-                            + " index_error=NULL, indexed_at=NULL, chunk_count=0"
+                    "UPDATE bio_file SET kb_enabled=0"
                             + " WHERE kind='paper' AND user_id=? AND id IN ("
                             + placeholders(ids.size()) + ")",
                     args.toArray());
         }
-        // 已在库里的论文重复勾选不重置状态：重置会把 ready 打回 queued，
-        // 白白触发一次全量重建。失败论文的重试走独立的 retry 端点。
+        // 已在库里的论文重复勾选不动：重排会让已就绪论文白白重建一轮；
+        // 失败论文的重试走独立的 retry 端点。
         return jdbc.update(
-                "UPDATE bio_file SET kb_enabled=1, indexed=0, index_status='queued',"
-                        + " index_error=NULL, indexed_at=NULL, chunk_count=0"
+                "UPDATE bio_file SET kb_enabled=1"
                         + " WHERE kind='paper' AND user_id=? AND kb_enabled=0 AND id IN ("
                         + placeholders(ids.size()) + ")",
                 args.toArray());
@@ -121,7 +131,7 @@ public class KbPaperServiceImpl implements KbPaperService {
         String status;
         int chunks;
         if (kbEnabled != 1) {
-            // 勾选是「是否在知识库」的唯一真相：未勾选时索引列一律按未加入展示
+            // 勾选是「是否在知识库」的唯一真相：未勾选时索引状态一律按未加入展示
             status = "not_added";
             chunks = 0;
         } else {

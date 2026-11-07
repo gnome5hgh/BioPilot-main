@@ -1,4 +1,11 @@
-"""知识库索引、对账与检索实现。"""
+"""知识库索引、对账与检索实现。
+
+索引状态（排队/索引中/成功/失败、块数）的唯一落点是引擎自己的
+``bio_rag_paper_status`` 表（``mapper/rag_paper_status_mapper.py``）：整个索引
+流程就地读写，不再向平台上报转抄。平台侧只持有勾选真相 ``bio_file.kb_enabled``
+（Java 写），状态表的全部写入守卫都以 JOIN ``kb_enabled=1`` 完成——索引期间
+被移出的论文结果落不了盘，本模块据此撤回刚建好的向量。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +14,6 @@ import time as _time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from biopilot.common.platform import PlatformError
 from biopilot.config import BioPilotConfig
 from biopilot.engine.memory.storage.named_lock import NamedLock
 from biopilot.engine.rag.constants import (
@@ -16,13 +22,12 @@ from biopilot.engine.rag.constants import (
     paper_id_of,
 )
 from biopilot.engine.rag.storage.index_state_store import list_domain_states
-from biopilot.mapper import kb_file_mapper
+from biopilot.mapper import rag_paper_status_mapper as status_mapper
 from biopilot.mapper.base import shared_db
 from biopilot.service import state
 from biopilot.service.errors import (
     KbBusyError,
     RequestValidationError,
-    ServiceUnavailableError,
 )
 from biopilot.service.impl.platform_client import shared_platform_client
 from biopilot.service.kb_service import KbService
@@ -114,9 +119,8 @@ class KbServiceImpl(KbService):
 
         db = shared_db()
         svc = get_rag_service(cfg, user_domain=user_id, db=db)
-        platform = shared_platform_client()
 
-        # ---- 向量库 ↔ 平台表对账（MySQL 是唯一真相） ----
+        # ---- 向量库 ↔ 状态表对账：向量库是块的存储形态，状态表是唯一落点 ----
         indexed = failed = removed = orphans = 0
         drift: set[str] = set()
         try:
@@ -126,13 +130,13 @@ class KbServiceImpl(KbService):
             logger.warning("向量库对账读取失败，本轮跳过漂移检测（%s）", user_id,
                            exc_info=True)
         if vector_counts is not None:
-            rows = kb_file_mapper.select_papers_for_reconcile(db, user_id)
+            rows = status_mapper.select_for_reconcile(db, user_id)
             enabled_ids = {str(row["id"]) for row in rows if row["kb_enabled"]}
             # 1) 向量库里不属于任何「已加入」论文的块：删掉
             swept, vector_counts = _sweep_orphan_vectors(
                 svc, vector_counts, enabled_ids)
             orphans += swept
-            # 2) 已就绪论文的向量块数必须与平台 chunk_count 一致
+            # 2) 已就绪论文的向量块数必须与状态表 chunk_count 一致
             for row in rows:
                 if not row["kb_enabled"] or row["index_status"] != "indexed":
                     continue
@@ -142,23 +146,20 @@ class KbServiceImpl(KbService):
                 if actual == 0 or actual != expected:
                     drift.add(paper_id)
                     logger.warning(
-                        "论文索引与平台状态不一致，将重建：%s"
-                        "（数据库 %d 块，向量库 %d 块）",
+                        "论文索引与状态表不一致，将重建：%s"
+                        "（状态表 %d 块，向量库 %d 块）",
                         paper_id, expected, actual)
 
         seen: set[str] = set()
         for _pass in range(state._KB_INDEX_PASSES):
-            # 每遍先让 Java 收敛：半截状态与崩溃遗留的 indexing 都拉回可执行状态。
+            # 每遍先收敛状态行：清孤儿行、补 queued、把崩溃遗留的 indexing
+            # 拉回（本流程持索引锁，重排是安全的）。
             try:
-                platform.kb_normalize(user_id, requeue_indexing=True)
-            except PlatformError as exc:
-                logger.info("平台未就绪，知识库对账稍后重试（%s）：%s", user_id, exc)
-                return _index_summary(skipped=True, deferred=True,
-                                      reason="platform_unavailable")
+                status_mapper.normalize(db, user_id, requeue_indexing=True)
             except Exception as exc:
                 logger.warning("知识库状态收敛失败（%s），本轮跳过：%s", user_id, exc)
                 break
-            rows = kb_file_mapper.select_papers_for_index(db, user_id)
+            rows = status_mapper.select_papers_for_index(db, user_id)
             enabled = {str(row["id"]): row for row in rows if row["kb_enabled"]}
             todo = []
             for paper_id, row in enabled.items():
@@ -173,12 +174,8 @@ class KbServiceImpl(KbService):
             if not todo:
                 break
             try:
-                accepted = set(platform.kb_indexing(
-                    user_id, [paper_id for paper_id, _row in todo]))
-            except PlatformError as exc:
-                logger.info("平台未就绪，索引状态置位稍后重试（%s）：%s",
-                            user_id, exc)
-                break
+                accepted = set(status_mapper.mark_indexing(
+                    db, user_id, [paper_id for paper_id, _row in todo]))
             except Exception as exc:
                 logger.warning("索引状态置位失败（%s），本轮跳过：%s", user_id, exc)
                 break
@@ -187,11 +184,13 @@ class KbServiceImpl(KbService):
             seen.update(accepted)
 
             results: list[dict] = []
+            platform = shared_platform_client()
             for paper_id, row in todo:
                 if paper_id not in accepted:
                     continue
                 try:
-                    data, _meta = platform.attachment(user_id, "paper", paper_id)
+                    data, _meta = platform.attachment(
+                        user_id, "paper", paper_id)
                     if not data:
                         raise RuntimeError("论文原文取回失败")
                     outcome = svc.index_document_bytes(
@@ -219,14 +218,11 @@ class KbServiceImpl(KbService):
             applied: dict = {}
             if results:
                 try:
-                    applied = platform.kb_result(user_id, results)
+                    applied = status_mapper.apply_results(db, user_id, results)
                     reported = True
-                except PlatformError as exc:
-                    logger.info("平台未就绪，索引结果上报稍后重试（%s）：%s",
-                                user_id, exc)
                 except Exception as exc:
                     # 状态未知：保留已建好的索引，下一轮按 indexing 重排后幂等重建
-                    logger.warning("索引结果上报失败（%s）：%s", user_id, exc)
+                    logger.warning("索引结果落库失败（%s）：%s", user_id, exc)
 
             for item in results:
                 paper_id = str(item["paper_id"])
@@ -242,7 +238,7 @@ class KbServiceImpl(KbService):
                     _drop_paper_index(svc, paper_id)
 
         # 已移出知识库（或已删除）的论文：按向量库实际持有的文档标识清理
-        rows = kb_file_mapper.select_paper_states(db, user_id)
+        rows = status_mapper.select_paper_states(db, user_id)
         enabled = {str(row["id"]) for row in rows if row["kb_enabled"]}
         try:
             counts = svc.document_chunk_counts()
@@ -255,9 +251,7 @@ class KbServiceImpl(KbService):
 
         # 收尾再收敛一次（不重排本轮刚置 indexing 的行）
         try:
-            platform.kb_normalize(user_id, requeue_indexing=False)
-        except PlatformError as exc:
-            logger.info("平台未就绪，收尾收敛稍后重试（%s）：%s", user_id, exc)
+            status_mapper.normalize(db, user_id, requeue_indexing=False)
         except Exception as exc:
             logger.warning("知识库收尾收敛失败（%s）：%s", user_id, exc)
 
@@ -268,27 +262,38 @@ class KbServiceImpl(KbService):
 
     def users_with_kb(self) -> list[str]:
         """列出知识库里还有勾选论文的用户（启动对账用）。"""
-        rows = kb_file_mapper.select_users_with_kb(shared_db())
+        rows = status_mapper.select_users_with_kb(shared_db())
         return sorted({str(row["user_id"]) for row in rows
                        if row.get("user_id")})
 
     def users_needing_reconcile(self) -> list[str]:
-        """列出知识库派生状态不自洽的用户（启动恢复与周期对账共用）。"""
-        rows = kb_file_mapper.select_all_papers(shared_db())
-        stale = {
-            row["user_id"] for row in rows
-            if row.get("user_id") and (
-                (int(row.get("kb_enabled") or 0) == 1
-                 and str(row.get("index_status") or "")
-                 in ("not_added", "queued", "indexing"))
-                or (int(row.get("kb_enabled") or 0) == 0 and (
-                    int(row.get("indexed") or 0) != 0
-                    or str(row.get("index_status") or "not_added") != "not_added"
-                    or int(row.get("chunk_count") or 0) != 0
-                    or row.get("index_error") is not None
-                    or row.get("indexed_at") is not None))
-            )
-        }
+        """列出状态不自洽的用户（启动恢复与周期对账共用）。
+
+        判据（勾选真相在 bio_file，状态落点在 bio_rag_paper_status）：
+        - 已勾选但尚无状态行 / 行在 queued 或 indexing：有待办或半截状态；
+        - 未勾选但状态行还在：孤儿行待清；
+        - 状态行指向已删除论文：同上；
+        - 状态里还记着、平台已不在知识库的索引（向量孤儿）。
+        failed 不在此列——失败等用户显式重试，周期对账不能反复烧嵌入。
+
+        Returns:
+            list[str]: 需要跑一轮索引的用户 id（升序去重）。
+        """
+        rows = status_mapper.select_all_papers(shared_db())
+        stale: set[str] = set()
+        for row in rows:
+            user_id = str(row.get("user_id") or "")
+            if not user_id:
+                continue
+            has_row = row.get("paper_id") is not None
+            if int(row.get("kb_enabled") or 0) == 1:
+                if not has_row or row.get("index_status") in ("queued", "indexing"):
+                    stale.add(user_id)
+            elif has_row:
+                stale.add(user_id)
+        stale |= {str(row["user_id"]) for row
+                  in status_mapper.select_users_with_orphan_rows(shared_db())
+                  if row.get("user_id")}
         return sorted(stale | self._users_with_orphan_index(rows))
 
     def _users_with_orphan_index(self, rows: list[dict]) -> set[str]:
@@ -332,10 +337,6 @@ class KbServiceImpl(KbService):
                     state.reindex_pending.discard(user_id)
                     summary = await asyncio.to_thread(
                         self.index_user_kb_sync, user_id)
-                    if summary.get("deferred"):
-                        logger.info("平台未就绪，知识库对账交给周期任务（%s）",
-                                    user_id)
-                        break
                     if summary.get("skipped"):
                         misses += 1
                         if misses > state._KB_LOCK_RETRIES:
@@ -356,14 +357,15 @@ class KbServiceImpl(KbService):
         asyncio.get_running_loop().create_task(_runner())
 
     async def reindex(self, user_id: str, force: bool) -> dict:
-        """重建知识库：默认只补排队/失败/缺文件的论文；force=true 时全部重扫。"""
+        """重建知识库：默认只补排队/失败/缺文件的论文；force=true 时全部重扫。
+
+        force 的重排直接落在引擎自己的状态表上（不涉及平台）。
+
+        Returns:
+            dict: ``{status, already_running}``，status 恒为 "started"。
+        """
         if force:
-            try:
-                await asyncio.to_thread(
-                    shared_platform_client().kb_requeue_all, user_id)
-            except PlatformError as exc:
-                raise ServiceUnavailableError(
-                    "索引状态重置失败：平台不可达") from exc
+            status_mapper.requeue_all(shared_db(), user_id)
         self.schedule_user_index(user_id)
         return {"status": "started",
                 "already_running": user_id in state.reindex_running}
@@ -406,8 +408,22 @@ class KbServiceImpl(KbService):
         chunks.sort(key=lambda chunk: chunk.chunk_index)
         return {"chunks": [self._chunk_view(chunk) for chunk in chunks]}
 
-    def sync(self, user_id: str) -> dict:
-        """唤醒一次该用户的知识库索引。"""
+    def sync(self, user_id: str, *, retry_paper_ids: list[str] | None = None,
+             requeue_paper_ids: list[str] | None = None) -> dict:
+        """处理平台的勾选变更信号：按需重排指定论文并唤醒索引。
+
+        Args:
+            user_id: 归属用户。
+            retry_paper_ids: 用户显式重试的论文（当前状态 → queued，通常是 failed）。
+            requeue_paper_ids: 需要重建的论文（标题变更等）。
+
+        Returns:
+            dict: ``{status: "ok"}``；索引在后台执行。
+        """
+        ids = list(dict.fromkeys([*(retry_paper_ids or []),
+                                  *(requeue_paper_ids or [])]))
+        if ids:
+            status_mapper.requeue(shared_db(), user_id, ids)
         self.schedule_user_index(user_id)
         return {"status": "ok"}
 

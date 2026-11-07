@@ -45,8 +45,11 @@ async def internal_kb_sync(
     user_id: str = Depends(require_internal),
     services: ServiceContainer = Depends(get_services),
 ) -> dict:
-    """唤醒该用户的知识库索引。"""
-    return services.kb.sync(user_id)
+    """唤醒该用户的知识库索引；可携带要重排的论文（重试/标题变更重建）。"""
+    return services.kb.sync(
+        user_id,
+        retry_paper_ids=req.retry_paper_ids if req else None,
+        requeue_paper_ids=req.requeue_paper_ids if req else None)
 
 
 @router.get("/kb/runtime", response_model=KbRuntimeResponse)

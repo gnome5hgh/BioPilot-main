@@ -84,23 +84,29 @@ BioPilot/
 
 ## Python 与 Java 的职责边界
 
-三层平台的分工不是「按语言分」，而是「按职责分」。新增代码前先回答：它属于平台业务，还是 agent 运行时？
+三层平台的分工按**管理面/执行面尺**切：看一段代码在**管理一个资产**，还是在**消费资产去生产内容**。管理面（资产的登记/命名/删除/勾选/调度/状态展示，以及外部资源的**连接器**）→ Java；执行面（检索执行、工具语义、编排、记忆、RAG、沙箱——一切为 agent 行为语义存在的代码）→ Python。
 
-- **Java（`server/`）拥有平台业务**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件目录（论文/数据文件/文档/分析产物的 HTTP CRUD 与 OSS 生命周期）、论文索引状态机（`KbStateService`）、知识库状态概览与论文清单（`bio_file` 的 paper 行统计）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置（`bio-common-mcp` 通用客户端）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）、用户技能管理（`bio-skill`：标准包准入、OSS 包、启停/更新/卸载）。
-- **Python（`biopilot/`）拥有 agent 运行时**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、视觉、安全中间件与确认、终端 PTY、对话 SSE/确认/上下文用量、知识库试检索/分块读取/运行时信息、引擎配置（`bio_config` + 引导 env）、用户技能运行时消费（按用户物化技能缓存）。
-- **端点落点判据**：只写平台表、不读引擎进程内状态、不参与引擎领域产物写路径 → Java；需要读 agent 缓存/确认 future/窗口用量，或需要调用 RAG/记忆 → Python。跨边界写一律走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）：平台表（含 `bio_file` 的索引状态列）只有 Java 写，引擎经 `/internal/kb/*` 上报状态；引擎需要文件字节时调 `/internal/attachments/*`，不直连 OSS。
-- **单写者规则（按表/列）**：
+- **Java（`server/`）拥有管理面与连接器**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件资产（论文/数据文件/文档/分析产物的 CRUD、OSS 生命周期、`kb_enabled` 勾选真相）、知识库勾选/概览/清单（索引状态只读展示）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置与客户端（`bio-common-mcp`，双平面共享的连接器）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）、用户技能管理（`bio-skill`：标准包准入、OSS 包、启停/更新/卸载）。
+- **Python（`biopilot/`）拥有执行面**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、论文索引状态（`bio_rag_paper_status`，唯一落点）、视觉、安全中间件与确认、终端 PTY、对话 SSE/确认/上下文用量（含 `bio_message` 对话落盘）、知识库试检索/分块读取/运行时信息、引擎配置（`bio_config` + 引导 env）、用户技能运行时消费（按用户物化技能缓存）。
+- **推论一（连接器共享）**：外部资源的连接器只写一份、双平面共享（OSS 客户端、MCP 客户端、PDF 解析器都是平台连接器），谁消费谁经 `/internal/*` 契约调用；双消费者逻辑随连接器落 Java（如文献聚合同时服务检索页与 agent 工具）。
+- **推论二（数据轴正交）**：数据归属与逻辑归属是两把独立的尺——单写者规则按下表执行，跨平面访问只走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）。
+- **推论三（引擎资产代理到达）**：引擎自身的运行时配置与领域数据（记忆/消息/状态/审计）是引擎资产，管理面经代理到达（设置页、会话列表），平台侧只读展示。
+- **推论四（单一实现）**：同一产品功能只在一个栈实现，另一栈只经契约消费，禁止为绕开跨栈契约而复制实现。
+- **推论五（单一落点）**：一份数据只有一个写者、一个落点；需要展示就跨栈只读，禁止「投影/真相源」式双写与常设对账。合法例外三类：信任边界两侧行级过滤机制各一套（纵深防御）；数据域不相交的基础设施客户端各持一份；可丢弃缓存与派生物（向量索引、技能缓存）不是双真相。
+- **已知例外**：终端面板是面向用户的功能但宿在引擎进程——宿主语义绑死引擎所在机器（容器部署下是引擎容器内），且 PTY 生态在 Python；它不属于 agent 工具面。
+- **单写者规则（按表）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
   - `bio_rag_index_state`：Python 独占（RAG 增量索引状态）。隔离键是 `user_domain`（`local` 或登录用户 id），不是 `user_id`——本地语料域没有用户归属，这是该表不带 `user_id` 列的唯一理由。
+  - `bio_rag_paper_status`：Python 独占（论文索引状态唯一落点：排队/索引中/成功/失败、块数）；Java 只读展示（概览/清单），写入守卫以 JOIN `bio_file.kb_enabled=1` 完成。
   - `bio_config`、`bio_config_secret`、`bio_config_history`：Python 独占（运行时配置、加密密钥、保存历史）；Java 只经 `/admin/settings` 代理，不直连这三张表。
-  - `bio_file`：Java 独占（论文/数据文件/文档/分析产物统一表）。按列分写者：`bio-file` 写身份/文件/书目/`citation_id`/`kb_enabled`，`bio-kb` 写 `indexed/index_status/index_error/indexed_at/chunk_count`。Python 只读身份/勾选/状态列，**不直接 INSERT/UPDATE/DELETE**——索引结果经 `/internal/kb/{indexing,result}` 上报，强制重建经 `/internal/kb/requeue-all` 复位。文件正文只在 OSS，表里只有 `oss_key`/`sha256`/`version`；同名唯一键是 `(user_id, name_key)`，artifact 的 `name_key` 为 NULL（不占名）。
+  - `bio_file`：Java 独占（论文/数据文件/文档/分析产物统一表），写身份/文件/书目/`citation_id`/`kb_enabled`；Python 只读身份/勾选/标题列，**不直接 INSERT/UPDATE/DELETE**。文件正文只在 OSS，表里只有 `oss_key`/`sha256`/`version`；同名唯一键是 `(user_id, name_key)`，artifact 的 `name_key` 为 NULL（不占名）。
   - `bio_citation`：Java 独占（引用库行）；Python 不读写。
   - `bio_oss_gc`：OSS 删除 outbox（系统级、无 `user_id`；Java 定时任务读写）。
   - `bio_schedule_task`：Java 独占（任务定义与 `last_run_at` / `next_run_at` 进度列都由 Java 写）；Python 只接收 `/internal/schedule/run` 触发后执行 agent。
   - `bio_skill`：Java 独占写（用户技能安装记录，带 `user_id`）；Python 只读 `enabled/content_sha`，用于把技能包物化成本地缓存。
   - `sys_*`、`bio_project`、`bio_literature_mcp_server`：Java 独占。
 - **表命名规范**：系统表 `sys_<entity>`；BioPilot 业务表 `bio_<domain>_<entity>`，域内用单数实体名（如 `bio_file`、`bio_schedule_task`）。平台表 DDL 只在 `server/script/sql/` 与 `docker/mysql-init/` 维护；Python 的 `_SCHEMA` 只建引擎自己的表。
-- **禁止事项**：Java 不实现 agent 编排/记忆/检索/切块/嵌入；Python 不新增平台 CRUD（新增前先判断是否属于 agent 运行时），不自建文献检索/MCP 客户端/调度循环/外部 URL 抓取，也不直连 OSS 取平台文件——检索调 `/internal/literature/search`、PDF 下载调 `/internal/literature/fetch-pdf`（SSRF 与 `%PDF` 校验在 Java `bio-common-net`）、文件字节调 `/internal/attachments/*`、产物登记调 `/internal/files/artifacts`、定时任务只接收 `/internal/schedule/run`；Web 不直连 8300，全部经 `/api` → Java。
+- **禁止事项**：Java 不实现 agent 编排/记忆/检索/切块/嵌入/索引状态机；Python 不新增平台 CRUD（新增前先按管理面/执行面尺判断），不自建文献检索/MCP 客户端/调度循环/外部 URL 抓取，也不直连 OSS 取平台文件——检索调 `/internal/literature/search`、PDF 下载调 `/internal/literature/fetch-pdf`（SSRF 与 `%PDF` 校验在 Java `bio-common-net`）、文件字节调 `/internal/attachments/*`、产物登记调 `/internal/files/artifacts`、定时任务只接收 `/internal/schedule/run`；Web 不直连 8300，全部经 `/api` → Java。
 
 ## 硬红线
 
@@ -115,7 +121,7 @@ BioPilot/
 - **写工具必须声明安全元数据**（`risk_level` / `side_effects` / `provenance` 等），注册表加载时校验合法值。
 - **路径检查与写盘共用同一份解析结果**：检查通过的路径参数就地归一化为解析后的绝对路径（防 TOCTOU）。
 - **SQL 是唯一真相源**：压缩与窗口驱逐**永不删 SQL 行**；读—改—写类块写入必须经一次持锁事务，不能「读旧值→算新值→写回」分三步做。
-- **知识库一致性以 `bio_file` 的 paper 行为唯一真相**：引擎启动与每轮索引都对账向量库——不属于任何「已加入」论文的块直接清理，已就绪论文的向量块数与 `chunk_count` 不一致则重建；`failed` 不自动重试（用户重试由 Java 先置 `queued`），避免对账反复消耗解析与嵌入资源。
+- **知识库一致性：勾选真相在 `bio_file.kb_enabled`（Java 写），索引状态唯一落点在引擎的 `bio_rag_paper_status`（引擎写）**：引擎启动与每轮索引都对账向量库——不属于任何「已加入」论文的块直接清理，已就绪论文的向量块数与状态表 `chunk_count` 不一致则重建（向量库是索引的派生存储，对账是它的固有属性，不是双真相）；`failed` 不自动重试（用户重试经 `/internal/kb/sync` 携带论文 id 通知引擎置 `queued`），避免对账反复消耗解析与嵌入资源。
 - **压缩只改窗口，旧摘要并入重摘**：每次压缩把上一份摘要作为底稿送回摘要模型（Claude Code 式，集成指令约束漂移），窗口恒只有一份最新摘要、多次压缩不累积；摘要不携带用户原话（业界无代码插全量原话的先例，实测还会挤爆摘要预算）——**唯一例外是第 9、10 节边界：硬约束逐字抄录、截止时间只在用户明确说过时填写**，该节随摘要一起进入重摘底稿，由集成指令要求「不丢已确立的约束」；其余原话不作回溯；摘要失败时保持原窗口，不拿空摘要替换历史。
 - **摘要不携带用户原话与工具引用（第 9、10 节边界除外）**：压缩摘要有损、用户原话不进摘要且不作回溯；跨会话知识只走记忆块（`bio_memory_block`）。工具结果外置后的指针只在窗口内可回取。
 - **领域产物的读写各自归口**：长期记忆写入归轮末后台整合（`MemoryConsolidator`），**不向任何 agent 暴露记忆写工具**；所有 agent 只通过只读召回（`memory_read` / `read_tool_result`）读取。语料索引归 `rag-agent` 独占读写。引用库是平台功能（Java `bio-citation`），agent 既不读写也不做溯源标注。supervisor 因此持有 spawn + 只读召回，仍不持有执行类工具。
@@ -180,8 +186,8 @@ conda run -n biopilot python -m pytest tests/agent/test_agent.py::TestExecTool -
 # 依赖服务栈（Milvus Standalone + MinIO + MySQL）；./start.sh 会先拉起，此命令用于手动管理
 docker compose up -d
 
-# Web 平台一键启动（容器 + 适配层 + SpringBoot + 前端，含就绪探测与日志跟随）
-./start.sh        # 停止：./stop.sh（容器与数据保留）；前端 http://localhost:5173
+# Web 平台一键启动（Docker 守护进程 + 容器 + 适配层 + SpringBoot + 前端，含就绪探测与日志跟随）
+./start.sh        # 停止：./stop.sh（应用进程与依赖容器一起停，数据保留）；前端 http://localhost:5173
 
 # 部署形态（实验室服务器）：容器化整套平台（nginx:80 + server + webapi）
 docker compose --profile full up -d --build   # 只起基建则省略 --profile full
