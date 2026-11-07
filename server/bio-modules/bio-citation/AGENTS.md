@@ -9,7 +9,7 @@
 
 - 角色：`business-domain`
 - 职责：`bio_citation` 行 + `bio_paper.citation_id` 的单向关联；加入/移出/论文删除/书目变更的联动。
-- 不写 `bio_paper` 的索引状态列（归 `bio-kb` 的 `KbStateService`）；不参与 RAG 索引与检索。
+- 不写论文索引状态（唯一落点在引擎的 `bio_rag_paper_status`）；不参与 RAG 索引与检索。
 
 ## Core Logic
 

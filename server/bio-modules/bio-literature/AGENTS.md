@@ -12,7 +12,7 @@
 
 - 角色：`business-domain`
 - 职责：把多个检索源统一成 `PaperCandidate`，给前端文献页与 Python agent 提供同一个检索结果。
-- 不做论文目录 CRUD、不做文件下载/删除、不写索引状态列——这些归 `bio-file`；`/internal/literature/fetch-pdf` 只返回字节，不登记论文库。
+- 不做论文目录 CRUD、不做文件下载/删除、不碰索引状态（文件资产归 `bio-file`，状态唯一落点在引擎）——`/internal/literature/fetch-pdf` 只返回字节，不登记论文库。
 
 ## Directory Structure
 

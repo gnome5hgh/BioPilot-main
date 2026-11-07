@@ -14,9 +14,10 @@
 - 角色：`business-domain`
 - 职责：`bio_file` 的身份/文件/书目/`citation_id`/`kb_enabled` 列与 OSS 生命周期；
   同名唯一键 `(user_id, name_key)`；论文标题/书目在入库时提取。
-- **`bio_file` 按列分写者**：本模块写身份/文件/书目/`citation_id`/`kb_enabled` 列；
-  `kb_enabled` 的状态迁移与 `index_*` 索引状态列归 `bio-kb`。标题变更且论文在库时，
-  本模块只发 `PaperRequeueHook` 通知，由 `bio-kb` 置回 `queued` 并唤醒引擎。
+- **本模块写 `kb_enabled` 勾选真相**：身份/文件/书目/`citation_id`/`kb_enabled` 列由本模块写；
+  索引派生状态一律不落 `bio_file`（唯一落点是引擎的 `bio_rag_paper_status`，本模块只读
+  合并进论文清单展示）。标题变更且论文在库时，本模块只发 `PaperRequeueHook` 通知，
+  由 `bio-kb` 经 `/internal/kb/sync` 携带论文 id 通知引擎重排。
 - **正文只在 OSS**：`bio_file` 只存 `oss_key`/`sha256`/`version`，文档写走版本化对象键 +
   条件更新指针；旧对象进 `bio_oss_gc`，提交后才删。
 - **文件字节出口**：`/internal/attachments/{kind}/{id}` 按 `(user_id, id)` 取回本人论文/数据
@@ -30,7 +31,8 @@
   （`*ForAgent` 跳过租户插件，`bio_oss_gc` 整表豁免）
 - `service/` — 接口：PaperService / UploadedFileService / DocumentService / OssGcService
   与 Hook 契约（含 `PaperRequeueHook`）；`service/impl/` — 对应实现
-- `dto/` — 对前端输出的 snake_case 视图、内部附件内容
+- `dto/` — 对前端输出的 snake_case 视图（`PaperView` 以 LEFT JOIN 语义合并引擎状态行）、内部附件内容
+- `domain/PaperIndexStatus` — 引擎状态表的只读投影（跨栈读取已在 `server/AGENTS.md` 登记）
 
 ## Core Logic
 
