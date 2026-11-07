@@ -42,11 +42,6 @@ public class BioFile {
     private String year;
     private String journal;
     private Integer kbEnabled;
-    private Integer indexed;
-    private String indexStatus;
-    private String indexError;
-    private String indexedAt;
-    private Integer chunkCount;
     private String citationId;
     private String createdAt;
     private String updatedAt;
@@ -194,46 +189,6 @@ public class BioFile {
 
     public void setKbEnabled(Integer kbEnabled) {
         this.kbEnabled = kbEnabled;
-    }
-
-    public Integer getIndexed() {
-        return indexed;
-    }
-
-    public void setIndexed(Integer indexed) {
-        this.indexed = indexed;
-    }
-
-    public String getIndexStatus() {
-        return indexStatus;
-    }
-
-    public void setIndexStatus(String indexStatus) {
-        this.indexStatus = indexStatus;
-    }
-
-    public String getIndexError() {
-        return indexError;
-    }
-
-    public void setIndexError(String indexError) {
-        this.indexError = indexError;
-    }
-
-    public String getIndexedAt() {
-        return indexedAt;
-    }
-
-    public void setIndexedAt(String indexedAt) {
-        this.indexedAt = indexedAt;
-    }
-
-    public Integer getChunkCount() {
-        return chunkCount;
-    }
-
-    public void setChunkCount(Integer chunkCount) {
-        this.chunkCount = chunkCount;
     }
 
     public String getCitationId() {

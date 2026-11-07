@@ -76,19 +76,11 @@ public class PaperTitleBackfillRunner implements ApplicationRunner {
                     log.warn("标题回填失败 paper={}: {}", id, e.getMessage());
                 }
             }
-            // 标题进了检索块前缀：回填成功后必须重建这些篇，先置排队再唤醒索引器
+            // 标题进了检索块前缀：回填成功后必须重建这些篇——通知引擎把状态行
+            // 重排为 queued（状态唯一落点在引擎表）并唤醒索引器
             touched.forEach((userId, ids) -> {
-                String in = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
-                Object[] args = new Object[ids.size() + 1];
-                args[0] = userId;
-                for (int i = 0; i < ids.size(); i++) {
-                    args[i + 1] = ids.get(i);
-                }
-                jdbc.update("UPDATE bio_file SET index_status='queued', index_error=NULL"
-                        + " WHERE kind='paper' AND user_id=? AND kb_enabled=1"
-                        + " AND id IN (" + in + ")", args);
                 try {
-                    internal.kbSync(Long.parseLong(userId));
+                    internal.kbSync(Long.parseLong(userId), List.of(), ids);
                 } catch (NumberFormatException e) {
                     log.warn("标题回填后跳过唤醒：user_id 非数字 {}", userId);
                 }

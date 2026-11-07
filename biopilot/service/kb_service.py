@@ -28,8 +28,9 @@ class KbService(ABC):
         """读取一篇论文的分块。"""
 
     @abstractmethod
-    def sync(self, user_id: str) -> dict:
-        """唤醒索引。"""
+    def sync(self, user_id: str, *, retry_paper_ids: list[str] | None = None,
+             requeue_paper_ids: list[str] | None = None) -> dict:
+        """唤醒索引；可携带要重排为 queued 的论文（重试/标题变更重建）。"""
 
     @abstractmethod
     def runtime(self, user_id: str) -> dict:

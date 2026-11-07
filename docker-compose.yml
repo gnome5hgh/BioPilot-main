@@ -190,6 +190,10 @@ services:
         condition: service_healthy
       paper-search-mcp:
         condition: service_started
+      # 引擎先起：init_schema 建好引擎表（如 bio_rag_paper_status）后 Java 的
+      # 跨栈只读 JOIN 才不会在首启时 500；与 start.sh 的顺序约定一致
+      webapi:
+        condition: service_started
     restart: unless-stopped
 
   web:

@@ -7,6 +7,7 @@ import com.biopilot.common.web.http.AgentInternalClient;
 import com.biopilot.file.domain.BioFile;
 import com.biopilot.file.domain.FileNames;
 import com.biopilot.file.domain.FileObjectKeys;
+import com.biopilot.file.domain.PaperIndexStatus;
 import com.biopilot.file.domain.UserFileKind;
 import com.biopilot.file.dto.AgentFileData;
 import com.biopilot.file.dto.DownloadData;
@@ -32,8 +33,8 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * 论文目录：{@code bio_file} 的 paper 行 + OSS 对象生命周期。
  *
- * <p>论文正文不可变，对象键按 paperId 固定；元数据与索引状态都在同一行上，
- * 身份/文件/书目列由本服务写，index_* 列由 bio-kb 写。创建走“对象先落、行后写”，
+ * <p>论文正文不可变，对象键按 paperId 固定。身份/文件/书目/勾选列由本服务写；
+ * 索引状态的唯一落点在引擎表，本服务只读合并展示。创建走“对象先落、行后写”，
  * 删除走“行先删、对象交给 GC”。</p>
  */
 @Service
@@ -161,8 +162,16 @@ public class PaperServiceImpl implements PaperService {
     }
 
     public List<PaperView> list(long userId) {
-        return files.listForAgent(String.valueOf(userId), BioFile.KIND_PAPER, LIST_LIMIT)
-                .stream().map(PaperView::from).toList();
+        String user = String.valueOf(userId);
+        // 索引状态唯一落点在引擎表：批量只读后按 paper_id 合并进视图
+        var statusById = new java.util.HashMap<String, PaperIndexStatus>();
+        for (PaperIndexStatus status : files.listPaperStatusForAgent(user)) {
+            statusById.put(status.getPaperId(), status);
+        }
+        return files.listForAgent(user, BioFile.KIND_PAPER, LIST_LIMIT)
+                .stream()
+                .map(row -> PaperView.from(row, statusById.get(row.getId())))
+                .toList();
     }
 
     public BioFile get(long userId, String paperId) {
@@ -202,14 +211,14 @@ public class PaperServiceImpl implements PaperService {
         boolean titleChanged = !Objects.equals(paper.getTitle(), title);
         boolean requeue = titleChanged && Integer.valueOf(1).equals(paper.getKbEnabled());
         transaction.executeWithoutResult(status -> {
-            // 只写 bio-file owns 的书目列；index_* 由 bio-kb 独占写。
+            // 只写 bio-file 拥有的书目列；索引状态归引擎表。
             files.updatePaperMetadataForAgent(paperId, String.valueOf(userId), title,
                     authors, year, journal, now());
             metadataHooks.ifAvailable(hook -> hook.onPaperMetadataChanged(
                     paper.getCitationId(), title, authors, year, journal));
         });
         if (requeue) {
-            // 标题进检索块前缀：由 bio-kb 负责重排索引并唤醒引擎
+            // 标题进检索块前缀：通知引擎重排该篇并唤醒索引
             requeueHooks.ifAvailable(hook -> hook.onPaperTitleChanged(userId, paperId));
         }
     }
@@ -272,9 +281,6 @@ public class PaperServiceImpl implements PaperService {
         row.setYear(year == null ? "" : year);
         row.setJournal(journal == null ? "" : journal);
         row.setKbEnabled(addToKb ? 1 : 0);
-        row.setIndexed(0);
-        row.setIndexStatus(addToKb ? "queued" : "not_added");
-        row.setChunkCount(0);
         row.setCreatedAt(now());
         row.setUpdatedAt(now());
         return row;

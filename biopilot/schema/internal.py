@@ -7,9 +7,16 @@ from pydantic import BaseModel, ConfigDict
 
 
 class KbSyncRequest(BaseModel):
-    """``POST /internal/kb/sync`` 的可选请求体。"""
+    """``POST /internal/kb/sync`` 的可选请求体。
+
+    勾选变更只需空体唤醒；重试与标题变更重建由 Java 带论文 id 列表，
+    引擎据此把状态表对应行重排为 queued（索引状态唯一落点在引擎）。
+    """
 
     model_config = ConfigDict(extra="ignore")
+
+    retry_paper_ids: list[str] = []
+    requeue_paper_ids: list[str] = []
 
 
 class KbSyncResponse(BaseModel):

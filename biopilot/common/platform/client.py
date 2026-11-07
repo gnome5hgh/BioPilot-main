@@ -236,66 +236,6 @@ class PlatformClient:
             json={"url": url}, timeout=self._transfer_timeout)
         return response.content
 
-    def kb_normalize(self, user_id: str, *, requeue_indexing: bool = False) -> dict:
-        """让 Java 把索引状态收敛到勾选状态。
-
-        Args:
-            user_id: 归属用户。
-            requeue_indexing: 持索引锁时置 true，把遗留的 ``indexing`` 重排。
-
-        Returns:
-            ``{reset, queued, requeued}``。
-        """
-        return self._request(
-            "POST", "/internal/kb/normalize", user_id=user_id,
-            json={"requeue_indexing": bool(requeue_indexing)}).json()
-
-    def kb_requeue_all(self, user_id: str) -> int:
-        """让 Java 把所有已加入知识库的论文重排为 ``queued``（强制重建）。
-
-        状态列只有 Java 能写；引擎的「全部重新索引」只负责触发，不再直接 UPDATE。
-
-        Args:
-            user_id: 归属用户。
-
-        Returns:
-            int: 实际重排的行数。
-        """
-        data = self._request(
-            "POST", "/internal/kb/requeue-all", user_id=user_id, json={}).json()
-        return int(data.get("queued") or 0)
-
-    def kb_indexing(self, user_id: str, paper_ids: list[str]) -> list[str]:
-        """把本批论文置为索引中，返回真正被接受的 id。
-
-        Args:
-            user_id: 归属用户。
-            paper_ids: 待索引论文。
-
-        Returns:
-            仍在知识库、被接受的论文 id 列表。
-        """
-        data = self._request(
-            "POST", "/internal/kb/indexing", user_id=user_id,
-            json={"paper_ids": [str(p) for p in paper_ids]}).json()
-        return [str(item) for item in (data.get("accepted") or [])]
-
-    def kb_result(self, user_id: str, results: list[dict]) -> dict:
-        """批量上报索引结果，返回每篇是否真正落盘。
-
-        Args:
-            user_id: 归属用户。
-            results: 每项 ``{paper_id, ok, chunks, error}``。
-
-        Returns:
-            ``{paper_id: bool}``；False 表示索引期间已被移出，调用方应撤回索引产物。
-        """
-        data = self._request(
-            "POST", "/internal/kb/result", user_id=user_id,
-            json={"results": results}).json()
-        applied = data.get("applied") or {}
-        return {str(key): bool(value) for key, value in applied.items()}
-
     def save_document(self, user_id: str, name: str, content: str,
                       expected_version: int | None = None) -> dict:
         """保存或覆盖用户文档编辑器中的 markdown 文档。

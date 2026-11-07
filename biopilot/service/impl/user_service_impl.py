@@ -7,7 +7,12 @@ from pathlib import Path
 
 from biopilot.common.utils.paths import safe_component
 from biopilot.domain.runtime_state import RuntimeState
-from biopilot.mapper import agent_state_mapper, rag_index_mapper, user_mapper
+from biopilot.mapper import (
+    agent_state_mapper,
+    rag_index_mapper,
+    rag_paper_status_mapper,
+    user_mapper,
+)
 from biopilot.mapper.base import shared_db
 from biopilot.service import state
 from biopilot.service.user_service import UserService
@@ -44,6 +49,10 @@ class UserServiceImpl(UserService):
             rag_index_mapper.delete_domain(db, target_id)
         except Exception:
             logger.warning("删户清理跳过 bio_rag_index_state（表不存在或不可达）")
+        try:
+            rag_paper_status_mapper.delete_by_user(db, target_id)
+        except Exception:
+            logger.warning("删户清理跳过 bio_rag_paper_status（表不存在或不可达）")
         agent_state_mapper.delete_by_user(db, target_id)
 
         # 向量库按用户域独立 collection：不清会让重建后的同 id 账号检索到旧数据。

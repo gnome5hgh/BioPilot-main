@@ -113,6 +113,21 @@ CREATE TABLE IF NOT EXISTS bio_rag_index_state (
     updated_at VARCHAR(40) NOT NULL,    -- 最近写入时间（ISO 字符串）
     PRIMARY KEY (user_domain)
 );
+-- bio_rag_paper_status 表：论文索引状态的唯一落点（逐篇一行，Python 独占写，Java 只读展示）
+-- 行存在即代表该论文进入过索引流程，「未加入知识库」= 无行；勾选真相是 bio_file.kb_enabled
+-- （Java 写），本表写入侧以 JOIN kb_enabled=1 为守卫——索引期间被移出的论文结果不落盘。
+CREATE TABLE IF NOT EXISTS bio_rag_paper_status (
+    user_id VARCHAR(191) NOT NULL,      -- 归属用户（行级隔离）
+    paper_id VARCHAR(64) NOT NULL,      -- 平台论文 id（bio_file.id）
+    index_status VARCHAR(20) NOT NULL,  -- queued/indexing/indexed/failed
+    indexed TINYINT NOT NULL DEFAULT 0, -- 1=索引成功（与 index_status='indexed' 同步维护）
+    index_error VARCHAR(500) NULL,      -- 最近一次失败原因（截断存储）
+    indexed_at VARCHAR(40) NULL,        -- 最近一次索引成功时间（ISO 字符串）
+    chunk_count INT NOT NULL DEFAULT 0, -- 向量库块数（对账基准）
+    updated_at VARCHAR(40) NOT NULL,    -- 最近写入时间（ISO 字符串）
+    PRIMARY KEY (user_id, paper_id),
+    KEY idx_paper_status_state (user_id, index_status)
+);
 -- bio_message 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS bio_message (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识
