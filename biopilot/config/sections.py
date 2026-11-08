@@ -214,7 +214,7 @@ class CorpusConfig:
     """产物路径。个人绝对路径，经 config.yaml / env 提供，留空走工作区回退。
 
     笔记与论文不再使用本地语料目录：笔记定稿进平台文档编辑器，论文由平台
-    （OSS + ``bio_paper``）提供字节；这里只保留分析产物与研究产物两个落点。
+    （OSS + ``bio_file``）提供字节；这里只保留分析产物与研究产物两个落点。
 
     Attributes:
         analysis_dir: str，分析产物根（空则回退 workspace/analysis）

@@ -430,7 +430,7 @@ class RAGService:
     def document_chunk_counts(self) -> dict[str, int]:
         """按文档路径统计向量库块数（持锁，只读）。
 
-        MySQL 的 `bio_paper` 是知识库成员与索引状态的唯一真相；这里返回向量库
+        MySQL 的 `bio_file`（勾选真相）与 `bio_rag_paper_status`（索引状态）是知识库的真相；这里返回向量库
         实际持有的块数，供对账发现「库里多/少/缺」并触发重建或清理。
 
         Returns:

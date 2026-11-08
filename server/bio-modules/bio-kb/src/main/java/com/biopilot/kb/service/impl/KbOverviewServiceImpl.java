@@ -11,9 +11,9 @@ import org.springframework.stereotype.Service;
 import com.biopilot.kb.service.KbPaperService;
 
 /**
- * 知识库概览：平台侧统计只读 `bio_paper`，RAG 运行时信息向引擎内部端点取。
+ * 知识库概览：平台侧统计只读 `bio_file` 与引擎状态表，RAG 运行时信息向引擎内部端点取。
  *
- * <p>`bio_paper` 是知识库成员与索引状态的唯一真相：勾选/移出、索引结果都由 Java
+ * <p>`bio_file.kb_enabled` 是勾选真相：勾选/移出由 Java 写；索引状态在引擎
  * 落库，因此概览不需要（也不应该）去查 Milvus。统计口径复用
  * {@link KbPaperService#list} 的归一化结果，页面上的统计与「已加入」清单不会互相矛盾。</p>
  *

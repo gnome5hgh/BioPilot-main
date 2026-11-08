@@ -2,7 +2,7 @@ package com.biopilot.literature.service;
 
 import java.util.Map;
 
-/** 文献导入：检索结果 → 开放获取 PDF → 论文库（bio_paper + OSS）。 */
+/** 文献导入：检索结果 → 开放获取 PDF → 论文库（bio_file + OSS）。 */
 public interface LiteratureImportService {
 
     /**

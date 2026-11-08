@@ -30,7 +30,7 @@ import com.biopilot.citation.service.CitationFormatter;
 
 /** 平台引用库：用户从文件管理加入论文、维护库外条目、导出 .bib。
 
-    引用行与论文通过 `bio_paper.citation_id` 单向关联；加入/移出/论文删除都在
+    引用行与论文通过 `bio_file.citation_id` 单向关联；加入/移出/论文删除都在
     同一事务里维护两侧状态（数据库外键存在时 `ON DELETE SET NULL` 兜底）。
 */
 @Service

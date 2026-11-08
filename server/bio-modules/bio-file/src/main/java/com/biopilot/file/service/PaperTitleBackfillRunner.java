@@ -15,7 +15,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/** 启动时异步补齐历史论文标题（`bio_paper.title=''`）。
+/** 启动时异步补齐历史论文标题（`bio_file.title=''`）。
 
     标题提取已归 Java：旧库里的直传论文在本次改造前没有标题，平台需要一次性把它们
     从 OSS 原文补齐，否则检索块没有标题前缀、引用库也无法生成条目。任务在后台线程

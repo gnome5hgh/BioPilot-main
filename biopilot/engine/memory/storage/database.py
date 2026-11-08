@@ -32,8 +32,8 @@ __all__ = ["MemoryDB"]
 # 数据库 Schema 定义（幂等建表）
 # ============================================================================
 # 表名规范：系统域 sys_<entity>，BioPilot 业务域 bio_<domain>_<entity>。
-# 这里只列引擎侧的表；平台表（sys_*、bio_project、bio_paper、bio_document、
-# bio_file_upload、bio_schedule_task、bio_citation 等）由 server/script/sql 维护。
+# 这里只列引擎侧的表；平台表（sys_*、bio_project、bio_file、bio_schedule_task、
+# bio_citation 等）由 server/script/sql 维护。
 _SCHEMA = """
 -- bio_memory_block 表：核心记忆块存储（业务主表）
 CREATE TABLE IF NOT EXISTS bio_memory_block (
@@ -204,7 +204,7 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
     ("bio_agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
     ("bio_agent_state", "project_id", "project_id VARCHAR(64) NULL"),
-    # 平台表（bio_paper/bio_document/bio_file_upload/bio_schedule_task）的建表与
+    # 平台表（bio_file/bio_schedule_task）的建表与
     # 加列归 Java（server/script/sql）；此处只维护引擎自己的表。
 )
 

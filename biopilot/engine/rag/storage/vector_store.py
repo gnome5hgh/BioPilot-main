@@ -422,7 +422,7 @@ class VectorStore:
     def document_chunk_counts(self) -> dict[str, int]:
         """按文档路径统计块数（只取 path 字段，不物化正文与向量）。
 
-        用于和平台表 `bio_paper.chunk_count` 对账：全量扫描只读一列，开销远小于
+        用于和引擎状态表 `bio_rag_paper_status.chunk_count` 对账：全量扫描只读一列，开销远小于
         `all_documents()`（后者还要还原正文与元数据）。分页读取避免单次 query
         的返回上限。
 

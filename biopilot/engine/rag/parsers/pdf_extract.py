@@ -4,7 +4,7 @@
 RAG 索引要带版面坐标的渲染块。两个入口对应两种来源：``extract_pdf`` 读本地文件，
 ``extract_pdf_bytes`` 读内存字节（平台论文不落盘）。
 
-**标题不再由本模块推导**：调用方从 `bio_paper.title`（平台论文）或任务上下文取标题，
+**标题不再由本模块推导**：调用方从 `bio_file.title`（平台论文）或任务上下文取标题，
 经 `extract_pdf(..., title=...)` 传入；本模块只把它用于章节识别时剔除标题行。
 
 输出形态由版面推断：PyMuPDF 只给出带字号与坐标的文本行，本模块按字号识别章节标题并
@@ -358,7 +358,7 @@ def _extract_doc(doc, title: str) -> PdfText:
 def _extract(path: str, title: str = "") -> PdfText:
     """打开并抽取一个本地 PDF（不走缓存）。
 
-    标题由调用方提供：平台论文从 `bio_paper.title` 取，本地文件路径入口为空——
+    标题由调用方提供：平台论文从 `bio_file.title` 取，本地文件路径入口为空——
     本模块不再从版面推导标题。传入的标题只用于章节识别时剔除正文里的标题行。
 
     Args:

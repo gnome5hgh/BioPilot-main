@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 
-/** 文献导入：Europe PMC/OpenAlex 结果 → 开放获取 PDF → 论文库（bio_paper + OSS）。 */
+/** 文献导入：Europe PMC/OpenAlex 结果 → 开放获取 PDF → 论文库（bio_file + OSS）。 */
 @Service
 public class LiteratureImportServiceImpl implements LiteratureImportService {
 

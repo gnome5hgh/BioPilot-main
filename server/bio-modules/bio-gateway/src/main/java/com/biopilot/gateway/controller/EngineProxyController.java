@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.PutMapping;
  * 引擎运行时透传：模型选择、平台设置、技能商店、终端开关、知识库试检索/重建/分块。
  *
  * <p>这些数据的真相都在 Python 引擎，Java 不做业务判断；只有分块读取前的论文
- * 归属校验留在平台侧（引擎按 id 读 RAG 索引，不再查 bio_paper）。</p>
+ * 归属校验留在平台侧（引擎按 id 读 RAG 索引，不再查平台表）。</p>
  */
 @RestController
 @RequestMapping("/api/v1")

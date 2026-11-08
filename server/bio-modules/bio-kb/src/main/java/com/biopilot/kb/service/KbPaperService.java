@@ -3,7 +3,7 @@ package com.biopilot.kb.service;
 import com.biopilot.kb.dto.KbPaperView;
 import java.util.List;
 
-/** 知识库论文清单与勾选：{@code bio_paper} 的 kb 列归本服务写。
+/** 知识库论文清单与勾选：{@code bio_file} 的 kb_enabled 列归本服务写。
 
     <p>论文身份/文件/书目列归 {@code bio-file}；本服务只读这些列、只写
     {@code kb_enabled} 与索引状态列，因此不引用 {@code bio-file} 的 mapper 或实体。</p>

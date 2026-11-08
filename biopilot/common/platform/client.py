@@ -196,7 +196,7 @@ class PlatformClient:
 
     def upload_artifact(self, user_id: str, run_id: str, name: str, data: bytes,
                         content_type: str = "application/octet-stream") -> dict:
-        """把一个分析产物登记进平台文件表（OSS + ``bio_file_upload``）。
+        """把一个分析产物登记进平台文件表（OSS + ``bio_file``）。
 
         Args:
             user_id: 归属用户。
