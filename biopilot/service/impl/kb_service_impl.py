@@ -64,7 +64,7 @@ def _sweep_orphan_vectors(svc, counts: dict[str, int],
         try:
             if svc.remove_document(path):
                 removed += 1
-                logger.warning("清理孤儿向量：%s（%s）", path, svc.user_domain)
+                logger.warning("清理孤儿向量：%s（%s）", path, svc.user_id)
             remaining.pop(path, None)
         except Exception:
             logger.warning("清理孤儿向量失败（%s）", path, exc_info=True)
@@ -118,7 +118,7 @@ class KbServiceImpl(KbService):
         from biopilot.engine.rag.services.rag_service import get_rag_service
 
         db = shared_db()
-        svc = get_rag_service(cfg, user_domain=user_id, db=db)
+        svc = get_rag_service(cfg, user_id=user_id, db=db)
 
         # ---- 向量库 ↔ 状态表对账：向量库是块的存储形态，状态表是唯一落点 ----
         indexed = failed = removed = orphans = 0
@@ -304,11 +304,11 @@ class KbServiceImpl(KbService):
             if user_id and int(row.get("kb_enabled") or 0):
                 enabled.setdefault(user_id, set()).add(str(row["id"]))
         stale: set[str] = set()
-        for domain, docs in list_domain_states(shared_db()).items():
+        for owner, docs in list_domain_states(shared_db()).items():
             known = {paper_id_of(key) for key in docs}
             known.discard(None)
-            if known - enabled.get(domain, set()):
-                stale.add(domain)
+            if known - enabled.get(owner, set()):
+                stale.add(owner)
         return stale
 
     async def reconcile_loop(self) -> None:
@@ -383,7 +383,7 @@ class KbServiceImpl(KbService):
         from biopilot.engine.rag.services.rag_service import get_rag_service
 
         cfg = BioPilotConfig.from_env()
-        svc = get_rag_service(cfg, user_domain=user_id)
+        svc = get_rag_service(cfg, user_id=user_id)
         started = _time.monotonic()
         hits = await asyncio.to_thread(
             self._read_locked, svc, svc.retrieve_scored, query, top_k)
@@ -401,7 +401,7 @@ class KbServiceImpl(KbService):
         from biopilot.engine.rag.services.rag_service import get_rag_service
 
         cfg = BioPilotConfig.from_env()
-        svc = get_rag_service(cfg, user_domain=user_id, db=shared_db())
+        svc = get_rag_service(cfg, user_id=user_id, db=shared_db())
         doc_key = paper_doc_key(paper_id)
         chunks = await asyncio.to_thread(
             self._read_locked, svc, svc.list_document_chunks, doc_key)
@@ -430,8 +430,7 @@ class KbServiceImpl(KbService):
     def runtime(self, user_id: str) -> dict:
         """知识库运行时信息，供 Java 概览合并（纯内存/配置读取）。"""
         cfg = BioPilotConfig.from_env()
-        collection = cfg.rag.storage.collection + (
-            "" if user_id == "local" else f"_{user_id}")
+        collection = cfg.rag.storage.collection + f"_{user_id}"
         return {
             "collection": collection,
             "embedding_model": cfg.rag.embedding.embed_model,

@@ -8,7 +8,7 @@ spawn 的子 agent 各绑各的、退出自动还原。CLI 单会话语义不变
 其后所有任务继承）。
 
 未绑定时 ``get_memory_context()`` 返回 None，工具据此降级（统一回「记忆服务未
-装配」而非抛异常）；``get_rag_domain()`` 缺省回 ``local``。这样工具定义与运行时
+装配」而非抛异常）；``get_rag_domain()`` 未绑定时返回空串。这样工具定义与运行时
 装配彻底解耦，测试也能传 None 隔离。
 """
 from __future__ import annotations
@@ -37,11 +37,15 @@ class MemoryToolsContext:
     """
 
     agent_id: str = ""
-    user_id: str = "local"
+    user_id: str = ""                       # 归属用户（必填；引擎没有无用户形态）
     block_manager: object = None
     message_manager: object = None
     tool_result_store: object = None
     db: object = None
+
+    def __post_init__(self):
+        if not self.user_id:
+            raise ValueError("MemoryToolsContext 缺少归属用户（user_id）")
 
 
 _memory_context: contextvars.ContextVar[MemoryToolsContext | None] = (
@@ -49,7 +53,7 @@ _memory_context: contextvars.ContextVar[MemoryToolsContext | None] = (
 
 #: 当前 run 的 RAG 用户域（决定检索/索引进哪个用户的 collection）。
 _rag_domain: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "biopilot_rag_domain", default="local")
+    "biopilot_rag_domain", default="")
 
 
 def set_memory_context(ctx: MemoryToolsContext | None):
@@ -85,12 +89,17 @@ def set_rag_domain(domain: str | None):
     """绑定当前任务（及其子任务）的 RAG 用户域，返回复位令牌。
 
     Args:
-        domain: 用户隔离域（None/空串按 local 处理）。
+        domain: 归属用户（必填）。
+
+        Raises:
+            ValueError: domain 为空。
 
     Returns:
         contextvars.Token，嵌套场景收尾用 ContextVar.reset 还原外层绑定。
     """
-    return _rag_domain.set(domain or "local")
+    if not domain:
+        raise ValueError("set_rag_domain 缺少归属用户（user_id）")
+    return _rag_domain.set(domain)
 
 
 def reset_rag_domain(token) -> None:
@@ -103,5 +112,5 @@ def reset_rag_domain(token) -> None:
 
 
 def get_rag_domain() -> str:
-    """返回当前任务绑定的用户域；未绑定返回 local。"""
-    return _rag_domain.get() or "local"
+    """返回当前任务绑定的归属用户；未绑定返回空串（调用方据此 fail-fast）。"""
+    return _rag_domain.get() or ""

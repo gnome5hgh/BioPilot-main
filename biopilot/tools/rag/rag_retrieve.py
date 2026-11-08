@@ -108,7 +108,7 @@ class RagRetrieveTool(Tool):
             ToolResult: 包含格式化文本的 ToolResult 对象。
         """
         # 1. 获取 RAGService 单例（若已注入则使用注入的实例）。
-        svc = self._service or get_rag_service(user_domain=get_rag_domain())
+        svc = self._service or get_rag_service(user_id=get_rag_domain())
         if top_k is None:
             top_k = svc.config.rag.retriever.top_k
 

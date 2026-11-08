@@ -46,7 +46,7 @@ class UserServiceImpl(UserService):
         except Exception:
             logger.warning("删户清理跳过 bio_memory_consolidation_cursor")
         try:
-            rag_index_mapper.delete_domain(db, target_id)
+            rag_index_mapper.delete_by_user(db, target_id)
         except Exception:
             logger.warning("删户清理跳过 bio_rag_index_state（表不存在或不可达）")
         try:

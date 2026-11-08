@@ -53,13 +53,14 @@ def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage,
           与「信封里字段为 None」在库里都是可区分的（后者是一行 JSON）。
         - created_at 若未显式设置，则使用当前 UTC 时间。
     """
+    if not user_id:
+        # 引擎没有无用户的运行形态，绝不静默落假归属；引擎链路恒传真实归属。
+        raise ValueError("消息落盘缺少归属用户（user_id）")
     db.execute(
         "INSERT INTO bio_message (id, agent_id, user_id, session_id, role, content, tool_calls,"
         " tool_call_id, step_id, run_id, otid, meta, created_at)"
         " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        # user_id=None（测试预置等直接调用）按列默认值 'local' 归一；
-        # 引擎链路（ContextWindow）恒传真实归属。
-        (m.id, agent_id, user_id or "local", m.session_id, m.role.value,
+        (m.id, agent_id, user_id, m.session_id, m.role.value,
          # 若 content 是 list/dict，转为 JSON 字符串；否则原样保留
          json.dumps(m.content, ensure_ascii=False)
          if isinstance(m.content, (list, dict)) else m.content,

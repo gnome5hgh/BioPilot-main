@@ -50,7 +50,9 @@ def make_tool_result_offloader(store, settings):
         threshold = min(per_tool if per_tool is not None else ceiling, ceiling)
         if len(text) <= threshold:
             return result
-        stored = store.put(user_id or "local", session_id, tool_call_id, text)
+        if not user_id:
+            raise RuntimeError("工具结果外置缺少归属用户（user_id）")
+        stored = store.put(user_id, session_id, tool_call_id, text)
         if stored is None:
             return ToolResult(
                 text=(text[:threshold]

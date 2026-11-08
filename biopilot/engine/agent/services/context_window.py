@@ -66,7 +66,7 @@ class ContextWindow:
     """
 
     def __init__(self, message_manager=None, agent_manager=None, session_id: str = "",
-                 agent_id: str | None = None, user_id: str = "local"):
+                 agent_id: str | None = None, user_id: str = ""):
         """
         Args:
             message_manager: MessageManager | None，对话落盘与窗口回放；None 时
@@ -76,6 +76,8 @@ class ContextWindow:
             session_id: str，会话分组标识（同一会话的 supervisor 与子 agent 共享）
             agent_id: str | None，具体对话标识；None 时回退为 session_id（旧行为）
         """
+        if not user_id:
+            raise ValueError("ContextWindow 缺少归属用户（user_id）")
         self._mm = message_manager
         self._am = agent_manager
         self._session_id = session_id

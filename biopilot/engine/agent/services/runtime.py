@@ -168,7 +168,7 @@ class Agent:
         intent_service: "IntentService | None" = None,
         session_id: str | None = None,
         conversation_id: str | None = None,
-        user_id: str = "local",   # 归属用户（行级隔离）；单机脚本默认 local，spawn 显式继承父值
+        user_id: str = "",       # 归属用户（必填，由装配层注入；spawn 显式继承父值）
         memory=None,                # Memory | None
         agent_manager=None,         # AgentManager | None
         block_manager=None,         # BlockManager | None
@@ -243,6 +243,8 @@ class Agent:
         self.agents_block = agent_registry.agents_block(agent_type)
 
         #: Agent 类型标识符
+        if not user_id:
+            raise ValueError("Agent 缺少归属用户（user_id）")
         self.agent_type = agent_type
 
         #: ReAct 循环最大轮数安全阀
@@ -641,7 +643,7 @@ class Agent:
         # RAG 用户域随 run 绑定：检索/索引工具落在本用户的 collection
         from biopilot.engine.tool.services.runtime_context import (
             reset_rag_domain, set_rag_domain)
-        rag_token = set_rag_domain(getattr(self, "user_id", "local"))
+        rag_token = set_rag_domain(self.user_id)
         # 流式回调按次覆盖：缓存的 Agent 逐次运行可换回调（会话锁保证同
         # Agent 不并发，覆盖/恢复安全）
         old_cb = self.stream_callback

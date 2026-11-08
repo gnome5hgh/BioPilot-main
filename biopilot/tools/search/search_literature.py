@@ -19,9 +19,12 @@ _ABSTRACT_PREVIEW = 400
 
 
 def _current_user_id() -> str:
-    """取当前 run 的归属用户；未绑定上下文时回退 local（单机脚本/测试）。"""
+    """取当前 run 的归属用户；未绑定即报错（引擎没有无用户形态）。"""
     ctx = get_memory_context()
-    return getattr(ctx, "user_id", None) or "local"
+    user_id = getattr(ctx, "user_id", None)
+    if not user_id:
+        raise RuntimeError("当前上下文未绑定归属用户（user_id）")
+    return user_id
 
 
 class SearchLiteratureTool(Tool):

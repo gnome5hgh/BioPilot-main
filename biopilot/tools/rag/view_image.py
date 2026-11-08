@@ -80,7 +80,7 @@ class ViewImageTool(Tool):
             # 只在真的缺依赖时才去取全局服务（测试两样都注入时就不碰它）
             from biopilot.engine.rag.services.rag_service import get_rag_service
             from biopilot.engine.tool.services.runtime_context import get_rag_domain
-            svc = get_rag_service(user_domain=get_rag_domain())
+            svc = get_rag_service(user_id=get_rag_domain())
             if store is None:
                 store = svc.image_store
             if llm is None:

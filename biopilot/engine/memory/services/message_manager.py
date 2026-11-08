@@ -119,7 +119,7 @@ class MessageManager:
 
     def add_message(self, agent_id: str, wire: Message,
                     session_id: str | None = None,
-                    user_id: str | None = None) -> StoredMessage:
+                    user_id: str = "") -> StoredMessage:
         """落盘一条消息并返回持久化版本（全部消息持久化的唯一漏斗）。
 
         信任边界：清洗代理码点（surrogateescape 残留）——bio_message 表严格 UTF-8
@@ -131,8 +131,10 @@ class MessageManager:
             agent_id: 所属 agent 标识（具体对话）。
             wire: LLM 层的原始消息。
             session_id: 会话分组标识；None 时回退为 agent_id（旧行为）。
-            user_id: 归属用户（行级隔离列）；引擎链路（ContextWindow）恒传，
-                直接调用方（测试预置等）缺省为 NULL。
+            user_id: 归属用户（必填；引擎链路 ContextWindow 恒传真实归属）。
+
+        Raises:
+            ValueError: user_id 为空——引擎没有无用户的运行形态。
 
         Returns:
             持久化后的 StoredMessage 对象（含生成的 id 和 created_at）。

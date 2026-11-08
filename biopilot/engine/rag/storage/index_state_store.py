@@ -1,11 +1,11 @@
-"""RAG 索引状态的持久化：每个用户域一行，存配方指纹与「文档标识 → 指纹」清单。
+"""RAG 索引状态的持久化：每个用户一行，存配方指纹与「文档标识 → 指纹」清单。
 
 索引状态落在 MySQL 的 ``bio_rag_index_state`` 表，而不是工作区文件：运行数据根
-随时可能被清空或重定向，增量依据不该跟着丢；多进程同时索引同一域时，文件的
-读—改—写也没有可用的互斥手段。读—改—写在持锁事务里完成，同一域的写入串行化。
+随时可能被清空或重定向，增量依据不该跟着丢；多进程同时索引同一用户时，文件的
+读—改—写也没有可用的互斥手段。读—改—写在持锁事务里完成，同一用户的写入串行化。
 
-状态值统一保持数值形状：平台论文没有文件，存内容摘要派生的数值指纹；历史本地
-文档的 mtime 浮点数也仍按数值比对（外部评测脚本依赖这一点做增量）。
+状态值统一保持数值形状：平台论文没有文件，存内容摘要派生的数值指纹（外部
+消费方按数值比对做增量）。
 
 没有数据库的宿主（单测、嵌入式调用）用 ``MemoryIndexStateStore``：语义一致，只在
 进程内生效。写状态失败只告警——状态是增量优化的依据，丢了最多让下次全量重扫，
@@ -25,22 +25,24 @@ logger = logging.getLogger(__name__)
 
 
 class IndexStateStore:
-    """MySQL 里的索引状态（每用户域一行）。
+    """MySQL 里的索引状态（每用户一行）。
 
     Attributes:
-        user_domain: str，归属用户域（``local`` 或登录用户 id）。
+        user_id: 归属用户。
         _db: MemoryDB，连接池。
     """
 
-    def __init__(self, db, user_domain: str):
-        """绑定连接池与用户域。
+    def __init__(self, db, user_id: str):
+        """绑定连接池与归属用户。
 
         Args:
             db: MemoryDB 实例（提供 execute/transaction）。
-            user_domain: 归属用户域。
+            user_id: 归属用户（必填；引擎没有无用户的运行形态）。
         """
+        if not user_id:
+            raise ValueError("IndexStateStore 缺少归属用户（user_id）")
         self._db = db
-        self.user_domain = user_domain or "local"
+        self.user_id = user_id
 
     def read(self) -> tuple[object, dict] | None:
         """读原始状态，返回 (配方指纹, 文档清单)。
@@ -55,10 +57,10 @@ class IndexStateStore:
         try:
             row = self._db.execute(
                 "SELECT recipe, state_json FROM bio_rag_index_state"
-                " WHERE user_domain=?", (self.user_domain,)).fetchone()
+                " WHERE user_id=?", (self.user_id,)).fetchone()
         except Exception as e:
             logger.warning("读取索引状态失败（%s），按状态缺失处理：%s",
-                           self.user_domain, e)
+                           self.user_id, e)
             return None
         if not row:
             return None
@@ -71,7 +73,7 @@ class IndexStateStore:
         return row.get("recipe") or 0, docs
 
     def write(self, recipe: object, docs: dict) -> None:
-        """整份覆盖该域的状态（全量收敛用）。
+        """整份覆盖该用户的状态（全量收敛用）。
 
         Args:
             recipe: 配方指纹。
@@ -80,23 +82,23 @@ class IndexStateStore:
         self.mutate(lambda _current: (recipe, docs))
 
     def clear(self) -> None:
-        """删掉该域的状态记录（评测重建、强制全量重扫时用）。
+        """删掉该用户的状态记录（评测重建、强制全量重扫时用）。
 
         与「写一份空清单」的区别：空清单仍带配方，会被当成「状态正常、只是没有
         文档」，随后走元数据恢复；删记录才等价于「从未建过索引」。
         """
         try:
             self._db.execute(
-                "DELETE FROM bio_rag_index_state WHERE user_domain=?",
-                (self.user_domain,))
+                "DELETE FROM bio_rag_index_state WHERE user_id=?",
+                (self.user_id,))
         except Exception as e:
-            logger.warning("清除索引状态失败（%s）：%s", self.user_domain, e)
+            logger.warning("清除索引状态失败（%s）：%s", self.user_id, e)
 
     def mutate(self, change: Callable[[tuple[object, dict] | None],
                                       tuple[object, dict] | None]) -> None:
         """在持锁事务里读—改—写状态。
 
-        行锁保证并发写同一域时不会「读旧值 → 各自加一项 → 后写覆盖先写」。
+        行锁保证并发写同一用户时不会「读旧值 → 各自加一项 → 后写覆盖先写」。
         首次写入前先插一条空行占位：``SELECT … FOR UPDATE`` 在行不存在时锁不到
         任何东西，两个并发写者会在主键上相撞、后一个的更新被静默丢弃；占位行把
         首次写入也变成「先锁后改」。回调返回 None 表示不改写（例如旧配方状态要
@@ -113,18 +115,18 @@ class IndexStateStore:
                 # 「先锁后改」；后到的写者会在第二次 SELECT 上排队到前者提交。
                 row = self._db.execute(
                     "SELECT recipe FROM bio_rag_index_state"
-                    " WHERE user_domain=? FOR UPDATE", (self.user_domain,)).fetchone()
+                    " WHERE user_id=? FOR UPDATE", (self.user_id,)).fetchone()
                 if row is None:
                     self._db.execute(
                         "INSERT IGNORE INTO bio_rag_index_state"
-                        " (user_domain, recipe, state_json, updated_at)"
+                        " (user_id, recipe, state_json, updated_at)"
                         " VALUES (?,?,?,?)",
-                        (self.user_domain, "", "{}",
+                        (self.user_id, "", "{}",
                          datetime.now(timezone.utc).isoformat()))
                     row = self._db.execute(
                         "SELECT recipe FROM bio_rag_index_state"
-                        " WHERE user_domain=? FOR UPDATE",
-                        (self.user_domain,)).fetchone()
+                        " WHERE user_id=? FOR UPDATE",
+                        (self.user_id,)).fetchone()
                 # 占位行对回调呈现为「状态缺失」；真实状态照常读到。
                 current = self.read()
                 if current is not None and str(current[0] or "") == "":
@@ -133,19 +135,19 @@ class IndexStateStore:
                 if result is None:
                     if not row or str(row.get("recipe") or "") == "":
                         self._db.execute(
-                            "DELETE FROM bio_rag_index_state WHERE user_domain=?",
-                            (self.user_domain,))
+                            "DELETE FROM bio_rag_index_state WHERE user_id=?",
+                            (self.user_id,))
                     return
                 recipe, docs = result
                 self._db.execute(
                     "UPDATE bio_rag_index_state"
                     " SET recipe=?, state_json=?, updated_at=?"
-                    " WHERE user_domain=?",
+                    " WHERE user_id=?",
                     (str(recipe), json.dumps(docs, ensure_ascii=False),
-                     datetime.now(timezone.utc).isoformat(), self.user_domain))
+                     datetime.now(timezone.utc).isoformat(), self.user_id))
         except Exception as e:
             # 状态写不进去会让下次全量重扫（正确但更慢），不该让本次索引失败
-            logger.warning("写入索引状态失败（%s）：%s", self.user_domain, e)
+            logger.warning("写入索引状态失败（%s）：%s", self.user_id, e)
 
 
 class MemoryIndexStateStore:
@@ -188,18 +190,17 @@ class MemoryIndexStateStore:
 
 
 def list_domain_states(db) -> dict[str, dict]:
-    """读出所有非 local 域的文档清单（周期对账找孤儿索引用）。
+    """读出所有用户的文档清单（周期对账找孤儿索引用）。
 
     Args:
         db: MemoryDB 实例。
 
     Returns:
-        dict[str, dict]: 用户域 → {文档标识: 指纹}；读取失败时为空字典。
+        dict[str, dict]: 用户 id → {文档标识: 指纹}；读取失败时为空字典。
     """
     try:
         rows = db.execute(
-            "SELECT user_domain, state_json FROM bio_rag_index_state"
-            " WHERE user_domain <> 'local'").fetchall()
+            "SELECT user_id, state_json FROM bio_rag_index_state").fetchall()
     except Exception as e:
         logger.warning("读取全部索引状态失败：%s", e)
         return {}
@@ -210,5 +211,5 @@ def list_domain_states(db) -> dict[str, dict]:
         except (TypeError, ValueError):
             continue
         if isinstance(docs, dict):
-            out[str(row["user_domain"])] = docs
+            out[str(row["user_id"])] = docs
     return out

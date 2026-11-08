@@ -4,13 +4,9 @@
 被删除的论文则从索引里清理掉。索引对象只有论文——笔记是 agent 自己的产物，
 短、可整篇读，不需要检索（「检索自己的笔记」这项能力是有意移除的）。
 
-两种隔离域共用同一条内存字节管线：
-
-- **平台论文**（登录用户域）：字节由平台适配层取回，不落本地文件；文档标识是
-  ``paper:<paper_id>``，指纹是内容摘要派生的数值。成员与状态由平台表
-  ``bio_file`` 决定。
-- **本机域**（``local``）：评测/单机脚本同样传入字节，文档标识由调用方给出
-  （评测用绝对路径），指纹同内容摘要。不再按目录扫描。
+索引只有一条内存字节管线（**登录用户域**）：字节由平台适配层取回，不落本地
+文件；文档标识是 ``paper:<paper_id>``，指纹是内容摘要派生的数值。成员与状态由
+平台表 ``bio_file`` 决定。
 
 幂等设计：单篇文档的重新索引用"先删后建"。因为块 id 由文档标识加序号哈希
 生成、与内容无关，文档内容收缩或删掉某些章节时，原来位置上的旧块必须
@@ -219,19 +215,6 @@ class RagIndexer:
         return _recipe_hash(self.service.config)
 
     # ---------- 路径/状态工具 ----------
-    @property
-    def _is_local(self) -> bool:
-        """当前实例是否工作在本机域（``local``）。
-
-        本地域不再有目录语料：索引只接受平台论文的内存字节。保留这个判定是为了
-        状态门控与 collection 命名，不再用于目录扫描。
-
-        Returns:
-            bool: local 域为 True。
-        """
-        return self.service.user_domain == "local"
-
-
     def read_state(self) -> tuple[object, dict] | None:
         """读原始状态（公开入口；供全量收敛与用户域论文索引判成功）。
 
@@ -264,18 +247,15 @@ class RagIndexer:
     def _record_document(self, doc_key: str, stamp: float) -> None:
         """把单篇文档的指纹记进状态（读—改—写在存取器的事务里完成）。
 
-        用户域以平台表为真相，状态只记「索引过哪些论文」，不受配方门控约束；
-        local 域保留版本门控，配方不符时旧状态作废、按全量重扫处理。
+        以平台表为真相，状态只记「索引过哪些论文」，不受配方门控约束；
+        配方升级后的全量重扫由用户显式触发「全部重新索引」。
 
         Args:
-            doc_key: 文档标识（绝对路径或 ``paper:<id>``）。
-            stamp: 文档指纹（mtime 或内容摘要派生值）。
+            doc_key: 文档标识（``paper:<id>``）。
+            stamp: 文档指纹（内容摘要派生值）。
         """
-        is_local = self._is_local
 
         def _update(current):
-            if is_local and current is not None and current[0] != self._recipe:
-                return None
             docs = dict(current[1]) if current else {}
             docs[doc_key] = stamp
             return self._recipe, docs

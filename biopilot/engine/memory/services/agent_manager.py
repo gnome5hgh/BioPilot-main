@@ -53,7 +53,7 @@ class AgentManager:
                    "agent_id VARCHAR(64) PRIMARY KEY, name TEXT, description TEXT,"
                    "`system` MEDIUMTEXT, model TEXT, context_window_limit INTEGER,"
                    "message_ids MEDIUMTEXT, created_at VARCHAR(40),"
-                   "user_id VARCHAR(191) NOT NULL DEFAULT 'local',"
+                   "user_id VARCHAR(191) NOT NULL,"
                    "project_id VARCHAR(64) NULL)")
         # 老库补列走 MemoryDB 的增量迁移（建表语句只管新库）。
         db.migrate_additive_columns()
@@ -83,7 +83,7 @@ class AgentManager:
             message_ids=json.loads(row["message_ids"]) if row["message_ids"] else [],
             memory=Memory(blocks=self.block_manager.list_blocks()),
             created_at=row["created_at"],
-            user_id=row.get("user_id", "local"),
+            user_id=str(row.get("user_id") or ""),
             project_id=row.get("project_id"),
         )
 
