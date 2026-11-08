@@ -39,7 +39,7 @@ class IndexStatusTool(Tool):
             （不中断调用方流程，由上级决定是否请示用户）。
         """
         try:
-            st = get_rag_service(user_domain=get_rag_domain()).index_status()
+            st = get_rag_service(user_id=get_rag_domain()).index_status()
         except Exception as e:
             # 外部服务缺席如实回报，不让异常穿透 ReAct 循环
             return ToolResult(text=f"索引体检失败：{e}", is_error=True)

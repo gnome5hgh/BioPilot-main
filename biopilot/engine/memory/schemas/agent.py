@@ -45,7 +45,7 @@ class AgentState(BaseModel):
 
     # ---------- 标识与元数据 ----------
     agent_id: str                                    # 唯一标识符（主键）
-    user_id: str = "local"                           # 归属用户（行级隔离；单机脚本默认 "local"）
+    user_id: str                                     # 归属用户（行级隔离；必填）
     project_id: str | None = None                    # 归属项目（NULL=未分组）
     name: str | None = None                          # 可读名称（可选）
     description: str | None = None                  # 描述（可选，用于展示/索引）

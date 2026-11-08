@@ -9,9 +9,13 @@ from biopilot.engine.tool.services.runtime_context import get_memory_context
 
 
 def current_user_id() -> str:
-    """取当前 run 的归属用户；未绑定上下文时回退 ``local``（单机脚本/测试）。"""
-    ctx = get_memory_context()
-    return str(getattr(ctx, "user_id", None) or "local")
+    """取当前 run 的归属用户（转发运行时上下文的统一入口）。
+
+    Raises:
+        RuntimeError: 上下文未绑定归属用户。
+    """
+    from biopilot.engine.tool.services.runtime_context import current_user_id as _uid
+    return _uid()
 
 
 def current_run_id() -> str:

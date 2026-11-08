@@ -36,7 +36,7 @@ class RAGService:
         _embedder/_reranker/_vector_store/_milvus_available/_bm25/_indexer/_retriever/_rewriter: 惰性组件槽位（None 表示未构造，首次访问经双重检查加锁构造）
     """
 
-    def __init__(self, config: BioPilotConfig, user_domain: str = "local", db=None):
+    def __init__(self, config: BioPilotConfig, user_id: str, db=None):
         """初始化门面：先把所有组件槽位置空，首次访问才惰性构造。
 
         除 chunker（纯逻辑、构造无副作用）外，编码器/重排器/向量库/BM25 都走
@@ -44,13 +44,17 @@ class RAGService:
 
         Args:
             config: 全局配置对象，包含工作区路径、模型名等。
-            user_domain: 用户隔离域。local=本机单用户（共享语料根与索引状态）；
-                其余值（登录用户 id）派生独立 collection，论文不落本地文件——
-                索引时由平台适配层取回字节、以 ``paper:<id>`` 作文档标识。
+            user_id: 归属用户（必填）。每个用户派生独立 collection，论文不落
+                本地文件——索引时由平台适配层取回字节、以 ``paper:<id>`` 作文档标识。
             db: MemoryDB 实例（索引状态落库）；None 时首次用状态才按
                 ``runtime.memory_dsn`` 懒建共享连接池。
+
+        Raises:
+            ValueError: user_id 为空——引擎没有无用户的运行形态。
         """
-        self.user_domain = user_domain or "local"
+        if not user_id:
+            raise ValueError("RAGService 缺少归属用户（user_id）")
+        self.user_id = user_id
         self.config = config
         self._db = db
         # 可重入锁，保护整个索引/检索流程，确保并发下状态一致
@@ -144,8 +148,7 @@ class RAGService:
                             self.config.rag.storage.uri, dim,
                             collection_name=(
                                 self.config.rag.storage.collection
-                                + ("" if self.user_domain == "local"
-                                   else f"_{self.user_domain}")),
+                                + f"_{self.user_id}"),
                             batch_size=self.config.rag.storage.batch_size,
                             read_timeout=self.config.rag.storage.timeout,
                             write_timeout=self.config.rag.storage.write_timeout,
@@ -264,7 +267,7 @@ class RAGService:
                             "（重启后会全量重扫）：%s", e)
                         self._state_store = MemoryIndexStateStore()
                     else:
-                        self._state_store = IndexStateStore(db, self.user_domain)
+                        self._state_store = IndexStateStore(db, self.user_id)
         return self._state_store
 
     def bind_db(self, db) -> None:
@@ -285,7 +288,7 @@ class RAGService:
             IndexStateStore, MemoryIndexStateStore,
         )
         if isinstance(self._state_store, MemoryIndexStateStore):
-            self._state_store = IndexStateStore(db, self.user_domain)
+            self._state_store = IndexStateStore(db, self.user_id)
 
     # ---------- 索引器/检索器视图（延迟创建） ----------
     def get_indexer(self):
@@ -491,27 +494,31 @@ def _default_db(config: BioPilotConfig):
 
 
 def get_rag_service(config: BioPilotConfig | None = None,
-                    user_domain: str = "local", db=None) -> RAGService:
-    """按用户域缓存的检索服务实例（增量更新与索引状态的前提）。
+                    user_id: str = "", db=None) -> RAGService:
+    """按用户缓存的检索服务实例（增量更新与索引状态的前提）。
 
-    local 域沿用历史单例语义（共享语料根）；其余域每域一个实例——collection
-    加 `_{域}` 后缀、检索与索引天然按用户隔离。双重检查加锁，保证并发下每域
-    只创建一次。
+    每用户一个实例——collection 加 `_{用户}` 后缀、检索与索引天然按用户隔离。
+    双重检查加锁，保证并发下每用户只创建一次。
 
     Args:
         config: 可选配置对象，不传则使用 BioPilotConfig.from_env()。
-        user_domain: 用户隔离域（工具侧经运行时上下文取当前 run 的域）。
+        user_id: 归属用户（必填；工具侧经运行时上下文取当前 run 的归属）。
         db: 可选 MemoryDB；不传时首次读写索引状态才按配置懒建共享池。
 
     Returns:
-        RAGService: 该域唯一的检索服务实例。
+        RAGService: 该用户唯一的检索服务实例。
+
+    Raises:
+        ValueError: user_id 为空。
     """
-    key = user_domain or "local"
+    if not user_id:
+        raise ValueError("get_rag_service 缺少归属用户（user_id）")
+    key = user_id
     with _rag_singleton_lock:
         svc = _rag_services.get(key)
         if svc is None:
             svc = RAGService(config or BioPilotConfig.from_env(),
-                             user_domain=key, db=db)
+                             user_id=key, db=db)
             _rag_services[key] = svc
         else:
             svc.bind_db(db)

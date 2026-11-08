@@ -96,7 +96,7 @@ BioPilot/
 - **已知例外**：终端面板是面向用户的功能但宿在引擎进程——宿主语义绑死引擎所在机器（容器部署下是引擎容器内），且 PTY 生态在 Python；它不属于 agent 工具面。
 - **单写者规则（按表）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
-  - `bio_rag_index_state`：Python 独占（RAG 增量索引状态）。隔离键是 `user_domain`（`local` 或登录用户 id），不是 `user_id`——本地语料域没有用户归属，这是该表不带 `user_id` 列的唯一理由。
+  - `bio_rag_index_state`：Python 独占（RAG 增量索引状态，每用户一行）。
   - `bio_rag_paper_status`：Python 独占（论文索引状态唯一落点：排队/索引中/成功/失败、块数）；Java 只读展示（概览/清单），写入守卫以 JOIN `bio_file.kb_enabled=1` 完成。
   - `bio_config`、`bio_config_secret`、`bio_config_history`：Python 独占（运行时配置、加密密钥、保存历史）；Java 只经 `/admin/settings` 代理，不直连这三张表。
   - `bio_file`：Java 独占（论文/数据文件/文档/分析产物统一表），写身份/文件/书目/`citation_id`/`kb_enabled`；Python 只读身份/勾选/标题列，**不直接 INSERT/UPDATE/DELETE**。文件正文只在 OSS，表里只有 `oss_key`/`sha256`/`version`；同名唯一键是 `(user_id, name_key)`，artifact 的 `name_key` 为 NULL（不占名）。
@@ -128,18 +128,18 @@ BioPilot/
 - **`allowed_spawns` 与风险档位由框架强制**，不靠提示词自律；批量同类对象**一个对象一路**派发。
 - **技能的读写各自归口**：管理面（`bio_skill` 表、OSS `users/<uid>/skills/`、安装准入）归 Java `bio-skill`；引擎只做只读消费（按 `content_sha` 物化的用户缓存），不写管理状态，也不接受 `tools.py` 这类「加载即执行」的非标准扩展。**内置流程（笔记/选题/审查）不是 skill**，写在对应 agent 的 `AGENT.md` 里，模板在该角色 `references/` 下。
 - **意图只作信号**：不决定派发顺序、不作派发门禁、不持跨轮状态；spawn 对意图零引用，子 agent 不做意图识别。
-- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_file`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；例外有三类：`bio_rag_index_state` 的隔离键叫 `user_domain`（`local` 或用户 id），因为本地语料域不属于任何用户；`bio_config`/`bio_config_secret`/`bio_config_history` 是部署级全局配置，没有用户维度；`bio_oss_gc` 是系统级 outbox，没有用户维度。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
+- **`user_id` 即隔离键，信任边界不二次鉴权**：SpringBoot 内网调用携带的 `X-User-Id` 即真相，Python 适配层只验「头存在与否」（fail-closed）、不做鉴权，物理前提是适配层只绑回环/内网。引擎侧所有领域表（`bio_memory_block`/`bio_message`/`bio_file`/`bio_agent_state`/`bio_security_audit_event`/`bio_memory_consolidation_cursor`）都带 `user_id`；例外有两类：`bio_config`/`bio_config_secret`/`bio_config_history` 是部署级全局配置，没有用户维度；`bio_oss_gc` 是系统级 outbox，没有用户维度。SpringBoot 业务表的行级 `user_id` 过滤由 MyBatis-Plus 租户插件统一注入（`sys_*`/`bio_agent_state`/`bio_security_audit_event` 豁免），**不许手写 where 补过滤**。
 - **跨进程互斥只认 MySQL 锁**：per-conversation run 互斥与整合消费权认领都走 DB 锁（`GET_LOCK`/行级 `FOR UPDATE`），进程内锁只作单进程快路径；拿不到锁降级为文本提示，绝不排队阻塞。
 - **OSS 一致性方向固定**：对象先落、元数据行后写（失败留孤儿对象、不留死行）；删除反向（先删行、再删对象，孤儿可后台对账清扫）。论文标题恒来自解析器出口，上传登记也不回退文件名。
 - **config 快照语义**：run 启动时对配置做一次快照、全程读快照；设置页与模型切换都是**下一个 run 生效**，绝不热改在途 run。保存设置会丢弃 Agent 缓存；`rag.*` 与平台客户端是进程级单例，标「需重启」。
 - **SSE 契约**：`done` 帧恒发（含异常路径），客户端断开映射为取消 run（不留悬挂任务占会话锁）；确认等待由策略引擎计时（300 秒自动拒绝），不依赖连接存活。
 - **审计落 MySQL**：`bio_security_audit_event` 表是审计真相源（不是 JSONL 文件）；审计行不参与租户插件过滤。
 - **同一会话的身份链四处一致**：web 会话 id → SpringBoot（`X-User-Id`/`X-Conversation-Id` 头透传）→ AgentManager → `Agent.session_id`，错位会让各自读到空数据；子 agent 共享父 `session_id`，各自持有独立 `conversation_id`（消息不互相污染窗口）。
-- **多用户 RAG 隔离**：向量 collection 按用户域加后缀（`_{user_domain}`），`local` 域保持原名；BM25 按用户分语料，重建走 singleflight。
+- **多用户 RAG 隔离**：向量 collection 按用户加后缀（`_{user_id}`）；BM25 按用户分语料，重建走 singleflight。
 - **流式零开销**：`stream_callback` / `telemetry_callback` 为 `None` 时，全链路保持非流式行为。
 - **常量与配置的落点**：一个枚举一个文件（`constants/enums/<name>.py`，`__init__` 只再导出）；常量**有第二个消费方才**进 `constants/`；可调参数进顶层 `biopilot/config/`，组件自己的行为参数跟组件走。
 - **标题宁空勿错且只由 Java 产出**：论文标题由 `bio-common-pdf` 在入库时提取并写 `bio_file.title`；Python（RAG 索引、`read_pdf`）只从数据库读标题，不再自行推导。取不到就如实为空，**绝不回退到 PDF 文件名**。
-- **已退役的实现不要复活**：意图的旧混合路由与澄清链路、路径白名单、记忆的 markdown 投影与 git 投影提交、`conversation_search` 召回工具都已整体移出主干。跨会话知识只走记忆块（`bio_memory_block`），会话内精确回溯不再提供（摘要有损、原话不留）。旧文档里的描述不作论据。
+- **已退役的实现不要复活**：local 域与一切「无用户运行形态」（引擎必须显式拿到真实 user_id，绝不静默落哨兵）、意图的旧混合路由与澄清链路、路径白名单、记忆的 markdown 投影与 git 投影提交、`conversation_search` 召回工具都已整体移出主干。跨会话知识只走记忆块（`bio_memory_block`），会话内精确回溯不再提供（摘要有损、原话不留）。旧文档里的描述不作论据。
 
 ## 关键入口
 

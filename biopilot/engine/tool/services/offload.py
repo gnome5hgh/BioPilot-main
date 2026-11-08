@@ -34,11 +34,14 @@ def make_tool_result_offloader(store, settings):
             tool_call_id: 工具调用 ID。
             session_id: 会话标识。
             result: 原始 ToolResult。
-            user_id: 归属用户（外置键命名空间；None 时退回会话域）。
+            user_id: 归属用户（外置键命名空间；必填）。
             tool: Tool | None，用它的 max_result_size_chars 覆写阈值。
 
         Returns:
             原结果、指针结果，或明确截断的结果。
+
+        Raises:
+            RuntimeError: user_id 为空——外置键需要真实归属，绝不落哨兵。
         """
         if result is None or result.is_error:
             return result
@@ -50,7 +53,9 @@ def make_tool_result_offloader(store, settings):
         threshold = min(per_tool if per_tool is not None else ceiling, ceiling)
         if len(text) <= threshold:
             return result
-        stored = store.put(user_id or "local", session_id, tool_call_id, text)
+        if not user_id:
+            raise RuntimeError("工具结果外置缺少归属用户（user_id）")
+        stored = store.put(user_id, session_id, tool_call_id, text)
         if stored is None:
             return ToolResult(
                 text=(text[:threshold]

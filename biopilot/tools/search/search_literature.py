@@ -19,9 +19,9 @@ _ABSTRACT_PREVIEW = 400
 
 
 def _current_user_id() -> str:
-    """取当前 run 的归属用户；未绑定上下文时回退 local（单机脚本/测试）。"""
-    ctx = get_memory_context()
-    return getattr(ctx, "user_id", None) or "local"
+    """取当前 run 的归属用户（转发运行时上下文的统一入口）。"""
+    from biopilot.engine.tool.services.runtime_context import current_user_id
+    return current_user_id()
 
 
 class SearchLiteratureTool(Tool):

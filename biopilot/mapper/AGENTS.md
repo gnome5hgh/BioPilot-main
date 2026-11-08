@@ -3,7 +3,7 @@
 ## Scope
 
 - 覆盖 `biopilot/mapper/`：引擎领域表与跨栈只读表的全部 SQL。
-- 引擎表的 DDL 唯一落点是 [`../engine/memory/storage/database.py`](../engine/memory/storage/database.py) 的 `_SCHEMA`；本层只写查询，不建表。
+- 引擎表的 DDL 唯一落点是 [`../engine/memory/storage/database.py`](../engine/memory/storage/database.py) 的 `_SCHEMA`；本层只写查询，不建表。唯一例外是改名类迁移（如列 RENAME 无法经 _ADDITIVE_COLUMNS 表达），走 `server/script/sql/migrations/` 一次性脚本，完成后与 `_SCHEMA` 一致。
 
 ## Module Positioning
 

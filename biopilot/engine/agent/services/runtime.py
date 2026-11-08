@@ -168,7 +168,7 @@ class Agent:
         intent_service: "IntentService | None" = None,
         session_id: str | None = None,
         conversation_id: str | None = None,
-        user_id: str = "local",   # 归属用户（行级隔离）；单机脚本默认 local，spawn 显式继承父值
+        user_id: str = "",       # 归属用户（必填，由装配层注入；spawn 显式继承父值）
         memory=None,                # Memory | None
         agent_manager=None,         # AgentManager | None
         block_manager=None,         # BlockManager | None
@@ -194,6 +194,10 @@ class Agent:
                 begin 注入 INTENT 块；None 时整套意图层不存在
                 （纯 ReAct，无 INTENT 块、无追问继承）。
             session_id: 会话标识,跨多次 run 保持一致,便于审计聚合;None 时 自动生成 8 位 hex
+            user_id: 归属用户（必填，由装配层注入真实归属；spawn 显式继承父值）。
+
+        Raises:
+            ValueError: user_id 为空——引擎没有无用户的运行形态。
             conversation_id: 具体对话标识（消息落盘与窗口追踪用）；None 时回退为 session_id。
                 子 agent 共享父 session_id，但各自持有独立 conversation_id，互不污染窗口。
             memory: Memory 实例(可选),compile() 输出 system 记忆块注入 head (每轮重建);None 时跳过
@@ -241,6 +245,9 @@ class Agent:
 
         #: <available_agents> 清单块（本 agent 可派发目标，空串 = 无可派发目标，整块省略）
         self.agents_block = agent_registry.agents_block(agent_type)
+
+        if not user_id:
+            raise ValueError("Agent 缺少归属用户（user_id）")
 
         #: Agent 类型标识符
         self.agent_type = agent_type
@@ -641,7 +648,7 @@ class Agent:
         # RAG 用户域随 run 绑定：检索/索引工具落在本用户的 collection
         from biopilot.engine.tool.services.runtime_context import (
             reset_rag_domain, set_rag_domain)
-        rag_token = set_rag_domain(getattr(self, "user_id", "local"))
+        rag_token = set_rag_domain(self.user_id)
         # 流式回调按次覆盖：缓存的 Agent 逐次运行可换回调（会话锁保证同
         # Agent 不并发，覆盖/恢复安全）
         old_cb = self.stream_callback

@@ -49,7 +49,9 @@ class ReadToolResultTool(Tool):
         store = getattr(ctx, "tool_result_store", None)
         if store is None:
             return ToolResult(text="工具结果存储未装配")
-        uid = getattr(ctx, "user_id", None) or "local"
+        uid = getattr(ctx, "user_id", None)
+        if not uid:
+            raise RuntimeError("当前上下文未绑定归属用户（user_id）")
         if archive_key:
             if not archive_key.startswith(session_key_prefix(uid, ctx.agent_id)):
                 return ToolResult(text="archive_key 不属于当前用户会话")

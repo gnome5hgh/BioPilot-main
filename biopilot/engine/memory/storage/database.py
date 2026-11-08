@@ -38,7 +38,7 @@ _SCHEMA = """
 -- bio_memory_block 表：核心记忆块存储（业务主表）
 CREATE TABLE IF NOT EXISTS bio_memory_block (
     id VARCHAR(64) NOT NULL,            -- 块唯一标识
-    user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
+    user_id VARCHAR(191) NOT NULL,      -- 归属用户（行级隔离）
     label VARCHAR(191) NOT NULL,        -- 业务标签（如 "assistant", "profile"）
     value MEDIUMTEXT NOT NULL,          -- 块内容（文本）
     `limit` INTEGER NOT NULL DEFAULT 2000, -- 字符长度上限
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS bio_memory_block (
 -- bio_memory_block_history 表：块历史快照（撤销/重做链）
 CREATE TABLE IF NOT EXISTS bio_memory_block_history (
     id BIGINT NOT NULL AUTO_INCREMENT,  -- 自增主键（排序依据）
-    user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
+    user_id VARCHAR(191) NOT NULL,      -- 归属用户（行级隔离）
     block_id VARCHAR(64) NOT NULL,      -- 对应的块 ID
     label VARCHAR(191) NOT NULL,        -- 快照时的标签
     value MEDIUMTEXT NOT NULL,          -- 快照时的内容
@@ -103,15 +103,15 @@ CREATE TABLE IF NOT EXISTS bio_security_audit_event (
     KEY idx_audit_session (session_id, created_at),
     KEY idx_audit_user (user_id, created_at)
 );
--- bio_rag_index_state 表：RAG 增量索引状态（每用户域一行，Python 独占读写）
+-- bio_rag_index_state 表：RAG 增量索引状态（每用户一行，Python 独占读写）
 -- state_json 是「文档标识 → 指纹」的映射：本地文档存修改时间，平台论文存内容摘要
 -- 派生的数值。放数据库而不是工作区文件，让运行数据根不再承载任何真相。
 CREATE TABLE IF NOT EXISTS bio_rag_index_state (
-    user_domain VARCHAR(191) NOT NULL,  -- 用户隔离域（local 或登录用户 id）
+    user_id VARCHAR(191) NOT NULL,      -- 归属用户（行级隔离）
     recipe VARCHAR(64) NOT NULL,        -- 产出块集合的配方指纹（切块/嵌入/视觉参数）
     state_json MEDIUMTEXT NOT NULL,     -- 文档标识 → 指纹 的 JSON 映射
     updated_at VARCHAR(40) NOT NULL,    -- 最近写入时间（ISO 字符串）
-    PRIMARY KEY (user_domain)
+    PRIMARY KEY (user_id)
 );
 -- bio_rag_paper_status 表：论文索引状态的唯一落点（逐篇一行，Python 独占写，Java 只读展示）
 -- 行存在即代表该论文进入过索引流程，「未加入知识库」= 无行；勾选真相是 bio_file.kb_enabled
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS bio_rag_paper_status (
 -- bio_message 表：对话消息持久化
 CREATE TABLE IF NOT EXISTS bio_message (
     id VARCHAR(64) NOT NULL,             -- 消息唯一标识
-    user_id VARCHAR(191) NOT NULL DEFAULT 'local', -- 归属用户（行级隔离）
+    user_id VARCHAR(191) NOT NULL,      -- 归属用户（行级隔离）
     agent_id VARCHAR(191) NOT NULL,      -- 所属 agent（具体对话）
     session_id VARCHAR(191) NULL,        -- 会话分组（同一会话的 supervisor 与子 agent）
     role VARCHAR(20) NOT NULL,           -- system/user/assistant/tool
@@ -196,13 +196,8 @@ CREATE TABLE IF NOT EXISTS bio_config_history (
 _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("bio_message", "meta", "meta MEDIUMTEXT NULL"),
     ("bio_message", "session_id", "session_id VARCHAR(191) NULL"),
-    # user_id：多用户行级隔离。存量行（单用户时代）落 'local'。
-    ("bio_message", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
-    ("bio_memory_block", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
-    ("bio_memory_block_history", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
     # bio_agent_state 由 AgentManager 自建（不在 _SCHEMA 管辖）；此处登记使存量库在
     # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
-    ("bio_agent_state", "user_id", "user_id VARCHAR(191) NOT NULL DEFAULT 'local'"),
     ("bio_agent_state", "project_id", "project_id VARCHAR(64) NULL"),
     # 平台表（bio_file/bio_schedule_task）的建表与
     # 加列归 Java（server/script/sql）；此处只维护引擎自己的表。
