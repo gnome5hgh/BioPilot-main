@@ -4,7 +4,7 @@ SpringBoot 3.5 服务端（Java 21）：BioPilot 的鉴权、平台业务表与�
 
 ## Scope
 
-- 本 manifest 约束 `server/` 全部模块；进入子目录无更近的 manifest。
+- 本 manifest 约束 `server/` 全部模块；`bio-admin`、各业务域与 `bio-common` 的子模块各有自己的 manifest（见 Routing）——改对应模块前先读它那份。
 - 改引擎侧（Python）之前去读 `biopilot/AGENTS.md`；两端共守的信任边界与存储布局在根 `AGENTS.md` 硬红线与 ADR 0012。
 
 ## 模块定位
@@ -72,10 +72,13 @@ cd bio-admin && mvn spring-boot:run  # 启动 8080（reactor 里只有 bio-admin
 mvn test -pl bio-admin               # 服务端测试
 ```
 
-`mvn spring-boot:run -pl bio-admin -am` **会失败**：直接目标调用会在 reactor 每个模块上执行，库模块没有 main class。
+启动方式的选择与陷阱详见 [`bio-admin/AGENTS.md`](bio-admin/AGENTS.md)。
 
 ## Routing
 
 - 上级：根 `AGENTS.md`
+- 应用入口与集成测试：[`bio-admin/AGENTS.md`](bio-admin/AGENTS.md)
+- 业务域：[`bio-modules/bio-system/`](bio-modules/bio-system/AGENTS.md) / [`bio-project/`](bio-modules/bio-project/AGENTS.md) / [`bio-file/`](bio-modules/bio-file/AGENTS.md) / [`bio-kb/`](bio-modules/bio-kb/AGENTS.md) / [`bio-schedule/`](bio-modules/bio-schedule/AGENTS.md)（无 manifest，规则在本文件） / [`bio-literature/`](bio-modules/bio-literature/AGENTS.md) / [`bio-citation/`](bio-modules/bio-citation/AGENTS.md) / [`bio-skill/`](bio-modules/bio-skill/AGENTS.md) / [`bio-gateway/`](bio-modules/bio-gateway/AGENTS.md)
+- 共享基础设施：[`bio-common/AGENTS.md`](bio-common/AGENTS.md)（其下 8 个子模块 manifest 见它那份 Routing）
 - 信任边界与存储布局：ADR 0012；安全轴（引擎侧）：ADR 0002
 - 排障：启动失败先看 MySQL 容器健康与 `application.yaml` 的 DSN；401/403 语义见 SaTokenConfigure 与 SaTokenExceptionAdvice

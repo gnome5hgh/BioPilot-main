@@ -2,7 +2,7 @@
 
 ## Scope
 
-- 覆盖 `biopilot/` 主包。`api/`、`service/`、`config/`、`engine/`、`tools/` 与各子包各有自己的 manifest（见 Routing）；**改对应模块前先读它那份**。
+- 覆盖 `biopilot/` 主包。`api/`、`service/`、`controller/`、`domain/`、`mapper/`、`schema/`、`config/`、`engine/`、`tools/` 与各子包各有自己的 manifest（见 Routing）；**改对应模块前先读它那份**。
 - 根 manifest 的硬红线在本层同样成立，这里不重复。
 
 ## Module Positioning
@@ -17,11 +17,11 @@
 biopilot/
 ├─ main.py        # 启动类：config 子命令分发 + uvicorn
 ├─ api/           # FastAPI 装配：app/deps/router/lifespan/exception_handlers（有 manifest）
-├─ controller/    # 路由层：一个 controller 一个 APIRouter
+├─ controller/    # 路由层：一个 controller 一个 APIRouter（有 manifest）
 ├─ service/       # 应用服务：ABC 接口 + impl/（有 manifest）
-├─ mapper/        # SQL 访问：service 只经这里读写引擎领域表
-├─ schema/        # HTTP 契约：请求/响应 Pydantic 模型
-├─ domain/        # 应用层 dataclass / Protocol（WebConfig、WebSession、RuntimeState、TerminalSocket）
+├─ mapper/        # SQL 访问：service 只经这里读写引擎领域表（有 manifest）
+├─ schema/        # HTTP 契约：请求/响应 Pydantic 模型（有 manifest）
+├─ domain/        # 应用层 dataclass / Protocol（有 manifest）
 ├─ config/        # 全局可调参数（有 manifest）
 ├─ common/        # 跨层共享基础设施（有 manifest）
 ├─ engine/        # agent 系统技术核心，内含 rag/ vision/（有 manifest）
@@ -108,7 +108,7 @@ conda run -n biopilot python -m pytest tests/api tests/core -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 直接子包：[`api/`](api/AGENTS.md) / [`service/`](service/AGENTS.md) / [`config/`](config/AGENTS.md) / [`engine/`](engine/AGENTS.md) / [`tools/`](tools/AGENTS.md) / [`common/`](common/AGENTS.md)
+- 直接子包：[`api/`](api/AGENTS.md) / [`service/`](service/AGENTS.md) / [`controller/`](controller/AGENTS.md) / [`domain/`](domain/AGENTS.md) / [`mapper/`](mapper/AGENTS.md) / [`schema/`](schema/AGENTS.md) / [`config/`](config/AGENTS.md) / [`engine/`](engine/AGENTS.md) / [`tools/`](tools/AGENTS.md) / [`common/`](common/AGENTS.md)
 - `engine/` 之下：[`agent/`](engine/agent/AGENTS.md) / [`llm/`](engine/llm/AGENTS.md) / [`memory/`](engine/memory/AGENTS.md) / [`intent/`](engine/intent/AGENTS.md) / [`rag/`](engine/rag/AGENTS.md) / [`vision/`](engine/vision/AGENTS.md) / [`security/`](engine/security/AGENTS.md) / [`skills/`](engine/skills/AGENTS.md) / [`tool/`](engine/tool/AGENTS.md) / [`constants/`](engine/constants/AGENTS.md)
 
 ## References

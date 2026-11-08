@@ -12,19 +12,24 @@
 
 ## Directory Structure
 
-- `bio-common-core/` — R / PageResult / ServiceException / 常量 / 通用工具；不依赖 Web/MyBatis/Sa-Token/MinIO。
-- `bio-common-web/` — GlobalExceptionHandler / InternalHttp / MultipartRelay / SseRelay。
-- `bio-common-mybatis/` — MyBatis-Plus 配置、租户插件、分页与基础实体。
-- `bio-common-satoken/` — Sa-Token 配置、401/403 异常映射。
-- `bio-common-oss/` — MinIO 客户端与 `biopilot.storage.minio` 配置。
+- `bio-common-core/` — R / PageResult / ServiceException / 常量 / 通用工具；不依赖 Web/MyBatis/Sa-Token/MinIO（有 manifest）
+- `bio-common-web/` — GlobalExceptionHandler / InternalHttp / MultipartRelay / SseRelay（有 manifest）
+- `bio-common-mybatis/` — MyBatis-Plus 配置、租户插件、分页与基础实体（有 manifest）
+- `bio-common-satoken/` — Sa-Token 配置、401/403 异常映射（有 manifest）
+- `bio-common-oss/` — MinIO 客户端与 `biopilot.storage.minio` 配置（有 manifest）
+- `bio-common-pdf/` / `bio-common-net/` / `bio-common-mcp/` — 平台连接器（各有 manifest）
 
 ## Core Logic
 
 - **依赖方向**：`core ← web/mybatis/satoken/oss`；业务模块只依赖 common，不依赖其他模块的 mapper/entity。
-- **core 保持零中间件依赖**：需要 Web/MyBatis/Sa-Token/MinIO 的能力放各自模块，不塞进 core。
 - **异常 advice 有顺序**：具体异常（Sa-Token 401/403）必须排在全局兜底之前。
 - **新共享能力先确认是否已有子模块覆盖**；有则扩展，无则新建并同步 `bio-common/pom.xml` 与根 `server/pom.xml` 的 `dependencyManagement`。
 - 修改本层影响面广，必须全量构建与测试。
+
+## Routing
+
+- 上级：[`../../AGENTS.md`](../AGENTS.md)——即 `server/AGENTS.md`
+- 子模块 manifest：[`bio-common-core/`](bio-common-core/AGENTS.md) / [`bio-common-web/`](bio-common-web/AGENTS.md) / [`bio-common-mybatis/`](bio-common-mybatis/AGENTS.md) / [`bio-common-satoken/`](bio-common-satoken/AGENTS.md) / [`bio-common-oss/`](bio-common-oss/AGENTS.md) / [`bio-common-pdf/`](bio-common-pdf/AGENTS.md) / [`bio-common-net/`](bio-common-net/AGENTS.md) / [`bio-common-mcp/`](bio-common-mcp/AGENTS.md)
 
 ## Core Commands
 
