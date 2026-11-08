@@ -114,3 +114,21 @@ def reset_rag_domain(token) -> None:
 def get_rag_domain() -> str:
     """返回当前任务绑定的归属用户；未绑定返回空串（调用方据此 fail-fast）。"""
     return _rag_domain.get() or ""
+
+
+def current_user_id() -> str:
+    """取当前 run 的归属用户；未绑定即报错（引擎没有无用户形态）。
+
+    工具层的统一入口：各工具不再自带 fallback 拷贝。
+
+    Returns:
+        str: 归属用户。
+
+    Raises:
+        RuntimeError: 上下文未绑定归属用户。
+    """
+    ctx = get_memory_context()
+    user_id = str(getattr(ctx, "user_id", None) or "")
+    if not user_id:
+        raise RuntimeError("当前上下文未绑定归属用户（user_id）")
+    return user_id

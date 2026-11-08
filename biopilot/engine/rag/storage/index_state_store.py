@@ -38,6 +38,9 @@ class IndexStateStore:
         Args:
             db: MemoryDB 实例（提供 execute/transaction）。
             user_id: 归属用户（必填；引擎没有无用户的运行形态）。
+
+        Raises:
+            ValueError: user_id 为空。
         """
         if not user_id:
             raise ValueError("IndexStateStore 缺少归属用户（user_id）")

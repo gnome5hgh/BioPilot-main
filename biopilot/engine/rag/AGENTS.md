@@ -25,7 +25,7 @@ rag/
 ## Responsibilities
 
 - 本地版面解析 PDF，按节切块并丢弃残渣，产出带页码与坐标的块。
-- 把块写进向量库与 BM25 索引（两者用同一份带前缀文本），并维护索引状态（MySQL，每用户域一行）。
+- 把块写进向量库与 BM25 索引（两者用同一份带前缀文本），并维护索引状态（MySQL，每用户一行）。
 - 对外提供混合检索：稀疏 + 稠密融合后精排，返回有序块。
 
 ## Core Logic
@@ -49,7 +49,7 @@ rag/
 - `services/retriever.py` — 混合检索与重排
 - `parsers/chunker.py`、`parsers/pdf_extract.py` — 分块与解析（含字节入口）
 - `storage/vector_store.py` — 向量库
-- `storage/index_state_store.py` — 索引状态（MySQL，每用户域一行）
+- `storage/index_state_store.py` — 索引状态（MySQL，每用户一行）
 
 ## Usage And Change Notes
 

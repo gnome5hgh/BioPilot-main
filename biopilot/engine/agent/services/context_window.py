@@ -75,6 +75,10 @@ class ContextWindow:
                 的持久化；None 时只维护内存
             session_id: str，会话分组标识（同一会话的 supervisor 与子 agent 共享）
             agent_id: str | None，具体对话标识；None 时回退为 session_id（旧行为）
+            user_id: str，归属用户（必填；引擎链路由装配层注入真实归属）。
+
+        Raises:
+            ValueError: user_id 为空——引擎没有无用户的运行形态。
         """
         if not user_id:
             raise ValueError("ContextWindow 缺少归属用户（user_id）")

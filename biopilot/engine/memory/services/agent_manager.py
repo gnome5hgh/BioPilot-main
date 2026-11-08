@@ -83,7 +83,7 @@ class AgentManager:
             message_ids=json.loads(row["message_ids"]) if row["message_ids"] else [],
             memory=Memory(blocks=self.block_manager.list_blocks()),
             created_at=row["created_at"],
-            user_id=str(row.get("user_id") or ""),
+            user_id=str(row["user_id"]),
             project_id=row.get("project_id"),
         )
 

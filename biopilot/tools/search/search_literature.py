@@ -19,12 +19,9 @@ _ABSTRACT_PREVIEW = 400
 
 
 def _current_user_id() -> str:
-    """取当前 run 的归属用户；未绑定即报错（引擎没有无用户形态）。"""
-    ctx = get_memory_context()
-    user_id = getattr(ctx, "user_id", None)
-    if not user_id:
-        raise RuntimeError("当前上下文未绑定归属用户（user_id）")
-    return user_id
+    """取当前 run 的归属用户（转发运行时上下文的统一入口）。"""
+    from biopilot.engine.tool.services.runtime_context import current_user_id
+    return current_user_id()
 
 
 class SearchLiteratureTool(Tool):

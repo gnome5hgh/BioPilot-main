@@ -43,6 +43,10 @@ def insert_message(db: MemoryDB, agent_id: str, m: StoredMessage,
         db: 数据库连接。
         agent_id: 消息所属 agent 标识。
         m: 持久化消息对象（已含 id, role, content 等字段）。
+        user_id: 归属用户（必填；引擎链路恒传真实归属）。
+
+    Raises:
+        ValueError: user_id 为空——引擎没有无用户的运行形态。
 
     边界与注意：
         - content 字段在 schema 中为 TEXT，落盘时必须为字符串或 None。

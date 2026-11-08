@@ -194,6 +194,10 @@ class Agent:
                 begin 注入 INTENT 块；None 时整套意图层不存在
                 （纯 ReAct，无 INTENT 块、无追问继承）。
             session_id: 会话标识,跨多次 run 保持一致,便于审计聚合;None 时 自动生成 8 位 hex
+            user_id: 归属用户（必填，由装配层注入真实归属；spawn 显式继承父值）。
+
+        Raises:
+            ValueError: user_id 为空——引擎没有无用户的运行形态。
             conversation_id: 具体对话标识（消息落盘与窗口追踪用）；None 时回退为 session_id。
                 子 agent 共享父 session_id，但各自持有独立 conversation_id，互不污染窗口。
             memory: Memory 实例(可选),compile() 输出 system 记忆块注入 head (每轮重建);None 时跳过
@@ -242,9 +246,10 @@ class Agent:
         #: <available_agents> 清单块（本 agent 可派发目标，空串 = 无可派发目标，整块省略）
         self.agents_block = agent_registry.agents_block(agent_type)
 
-        #: Agent 类型标识符
         if not user_id:
             raise ValueError("Agent 缺少归属用户（user_id）")
+
+        #: Agent 类型标识符
         self.agent_type = agent_type
 
         #: ReAct 循环最大轮数安全阀
