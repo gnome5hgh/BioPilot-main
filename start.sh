@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# BioPilot 本地一键启动：依赖容器 → Python 适配层 → SpringBoot → 前端。
+# BioPilot 本地一键启动：Docker 守护进程 → 依赖容器 → Python 适配层 → SpringBoot → 前端。
 #
 # 用法：
 #   ./start.sh          # 起全部服务并跟随日志（Ctrl-C 只退出跟随，不停服务）
-#   ./stop.sh           # 停掉三个应用进程（容器保留，数据不丢）
+#   ./stop.sh           # 停掉三个应用进程与依赖容器（数据卷与数据不丢）
 #
 # 服务与端口：
 #   前端      http://localhost:5173
@@ -56,16 +56,60 @@ log() { printf '\033[2m[start]\033[0m %s\n' "$*"; }
 
 alive() { [ -f "$1" ] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
+# ---- 0. Docker 守护进程 ----
+# macOS 上 Docker Desktop / OrbStack 不常驻，守护进程没起时 compose 只会报
+# "Cannot connect to the Docker daemon"，一步就断；这里先尝试把桌面端拉起来
+# 并等它就绪，省掉「先手动开 Docker 再跑脚本」这一步。Linux 服务器上守护进程
+# 由 systemd 管理，没有可自动拉起的客户端，只做等待与报错。
+docker_up() { docker info >/dev/null 2>&1; }
+
+ensure_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    log "未找到 docker 命令：先安装 Docker（brew install --cask docker / OrbStack），或改用手动分步启动"
+    return 1
+  fi
+  if docker_up; then return 0; fi
+  if [ "$(uname -s)" = "Darwin" ]; then
+    for app in Docker OrbStack; do
+      if [ -d "/Applications/$app.app" ]; then
+        log "Docker 守护进程未就绪，启动 $app..."
+        open -a "$app" >/dev/null 2>&1 || true
+        break
+      fi
+    done
+  fi
+  for _ in $(seq 1 60); do
+    if docker_up; then log "Docker 守护进程已就绪"; return 0; fi
+    sleep 2
+  done
+  log "Docker 守护进程 120 秒内未就绪：请先启动 Docker Desktop / OrbStack（或 systemctl start docker）后重试"
+  return 1
+}
+
+ensure_docker || exit 1
+
 # ---- 1. 依赖容器（Milvus / MinIO / MySQL）----
+# --wait 会等到全部服务健康；Milvus 冷启动常见超 90 秒，失败不算致命，
+# 退回普通拉起让容器在后台继续初始化（后续就绪探测会兜住）。
 if ! docker compose up -d --wait --quiet-pull 2>/dev/null; then
-  log "docker compose 未就绪，重试普通拉起..."
-  docker compose up -d
+  log "docker compose --wait 未就绪，改普通拉起（容器在后台继续初始化）..."
+  docker compose up -d || log "compose 有服务拉起失败（见上面报错；Milvus/MinIO 缺失会降级，不影响启动）"
 fi
+# MySQL 是硬依赖：它起不来，适配层与 SpringBoot 都连不上，继续只会在 3 分钟
+# 就绪探测后一起报不可用，不如在这里明确失败。
 log "等待 MySQL 健康..."
+mysql_ok=0
 for _ in $(seq 1 30); do
-  docker exec biopilot-mysql mysqladmin ping -h 127.0.0.1 --silent >/dev/null 2>&1 && break
+  if docker exec biopilot-mysql mysqladmin ping -h 127.0.0.1 --silent >/dev/null 2>&1; then
+    mysql_ok=1
+    break
+  fi
   sleep 2
 done
+if [ "$mysql_ok" -eq 0 ]; then
+  log "MySQL 容器 60 秒内未健康：docker compose logs mysql 看原因，修好后重试"
+  exit 1
+fi
 log "依赖容器就绪"
 
 # ---- 2. Python 适配层（8300）----
@@ -119,7 +163,7 @@ if [ "$failures" -eq 0 ]; then
   cat <<'EOF'
 
   ✅ BioPilot 已启动：浏览器打开 http://localhost:5173
-     停止：./stop.sh（容器与数据保留）
+     停止：./stop.sh（应用进程与依赖容器一起停，数据保留）
 
 EOF
 else

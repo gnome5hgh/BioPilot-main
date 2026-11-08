@@ -33,12 +33,12 @@ pip install -e ".[dev]"
 cp .env.example .env
 # 运行时配置（模型参数/检索/安全档位等）在网页「设置」里维护，落 MySQL
 
-# 3. 启动依赖服务（Milvus + etcd + MinIO）并等健康
-docker compose up -d
-curl http://localhost:9091/healthz   # → OK
-
-# 4. 启动全套平台（适配层 + SpringBoot + 前端）
+# 3. 一键启动：Docker 守护进程 → 依赖容器（Milvus + etcd + MinIO + MySQL）→ 适配层 → SpringBoot → 前端
+#    Docker 没运行时脚本会尝试拉起 Docker Desktop / OrbStack，再等容器健康
 ./start.sh
+
+# 停止：应用进程与依赖容器一起停，数据卷保留（下次 ./start.sh 秒起）
+./stop.sh
 ```
 
 浏览器打开 `http://localhost:5173` 注册使用。
@@ -49,7 +49,7 @@ curl http://localhost:9091/healthz   # → OK
 PIP_INDEX_URL=https://pypi.org/simple APT_MIRROR=deb.debian.org docker compose build
 ```
 
-### 网页平台启动
+### 手动分步启动（等价于 `./start.sh`）
 
 ```bash
 docker compose up -d                       # MySQL + MinIO + Milvus（首启自动建库建表）
