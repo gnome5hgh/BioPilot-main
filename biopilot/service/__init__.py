@@ -2,7 +2,6 @@
 from biopilot.service.errors import (
     ConfigSourceUnavailable,
     ConflictError,
-    ForbiddenError,
     KbBusyError,
     NotFoundError,
     RequestValidationError,
@@ -12,7 +11,7 @@ from biopilot.service.errors import (
 )
 
 __all__ = [
-    "ServiceError", "RequestValidationError", "ForbiddenError", "NotFoundError",
+    "ServiceError", "RequestValidationError", "NotFoundError",
     "ConflictError", "TooManyRequestsError", "ServiceUnavailableError",
     "KbBusyError", "ConfigSourceUnavailable",
 ]

@@ -24,7 +24,7 @@
 
 ```text
 BioPilot/
-├─ web/                # 前端（Vue3 + Vite + TS 风格 JS）：登录/对话/文件/文献/知识库/引用库/终端面板/管理
+├─ web/                # 前端（Vue3 + Vite + TS 风格 JS）：登录/对话/文件/文献/知识库/引用库/管理
 ├─ server/             # SpringBoot 3（Java 21）：bio-admin(启动装配) bio-modules(业务域+引擎接入) bio-common(通用件)
 ├─ biopilot/           # Python 引擎：main.py(启动类) api/(FastAPI 装配) controller/(路由)
 │                      #   service/(应用服务 + impl) mapper/(SQL) schema/(HTTP DTO) domain/(领域对象)
@@ -69,7 +69,7 @@ BioPilot/
 
 ## 仓库职责
 
-- 承载一个可运行的多用户科研 Agent 平台：注册/登录/鉴权/角色（两档）/审计（SpringBoot），对话编排、领域子 agent、RAG 检索、引用管理、记忆系统、终端面板（宿主 shell，可选开启），文件管理（论文/数据文件/文档）/文献搜索/知识库/设置（三层协作）。
+- 承载一个可运行的多用户科研 Agent 平台：注册/登录/鉴权/角色（两档）/审计（SpringBoot），对话编排、领域子 agent、RAG 检索、引用管理、记忆系统，文件管理（论文/数据文件/文档）/文献搜索/知识库/设置（三层协作）。
 - 维护 agent 插件契约、工具的安全元数据与安全中间件链。
 - 维护设计文档体系：按模块划分的 ADR（正文恒为最新设计）与学习材料。
 - 承载编码代理的协作资产：各级 manifest、`.agents/skills/`、`biopilot/engine/intent/data/`。
@@ -87,13 +87,12 @@ BioPilot/
 三层平台的分工按**管理面/执行面尺**切：看一段代码在**管理一个资产**，还是在**消费资产去生产内容**。管理面（资产的登记/命名/删除/勾选/调度/状态展示，以及外部资源的**连接器**）→ Java；执行面（检索执行、工具语义、编排、记忆、RAG、沙箱——一切为 agent 行为语义存在的代码）→ Python。
 
 - **Java（`server/`）拥有管理面与连接器**：注册/登录/登出、Sa-Token 会话、角色（ADMIN/USER）、用户与登录日志、项目管理、文件资产（论文/数据文件/文档/分析产物的 CRUD、OSS 生命周期、`kb_enabled` 勾选真相）、知识库勾选/概览/清单（索引状态只读展示）、论文标题/书目提取（`bio-common-pdf`）、引用库（`bio-citation`：勾选、维护、导出 `.bib`）、定时任务管理与调度、文献搜索与导入、MCP 检索源配置与客户端（`bio-common-mcp`，双平面共享的连接器）、外部 URL 抓取（`bio-common-net`：公网校验 + 重定向逐跳校验，PDF 下载与文献导入共用）、管理端查询（用户/会话/审计读取）、用户技能管理（`bio-skill`：标准包准入、OSS 包、启停/更新/卸载）。
-- **Python（`biopilot/`）拥有执行面**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、论文索引状态（`bio_rag_paper_status`，唯一落点）、视觉、安全中间件与确认、终端 PTY、对话 SSE/确认/上下文用量（含 `bio_message` 对话落盘）、知识库试检索/分块读取/运行时信息、引擎配置（`bio_config` + 引导 env）、用户技能运行时消费（按用户物化技能缓存）。
+- **Python（`biopilot/`）拥有执行面**：ReAct 编排、LLM 接入、记忆与压缩、RAG 索引/检索/分块、论文索引状态（`bio_rag_paper_status`，唯一落点）、视觉、安全中间件与确认、对话 SSE/确认/上下文用量（含 `bio_message` 对话落盘）、知识库试检索/分块读取/运行时信息、引擎配置（`bio_config` + 引导 env）、用户技能运行时消费（按用户物化技能缓存）。
 - **推论一（连接器共享）**：外部资源的连接器只写一份、双平面共享（OSS 客户端、MCP 客户端、PDF 解析器都是平台连接器），谁消费谁经 `/internal/*` 契约调用；双消费者逻辑随连接器落 Java（如文献聚合同时服务检索页与 agent 工具）。
 - **推论二（数据轴正交）**：数据归属与逻辑归属是两把独立的尺——单写者规则按下表执行，跨平面访问只走 `/internal/*`（`X-Internal-Token` + `X-User-Id`）。
 - **推论三（引擎资产代理到达）**：引擎自身的运行时配置与领域数据（记忆/消息/状态/审计）是引擎资产，管理面经代理到达（设置页、会话列表），平台侧只读展示。
 - **推论四（单一实现）**：同一产品功能只在一个栈实现，另一栈只经契约消费，禁止为绕开跨栈契约而复制实现。
 - **推论五（单一落点）**：一份数据只有一个写者、一个落点；需要展示就跨栈只读，禁止「投影/真相源」式双写与常设对账。合法例外三类：信任边界两侧行级过滤机制各一套（纵深防御）；数据域不相交的基础设施客户端各持一份；可丢弃缓存与派生物（向量索引、技能缓存）不是双真相。
-- **已知例外**：终端面板是面向用户的功能但宿在引擎进程——宿主语义绑死引擎所在机器（容器部署下是引擎容器内），且 PTY 生态在 Python；它不属于 agent 工具面。
 - **单写者规则（按表）**：
   - `bio_agent_state`、`bio_message`、`bio_memory_block`、`bio_memory_block_history`、`bio_memory_consolidation_cursor`、`bio_security_audit_event`：Python 写，Java 只读（项目删除时清 `project_id` 是唯一例外）。
   - `bio_rag_index_state`：Python 独占（RAG 增量索引状态，每用户一行）。
@@ -115,7 +114,6 @@ BioPilot/
 - **错误一律降级为文本**：工具与中间件的错误转成 `ToolResult` 文本回传模型，由模型决定重试或调整。唯一向上抛的异常是 `MaxTurnsExceeded`。
 - **截断必须续写，绝不交付残缺内容**：模型因长度被截断时，把半截内容与续写提示放回 in-context 继续循环，不能把那半截当最终回答返回。
 - **安全只有策略轴，执行类工具必须进程外隔离**：进程内决定「要不要用户点头」。代码与命令执行只经 `run_python` / `run_shell` 的一次性 Docker 容器（断网/只读挂载/根只读）；要新增能执行 shell 或任意代码的工具，必须先有等强度的进程外隔离，否则不做。
-- **网页终端不属于 agent 工具面**：它是用户显式打开的宿主 shell，由 `runtime.allow_host_shell` 控制（默认关），子进程只带环境白名单；不得包装成工具交给模型，也不得在共享部署默认开启。终端面板按 `user_id` 复用一条会话，关闭/切换只脱离不杀进程。
 - **只有一个确认决策点**：策略引擎合并全部升级因后统一弹一次确认；其余中间件只登记升级原因。硬拒只来自显式规则，不来自档位。
 - **所有拦截走同一条降级通道**：拒绝、确认失败、安全阻断都表现为带 `decision` 的 `ToolResult`，绝不绕过 ReAct 循环。
 - **写工具必须声明安全元数据**（`risk_level` / `side_effects` / `provenance` 等），注册表加载时校验合法值。
@@ -139,14 +137,14 @@ BioPilot/
 - **流式零开销**：`stream_callback` / `telemetry_callback` 为 `None` 时，全链路保持非流式行为。
 - **常量与配置的落点**：一个枚举一个文件（`constants/enums/<name>.py`，`__init__` 只再导出）；常量**有第二个消费方才**进 `constants/`；可调参数进顶层 `biopilot/config/`，组件自己的行为参数跟组件走。
 - **标题宁空勿错且只由 Java 产出**：论文标题由 `bio-common-pdf` 在入库时提取并写 `bio_file.title`；Python（RAG 索引、`read_pdf`）只从数据库读标题，不再自行推导。取不到就如实为空，**绝不回退到 PDF 文件名**。
-- **已退役的实现不要复活**：local 域与一切「无用户运行形态」（引擎必须显式拿到真实 user_id，绝不静默落哨兵）、意图的旧混合路由与澄清链路、路径白名单、记忆的 markdown 投影与 git 投影提交、`conversation_search` 召回工具都已整体移出主干。跨会话知识只走记忆块（`bio_memory_block`），会话内精确回溯不再提供（摘要有损、原话不留）。旧文档里的描述不作论据。
+- **已退役的实现不要复活**：local 域与一切「无用户运行形态」（引擎必须显式拿到真实 user_id，绝不静默落哨兵）、意图的旧混合路由与澄清链路、路径白名单、记忆的 markdown 投影与 git 投影提交、`conversation_search` 召回工具、网页终端（宿主 shell PTY 面板，用户命令一律走 agent 的沙箱通道）都已整体移出主干。跨会话知识只走记忆块（`bio_memory_block`），会话内精确回溯不再提供（摘要有损、原话不留）。旧文档里的描述不作论据。
 
 ## 关键入口
 
 - 仓库规则与阅读路径：`AGENTS.md`
 - 进程入口与装配根：`biopilot/main.py`（启动类）、`biopilot/service/impl/assembly_service_impl.py`（Web 会话对象图）
-- FastAPI 装配层（agent 运行时 API：SSE/确认/知识库/终端/内部调用）：`biopilot/api/app.py`（工厂）、`biopilot/api/router.py`（路由汇总）、`biopilot/controller/`（处理器）、`biopilot/service/container.py`（服务容器）；规则见 [`biopilot/api/AGENTS.md`](biopilot/api/AGENTS.md)
-- SpringBoot 启动类：`server/bio-admin/src/main/java/com/biopilot/admin/`；引擎接入（代理/SSE/终端 WS）：`server/bio-modules/bio-gateway/`
+- FastAPI 装配层（agent 运行时 API：SSE/确认/知识库/内部调用）：`biopilot/api/app.py`（工厂）、`biopilot/api/router.py`（路由汇总）、`biopilot/controller/`（处理器）、`biopilot/service/container.py`（服务容器）；规则见 [`biopilot/api/AGENTS.md`](biopilot/api/AGENTS.md)
+- SpringBoot 启动类：`server/bio-admin/src/main/java/com/biopilot/admin/`；引擎接入（代理/SSE）：`server/bio-modules/bio-gateway/`
 - 前端入口与路由：`web/src/main.js`、`web/src/router/`
 - 参数声明点：`biopilot/config/sections.py`
 - 配置模板与字段示例：`.env.example`（引导层）；可调字段以设置页/`biopilot/config/schema.py` 为准

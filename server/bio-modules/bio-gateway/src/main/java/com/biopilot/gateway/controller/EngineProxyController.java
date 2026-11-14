@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 
 /**
- * 引擎运行时透传：模型选择、平台设置、技能商店、终端开关、知识库试检索/重建/分块。
+ * 引擎运行时透传：模型选择、平台设置、技能商店、知识库试检索/重建/分块。
  *
  * <p>这些数据的真相都在 Python 引擎，Java 不做业务判断；只有分块读取前的论文
  * 归属校验留在平台侧（引擎按 id 读 RAG 索引，不再查平台表）。</p>
@@ -62,17 +62,6 @@ public class EngineProxyController {
     @PostMapping("/kb/search")
     public ResponseEntity<String> kbSearch(@RequestBody String body) {
         return relay.post("/kb/search", body);
-    }
-
-    /** 终端面板：部署开关与重启（WS 本体由 TerminalRelayHandler 单独转发）。 */
-    @GetMapping("/terminal/config")
-    public ResponseEntity<String> terminalConfig() {
-        return relay.get("/terminal/config");
-    }
-
-    @PostMapping("/terminal/restart")
-    public ResponseEntity<String> terminalRestart() {
-        return relay.post("/terminal/restart", "{}");
     }
 
     /** 设置读/写（ADMIN 专属）：字段描述、有效值、补丁、历史与回滚。 */

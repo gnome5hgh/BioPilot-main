@@ -3,8 +3,8 @@
 ## Scope
 
 - 浏览器 ↔ Python 适配层的**全部转发**：SSE 对话流、确认回传、历史回放、上下文用量、
-  模型选择、平台设置、技能商店、终端开关、知识库试检索/重建/分块。
-- 终端 WebSocket 中继（浏览器 ⇄ SpringBoot ⇄ 引擎 PTY）与用户侧会话列表读取。
+  模型选择、平台设置、技能商店、知识库试检索/重建/分块。
+- 用户侧会话列表读取。
 - 上下文侧栏读侧：时间线与窗口组成明细查库组装（直读引擎落盘表，引擎不提供服务端点）。
 
 ## Module Positioning
@@ -27,11 +27,10 @@
 
 - `web/AgentRelay.java` — 唯一转发通道（单一 HttpClient，HTTP/1.1 锁死）
 - `controller/ChatProxyController` — 对话流、确认、历史、上下文用量、会话删除
-- `controller/EngineProxyController` — 模型、终端、设置、技能、知识库试检索
+- `controller/EngineProxyController` — 模型、设置、技能、知识库试检索
 - `controller/SessionController` — 用户侧会话列表（只读 `bio_agent_state`/`bio_message`）
 - `controller/ContextInsightController` — 上下文时间线与窗口组成明细（只读引擎表
   `bio_message`/`bio_agent_state`/`bio_memory_block`；技能清单经 bio-skill 公开接口）
-- `config/WebSocketConfig` + `ws/TerminalRelayHandler` — 终端中继
 
 ## Core Logic
 
@@ -41,8 +40,7 @@
   （JSON 错误体不是 SSE 帧）。`done` 帧由引擎负责恒发。
 - **归属校验留在平台侧**：知识库分块读取先经 `bio-file` 的 `PaperService.get` 校验论文归属。
 - **路径契约**：`/api/v1/chat/*`、`/api/v1/conversations/*`、`/api/v1/models`、
-  `/api/v1/terminal/*`、`/api/v1/admin/settings`、`/api/v1/admin/skills/*`；
-  WS 注册在 `/api/ws/terminal`（与 nginx 的 `/api/` 反代同一入口）。
+  `/api/v1/admin/settings`、`/api/v1/admin/skills/*`（与 nginx 的 `/api/` 反代同一入口）。
 
 ## Dependencies And Collaboration
 

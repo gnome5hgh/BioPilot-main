@@ -8,8 +8,6 @@
         <span v-else-if="!store.isDraft" class="project-chip muted">未归属项目</span>
       </div>
       <div class="head-right">
-        <button class="terminal-btn" title="打开终端（会话会保留）" aria-label="打开终端"
-                @click="terminalStore.toggle()">&gt;_</button>
         <select v-if="store.models.length > 1" class="select model-select"
                 :value="store.selectedModel" @change="changeModel">
           <option v-for="model in store.models" :key="model.name" :value="model.name">
@@ -232,14 +230,12 @@ import ContextSidebar from '../components/ContextSidebar.vue'
 import MarkdownView from '../components/MarkdownView.vue'
 import http from '../api/auth'
 import { useChatStore } from '../stores/chat'
-import { useTerminalStore } from '../stores/terminal'
 import { toast } from '../utils/toast'
 import { errText } from '../utils/errors'
 import { fmtBytes } from '../utils/time'
 import { usageLevelOf, usagePercentOf } from '../utils/contextUsage'
 
 const store = useChatStore()
-const terminalStore = useTerminalStore()
 
 const caps = [
   { name: '生信分析', example: '示例：帮我整理单细胞 QC 的标准流程要点' },
@@ -829,18 +825,6 @@ function stopStreaming() {
 }
 .project-chip.muted { color: #818999; background: #f1f3f7; }
 .head-right { display: flex; align-items: center; gap: 8px; }
-.terminal-btn {
-  border: 1px solid #e6e9ed;
-  background: #fff;
-  border-radius: 8px;
-  height: 30px;
-  padding: 0 9px;
-  color: #4a5160;
-  cursor: pointer;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 12px;
-}
-.terminal-btn:hover { border-color: #2ec5b1; color: #1f9e8c; }
 .model-select { height: 30px; font-size: 12px; }
 
 .messages {

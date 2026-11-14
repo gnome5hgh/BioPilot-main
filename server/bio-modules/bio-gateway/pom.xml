@@ -42,10 +42,5 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
-    <!-- 终端面板：浏览器 ⇄ SpringBoot ⇄ 适配层 PTY 的 WebSocket 中继 -->
-    <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-websocket</artifactId>
-    </dependency>
   </dependencies>
 </project>

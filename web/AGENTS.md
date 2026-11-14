@@ -11,9 +11,9 @@ Vue3 + Vite 前端：BioPilot 平台的呈现层。
 ## 模块定位
 
 - 名称：`biopilot-web`
-- 角色：登录/对话（SSE + 思考过程 + 确认弹框）/文件管理/文献搜索/知识库/引用库/定时任务/设置/管理页的 SPA，以及全局常驻的终端面板（宿主 shell，可选开启）。
+- 角色：登录/对话（SSE + 思考过程 + 确认弹框）/文件管理/文献搜索/知识库/引用库/定时任务/设置/管理页的 SPA。
 - 数据通道：全部经 `/api` 前缀 → Vite 代理到 SpringBoot 8080（`vite.config.js` 的 `rewrite` 会剥掉 `/api`）；**没有直连 Python 适配层（8300）的调用**——它是纯内网层。
-- 接口路径归属：平台 CRUD（项目/文件/论文/文档/定时任务/文献搜索/引用库/检索源管理）由 Java 原生控制器处理；agent 运行时（对话流/确认/知识库检索/终端）由 Java 代理到 Python。前端只认 `/api/...` 路径，不按「谁实现」区分，也不得为了绕过代理而改直连。
+- 接口路径归属：平台 CRUD（项目/文件/论文/文档/定时任务/文献搜索/引用库/检索源管理）由 Java 原生控制器处理；agent 运行时（对话流/确认/知识库检索）由 Java 代理到 Python。前端只认 `/api/...` 路径，不按「谁实现」区分，也不得为了绕过代理而改直连。
 
 ## 目录结构
 
@@ -22,8 +22,7 @@ web/src/
 ├─ main.js / router/   # 入口与路由（登录守卫 + admin 路由守卫）
 ├─ api/auth.js         # Pinia 用户态 + axios 实例（satoken 头、401 跳登录）
 ├─ stores/chat.js      # 会话/项目/当前会话/消息/用量（侧栏与对话页共享）
-├─ stores/terminal.js  # 终端面板开关（全局一块面板、一条会话）
-├─ components/         # AppSidebar / MarkdownView / FilePreviewModal / TerminalPanel / ToastHost / ConfirmDialog / ContextSidebar（上下文侧栏，查库组装）
+├─ components/         # AppSidebar / MarkdownView / FilePreviewModal / ToastHost / ConfirmDialog / ContextSidebar（上下文侧栏，查库组装）
 ├─ utils/              # time（本地时间）/ toast / confirm / errors / files（原文读取、预览分类、下载）
 └─ views/              # Chat / Papers / Literature / KB / Citations / Skills / Settings / Admin / Login / MainLayout
 ```
@@ -39,11 +38,6 @@ web/src/
 - **对话附件卡片**：用户消息的附件来自发送时的快照与 `/chat/history` 的 `attachments` 字段，渲染在气泡上方并可点击预览；不要在发送后清空本地附件时连带清掉已入消息的副本。
 - 错误提示读 `R` 包络的 `msg` 或 `detail`；401 统一跳登录，403 显示无权限，不吞成静默失败。
 - **危险操作统一二次确认**：使用 `utils/confirm.js`，不要再用 `window.confirm/prompt/alert`。
-- **终端面板是全局单例**：`TerminalPanel` 挂在 `MainLayout`，关闭只隐藏；服务端按 `user_id`
-  复用同一条 shell，切换会话看到的必须是同一份终端内容。客户端输入用 JSON 帧
-  （`input`/`resize`），服务端回原始输出；不要为每个会话/页面新建终端。
-- 终端是否可用读 `/api/v1/terminal/config`；`runtime.allow_host_shell=false` 时展示提示，
-  不要偷偷回退到别的执行通道。宿主 shell 拥有服务账号权限，共享部署保持关闭。
 
 ## 常用命令
 

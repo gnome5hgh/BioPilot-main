@@ -15,13 +15,11 @@
 - `web_config.py` — 适配层配置（监听地址/端口、DSN）
 - `web_session.py` — Web 会话装配产物
 - `runtime_state.py` — 每个 FastAPI 应用实例私有的运行时状态
-- `terminal_socket.py` — 终端 WebSocket 的最小传输协议（Protocol）
 
 ## Core Logic
 
 - **纯数据无行为**：只有 dataclass 与 Protocol，不做 IO、不 import FastAPI/SQL 层——服务层因此可脱离具体框架测试。
 - **状态两级分界**：每个应用实例一份的（确认 future、并发闸、活动流队列）进 `RuntimeState`；跨实例共享的（singleflight 集合、最近索引结果等进程级单例状态）进 `service/state.py`。放错层会让多 worker 部署时状态串台或丢失。
-- `TerminalSocket` 是故意收窄的协议面：服务层只依赖握手/收发/关闭，不依赖 FastAPI 的 `WebSocket` 类型。
 
 ## Usage And Change Notes
 

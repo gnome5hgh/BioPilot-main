@@ -116,17 +116,17 @@ API key 也可经环境变量提供（如 `BIOPILOT_LLM_API_KEY`、`BIOPILOT_RAG
 ## 架构概览
 
 ```
-web/             前端（Vue3 + Vite）:登录 / 对话 / 文件 / 文献 / 知识库 / 引用库 / 终端面板 / 管理
+web/             前端（Vue3 + Vite）:登录 / 对话 / 文件 / 文献 / 知识库 / 引用库 / 管理
 server/          SpringBoot 3.5（Java 21）:注册登录鉴权 / 业务表 / 内网代理（bio-admin
                  / bio-modules / bio-common 三模块）
 biopilot/
   main.py        启动类:配置子命令 + uvicorn
   api/           FastAPI 装配层:create_app / deps / router / lifespan / 异常映射
-  controller/    路由层:chat / session / settings / model / terminal / kb / internal
+  controller/    路由层:chat / session / settings / model / kb / internal
   service/       应用服务:ABC 接口 + impl（SSE、附件、设置、知识库索引、删户、调度）
   mapper/        SQL 访问层
   schema/        HTTP 请求/响应 Pydantic 模型
-  domain/        WebConfig / WebSession / RuntimeState / TerminalSocket
+  domain/        WebConfig / WebSession / RuntimeState
   config/        全局可调参数的唯一声明点
   engine/        agent 运行时:agent(ReAct 循环) / llm(客户端 + 结构化输出)
                  / intent(意图识别) / memory(记忆系统) / security(安全中间件)

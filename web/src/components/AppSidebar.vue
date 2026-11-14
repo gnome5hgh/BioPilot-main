@@ -93,8 +93,6 @@
     <div class="user-footer">
       <div class="avatar">{{ initial }}</div>
       <span class="user-name">{{ auth.nickName || '用户' }}</span>
-      <button class="footer-icon" title="打开终端（会话会保留）" aria-label="打开终端"
-              @click="terminal.toggle()">&gt;_</button>
       <button class="btn btn-sm logout" @click="logout">退出</button>
     </div>
 
@@ -118,7 +116,6 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../api/auth'
 import { useChatStore } from '../stores/chat'
-import { useTerminalStore } from '../stores/terminal'
 import { confirmDialog } from '../utils/confirm'
 import { errText } from '../utils/errors'
 import { toast } from '../utils/toast'
@@ -126,7 +123,6 @@ import { fmtTimeOrDate, parseTime } from '../utils/time'
 
 const auth = useAuthStore()
 const store = useChatStore()
-const terminal = useTerminalStore()
 const router = useRouter()
 const route = useRoute()
 

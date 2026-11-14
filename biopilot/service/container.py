@@ -13,7 +13,6 @@ from biopilot.service.model_service import ModelService
 from biopilot.service.schedule_service import ScheduleService
 from biopilot.service.session_service import SessionService
 from biopilot.service.settings_service import SettingsService
-from biopilot.service.terminal_service import TerminalService
 from biopilot.service.user_service import UserService
 
 
@@ -29,7 +28,6 @@ class ServiceContainer:
     chat: ChatService
     settings: SettingsService
     model: ModelService
-    terminal: TerminalService
     kb: KbService
     schedule: ScheduleService
     user: UserService
@@ -46,7 +44,6 @@ def build_services(config: WebConfig, runtime: RuntimeState,
     from biopilot.service.impl.schedule_service_impl import ScheduleServiceImpl
     from biopilot.service.impl.session_service_impl import SessionServiceImpl
     from biopilot.service.impl.settings_service_impl import SettingsServiceImpl
-    from biopilot.service.impl.terminal_service_impl import TerminalServiceImpl
     from biopilot.service.impl.user_service_impl import UserServiceImpl
 
     assembly = AssemblyServiceImpl()
@@ -66,7 +63,6 @@ def build_services(config: WebConfig, runtime: RuntimeState,
         chat=chat,
         settings=SettingsServiceImpl(),
         model=ModelServiceImpl(),
-        terminal=TerminalServiceImpl(),
         kb=KbServiceImpl(runtime),
         schedule=schedule,
         user=UserServiceImpl(runtime),

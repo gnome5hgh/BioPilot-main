@@ -17,7 +17,7 @@
 - `app.py` — `create_app()` 工厂与 `run_server()` 启动函数。
 - `deps.py` — `require_user` / `require_internal` 与 `get_services` / `get_runtime` 依赖。
 - `router.py` — 汇总全部 controller 的 `APIRouter`。
-- `lifespan.py` — 启动后台回收/对账，停服 flush 整合队列并结束终端 shell。
+- `lifespan.py` — 启动后台回收/对账，停服 flush 整合队列。
 - `exception_handlers.py` — 服务层与配置层异常 → HTTP 响应。
 
 ## 分层约定
@@ -38,7 +38,6 @@
 
 - 对话运行时：`/chat/stream`、`/chat/confirm`、`/chat/context-usage`、会话取消/删除。
 - 知识库运行时：`/kb/reindex`、`/kb/search`、`/kb/papers/{id}/chunks`。
-- 引擎领域产物：`/terminal/*`、`/ws/terminal`。
 - 引擎配置：`/settings*`、`/models*`。
 - 内部调用：`/internal/kb/*`、`/internal/schedule/run`、`/internal/users/*`。
 

@@ -167,7 +167,6 @@ FIELD_META: dict[str, dict[str, str]] = {
     "runtime.agents_dir": {"label": "Agent 插件目录"},
     "runtime.models": {"label": "多模型清单", "help": "JSON 数组，每项 {name, model, base_url, api_key}；api_key 只显示末 4 位。"},
     "runtime.confirm_above": {"label": "安全确认档位", "help": "风险高于该档的工具执行前会弹确认。"},
-    "runtime.allow_host_shell": {"label": "允许网页终端", "help": "宿主 shell 拥有服务账号权限；共享部署保持关闭。"},
     "platform.base_url": {"label": "Java 平台地址"},
     "platform.internal_token": {"label": "内部调用 Token"},
     "platform.search_timeout": {"label": "检索超时（秒）"},
