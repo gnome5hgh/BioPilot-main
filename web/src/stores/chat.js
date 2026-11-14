@@ -40,6 +40,11 @@ export const useChatStore = defineStore('chat', {
     pendingPrompt: '',
     messages: [],
     usage: null,
+    // 上下文时间线：逐请求 token 用量（打开侧栏/每轮问答结束时从后端拉取）
+    timeline: [],
+    selectedReqSeq: null,
+    // 上下文组成明细（浏览器卡数据源；Java 端点查库组装）
+    composition: null,
     loadingHistory: false,
     loadingSessions: false,
     running: false,
@@ -182,6 +187,43 @@ export const useChatStore = defineStore('chat', {
         this.usage = data.usage
       } catch {
         // 用量只是辅助信息，失败静默
+      }
+    },
+
+    /** 拉取上下文时间线（逐请求用量序列）；失败静默（辅助信息）。 */
+    async refreshTimeline() {
+      if (!this.currentId) {
+        this.timeline = []
+        return
+      }
+      try {
+        const { data } = await http.get(
+          `/conversations/${encodeURIComponent(this.currentId)}/context-timeline`,
+        )
+        this.timeline = data.data?.requests || []
+      } catch {
+        this.timeline = []
+      }
+    },
+
+    /** 选中时间线上某个请求（浏览器联动聚焦）；再点同一条取消选中。 */
+    selectRequest(seq) {
+      this.selectedReqSeq = this.selectedReqSeq === seq ? null : seq
+    },
+
+    /** 拉取上下文组成明细（浏览器卡）；失败静默（辅助信息）。 */
+    async refreshComposition() {
+      if (!this.currentId) {
+        this.composition = null
+        return
+      }
+      try {
+        const { data } = await http.get(
+          `/conversations/${encodeURIComponent(this.currentId)}/context-composition`,
+        )
+        this.composition = data.data?.composition ?? null
+      } catch {
+        this.composition = null
       }
     },
 
