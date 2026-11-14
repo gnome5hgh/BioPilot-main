@@ -537,17 +537,6 @@ onMounted(async () => {
   display: flex; align-items: center; justify-content: center; font-size: 12px;
 }
 .user-name { flex: 1; font-size: 12px; color: #4a5160; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.footer-icon {
-  border: 1px solid #e6e9ed;
-  background: #fff;
-  border-radius: 7px;
-  color: #4a5160;
-  cursor: pointer;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 11px;
-  padding: 3px 7px;
-}
-.footer-icon:hover { border-color: #2ec5b1; color: #1f9e8c; }
 .logout { padding: 3px 8px; }
 
 .menu-mask { position: fixed; inset: 0; z-index: 60; }
