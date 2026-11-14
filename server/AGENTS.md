@@ -28,7 +28,7 @@ server/
 │                 #   bio-literature（文献检索聚合/导入/MCP 检索源管理）、
 │                 #   bio-citation（引用库：勾选/维护/导出 .bib）、
 │                 #   bio-skill（用户技能：agentskills.io 标准包安装/启停/更新/卸载 + OSS 包 + 内部取包）、
-│                 #   bio-gateway（技术适配层：/api/v1 下的引擎 SSE/终端 WS/透传 + 会话列表）
+│                 #   bio-gateway（技术适配层：/api/v1 下的引擎 SSE/透传 + 会话列表）
 ├─ bio-common/    # 共享基础设施（按 cde-common 分模块）
 │  ├─ bio-common-core/     # R / PageResult / ServiceException / 常量 / 通用工具（含标题归一化）
 │  ├─ bio-common-web/      # 全局异常兜底 / 内部 HTTP 客户端 / multipart / SSE

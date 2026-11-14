@@ -1,4 +1,4 @@
-# 前端：node 构建 dist → nginx 托管并反代 /api（含 WebSocket 升级）。
+# 前端：node 构建 dist → nginx 托管并反代 /api（SSE 长连接）。
 FROM node:20-alpine AS build
 WORKDIR /src
 COPY web/package.json web/package-lock.json ./

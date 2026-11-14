@@ -17,7 +17,6 @@ const routes = [
       { path: 'docs', redirect: '/papers' },
       { path: 'literature', component: () => import('../views/LiteratureView.vue') },
       { path: 'citations', component: () => import('../views/CitationsView.vue') },
-      { path: 'terminal', redirect: '/' },
       { path: 'settings', component: () => import('../views/SettingsView.vue'),
         meta: { roles: ['ADMIN'] } },
       { path: 'kb', component: () => import('../views/KBView.vue') },

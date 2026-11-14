@@ -13,7 +13,7 @@
 ## Directory Structure
 
 - `chat.py` / `session.py` — 对话流与会话列表契约
-- `kb.py` / `model.py` / `settings.py` / `terminal.py` — 知识库/模型/设置/终端
+- `kb.py` / `model.py` / `settings.py` — 知识库/模型/设置
 - `internal.py` — `/internal/**` 跨栈契约（Java ↔ Python，不版本化）
 
 ## Core Logic

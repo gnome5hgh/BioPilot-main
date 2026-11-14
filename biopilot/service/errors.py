@@ -24,12 +24,6 @@ class RequestValidationError(ServiceError):
     status_code = 422
 
 
-class ForbiddenError(ServiceError):
-    """权限/信任边界拒绝（对应旧实现的 403）。"""
-
-    status_code = 403
-
-
 class NotFoundError(ServiceError):
     """资源不存在（对应旧实现的 404）。"""
 

@@ -81,7 +81,7 @@ GROUP_LAYOUT: list[dict[str, str]] = [
     {"key": "memory", "label": "记忆", "description": "轮末后台整合的开关与节流窗口。"},
     {"key": "compaction", "label": "上下文压缩", "description": "窗口接近上限时的摘要压缩与外置策略。"},
     {"key": "agents", "label": "子代理", "description": "各角色的超时与 ReAct 轮数预算。"},
-    {"key": "runtime", "label": "运行时", "description": "多模型清单、安全档位与网页终端开关。"},
+    {"key": "runtime", "label": "运行时", "description": "多模型清单与安全档位。"},
     {"key": "platform", "label": "平台后端", "description": "Java 平台内部调用的超时参数。"},
     {"key": "bootstrap", "label": "部署引导", "description": "由环境变量提供、页面只读；换部署时在这里核对。"},
 ]
@@ -125,7 +125,7 @@ SECTION_LAYOUT: dict[str, list[dict[str, str]]] = {
         {"key": "compaction.tool_results", "label": "工具结果外置", "description": "超过阈值的工具结果转存对象存储，窗口里只留指针。"},
     ],
     "runtime": [
-        {"key": "runtime", "label": "运行时", "description": "会话级模型选择、安全档位与终端开关。"},
+        {"key": "runtime", "label": "运行时", "description": "会话级模型选择与安全档位。"},
     ],
     "platform": [
         {"key": "platform", "label": "内部调用", "description": "文件传输与检索请求的超时。"},
@@ -167,7 +167,6 @@ FIELD_META: dict[str, dict[str, str]] = {
     "runtime.agents_dir": {"label": "Agent 插件目录"},
     "runtime.models": {"label": "多模型清单", "help": "JSON 数组，每项 {name, model, base_url, api_key}；api_key 只显示末 4 位。"},
     "runtime.confirm_above": {"label": "安全确认档位", "help": "风险高于该档的工具执行前会弹确认。"},
-    "runtime.allow_host_shell": {"label": "允许网页终端", "help": "宿主 shell 拥有服务账号权限；共享部署保持关闭。"},
     "platform.base_url": {"label": "Java 平台地址"},
     "platform.internal_token": {"label": "内部调用 Token"},
     "platform.search_timeout": {"label": "检索超时（秒）"},

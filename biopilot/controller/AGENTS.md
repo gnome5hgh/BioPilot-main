@@ -17,7 +17,6 @@
 - `kb_controller.py` — 知识库试检索/分块/重建（浏览器侧）
 - `internal_controller.py` — `/internal/**`：kb sync/runtime、定时任务触发、删户两阶段
 - `settings_controller.py` / `model_controller.py` — 配置数据面（模型列表/切换）
-- `terminal_controller.py` — 终端 WS
 - `health_controller.py` — 健康探测
 
 ## Responsibilities
