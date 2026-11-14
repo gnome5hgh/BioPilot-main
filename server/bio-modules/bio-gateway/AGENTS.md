@@ -5,13 +5,23 @@
 - 浏览器 ↔ Python 适配层的**全部转发**：SSE 对话流、确认回传、历史回放、上下文用量、
   模型选择、平台设置、技能商店、终端开关、知识库试检索/重建/分块。
 - 终端 WebSocket 中继（浏览器 ⇄ SpringBoot ⇄ 引擎 PTY）与用户侧会话列表读取。
+- 上下文侧栏读侧：时间线与窗口组成明细查库组装（直读引擎落盘表，引擎不提供服务端点）。
 
 ## Module Positioning
 
 - 角色：`technical-adapter`（**不是业务域**）
 - 职责：守住信任边界（登录态 userId → `X-User-Id`）、统一 HTTP/1.1 与 SSE 转发语义、
   集中维护错误降级；不承载业务规则、不写平台业务表。
-- 对话/会话的真相在引擎：本模块只转发；会话列表从引擎表只读（显式 `user_id`）。
+- 对话/会话的真相在引擎：本模块只转发；会话列表与上下文侧栏从引擎表只读（显式 `user_id`）。
+  上下文侧栏依赖的跨栈只读契约（引擎侧变更需同步 `ContextInsightController`）：
+  `bio_message.meta` 的 `usage`/`model` 落盘字段、压缩摘要消息的固定开场白前缀
+  （"This session is being continued…"）、`bio_agent_state.message_ids`（当前窗口消息
+  id 清单，压缩后收缩）。组成浏览器只返回三类可展示原文的类目（技能清单/记忆块/
+  窗口内消息）；系统提示词/可派发清单/意图/工具定义四类原文只在引擎进程内组装，
+  平台侧无既有端点、落库即副本（违反单一落点），已从浏览器移除。技能清单类目经
+  bio-skill 公开接口 `SkillService.list` 取当前启用清单（过滤 enabled），展示管理面
+  状态而非该轮注入原文。时间线响应的 `seq`
+  是 1 起始的请求展示序号（按消息落盘序编号），不是数据库 seq 列。
 
 ## Directory Structure
 
@@ -19,6 +29,8 @@
 - `controller/ChatProxyController` — 对话流、确认、历史、上下文用量、会话删除
 - `controller/EngineProxyController` — 模型、终端、设置、技能、知识库试检索
 - `controller/SessionController` — 用户侧会话列表（只读 `bio_agent_state`/`bio_message`）
+- `controller/ContextInsightController` — 上下文时间线与窗口组成明细（只读引擎表
+  `bio_message`/`bio_agent_state`/`bio_memory_block`；技能清单经 bio-skill 公开接口）
 - `config/WebSocketConfig` + `ws/TerminalRelayHandler` — 终端中继
 
 ## Core Logic
@@ -34,5 +46,6 @@
 
 ## Dependencies And Collaboration
 
-- 依赖 `bio-common-core/web/satoken/mybatis` 与 `bio-file`（仅归属校验）。
+- 依赖 `bio-common-core/web/satoken/mybatis`、`bio-file`（仅归属校验）、
+  `bio-skill`（仅上下文侧栏技能清单读侧）——对业务域模块只调公开接口。
 - 被 `bio-admin` 聚合启动；不依赖其他业务模块，业务模块也不得依赖本模块。

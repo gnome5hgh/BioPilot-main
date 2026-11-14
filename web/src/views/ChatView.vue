@@ -1,5 +1,6 @@
 <template>
   <div class="chat-page">
+    <div class="chat-main">
     <header class="chat-head">
       <div class="title-wrap">
         <h1 class="chat-title">{{ store.currentTitle }}</h1>
@@ -143,18 +144,10 @@
                       :value="project.projectId">{{ project.name }}</option>
             </select>
 
-            <div class="ctx-wrap" @mouseenter="usageHover = true" @mouseleave="usageHover = false">
-              <span class="ctx-pill" :class="usageLevel">
-                上下文 {{ store.usage ? usagePercent + '%' : '—' }}
-              </span>
-              <div v-if="store.usage && usageHover" class="ctx-panel">
-                <div class="ctx-head">上下文容量 {{ store.usage.total }}/{{ store.usage.limit }}</div>
-                <div class="ctx-bar"><div class="ctx-fill" :style="{ width: usagePercent + '%' }"></div></div>
-                <div v-for="(value, key) in store.usage.parts" :key="key" class="ctx-row">
-                  <span>{{ ctxLabel(key) }}</span><span>{{ value }}</span>
-                </div>
-              </div>
-            </div>
+            <button class="ctx-pill" :class="usageLevel" title="打开上下文侧栏"
+                    @click="ctxOpen = !ctxOpen">
+              上下文 {{ store.usage ? usagePercent + '%' : '—' }}
+            </button>
           </div>
           <button class="send" :class="{ stop: busy }" :title="busy ? '中断回答' : '发送'"
                   @click="busy ? stopStreaming() : send()">{{ busy ? '■' : '↑' }}</button>
@@ -199,6 +192,9 @@
         </div>
       </template>
     </footer>
+    </div>
+
+    <ContextSidebar v-if="ctxOpen" @close="ctxOpen = false" />
 
     <div v-if="pendingConfirm" class="confirm-mask">
       <div class="confirm-card" role="alertdialog" aria-modal="true">
@@ -232,6 +228,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import FilePreviewModal from '../components/FilePreviewModal.vue'
+import ContextSidebar from '../components/ContextSidebar.vue'
 import MarkdownView from '../components/MarkdownView.vue'
 import http from '../api/auth'
 import { useChatStore } from '../stores/chat'
@@ -239,6 +236,7 @@ import { useTerminalStore } from '../stores/terminal'
 import { toast } from '../utils/toast'
 import { errText } from '../utils/errors'
 import { fmtBytes } from '../utils/time'
+import { usageLevelOf, usagePercentOf } from '../utils/contextUsage'
 
 const store = useChatStore()
 const terminalStore = useTerminalStore()
@@ -258,7 +256,7 @@ const papers = ref([])
 const dataFiles = ref([])
 const pickerOpen = ref(false)
 const pickerQuery = ref('')
-const usageHover = ref(false)
+const ctxOpen = ref(false)
 const pendingConfirm = ref(null)
 const previewTarget = ref(null)
 const confirmRemaining = ref(0)
@@ -273,16 +271,9 @@ let confirmTimer = null
 
 const placeholder = '给 BioPilot 发送消息…（Enter 发送，Shift+Enter 换行）'
 
-const usagePercent = computed(() => {
-  const usage = store.usage
-  if (!usage || !usage.limit) return 0
-  return Math.min(100, Math.round((usage.total / usage.limit) * 1000) / 10)
-})
+const usagePercent = computed(() => usagePercentOf(store.usage))
 
-const usageLevel = computed(() => {
-  const percent = usagePercent.value
-  return percent > 80 ? 'danger' : percent > 50 ? 'warn' : 'ok'
-})
+const usageLevel = computed(() => usageLevelOf(usagePercent.value))
 
 const paramRows = computed(() => {
   const params = pendingConfirm.value?.params || {}
@@ -339,18 +330,6 @@ watch(() => store.currentId, () => {
 function fillExample(cap) {
   currentCap.value = cap
   input.value = cap.example.replace(/^示例：/, '')
-}
-
-function ctxLabel(key) {
-  return {
-    system_prompt: '系统提示词',
-    skills: '技能',
-    agents_list: '可派发清单',
-    memory: '记忆块',
-    intent: '意图规则',
-    tools_schema: '工具定义',
-    messages: '消息',
-  }[key] || key
 }
 
 function scrollBottom() {
@@ -699,6 +678,9 @@ async function send() {
     attachments.value = []
     await store.loadSessions()
     store.refreshUsage()
+    // 每轮问答结束即刷新侧栏数据（查库组装，无实时帧）
+    store.refreshTimeline()
+    store.refreshComposition()
     await nextTick()
     maybeScroll()
   }
@@ -806,9 +788,16 @@ function stopStreaming() {
 <style scoped>
 .chat-page {
   display: flex;
-  flex-direction: column;
   height: 100vh;
   min-width: 0;
+}
+
+/* 对话主列：侧栏打开时作为 flex 行的左列收窄，关闭时占满 */
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat-head {
@@ -1101,7 +1090,6 @@ function stopStreaming() {
 .icon-btn:disabled { opacity: 0.5; cursor: default; }
 .project-select { height: 30px; font-size: 12px; max-width: 170px; }
 
-.ctx-wrap { position: relative; }
 .ctx-pill {
   display: inline-flex;
   align-items: center;
@@ -1111,29 +1099,14 @@ function stopStreaming() {
   border-radius: 8px;
   font-size: 11px;
   color: #818999;
-  cursor: default;
+  background: #fff;
+  cursor: pointer;
   white-space: nowrap;
 }
+.ctx-pill:hover { border-color: #2ec5b1; }
 .ctx-pill.ok { color: #1f9e8c; border-color: #bfeee7; }
 .ctx-pill.warn { color: #b45309; border-color: #fde68a; }
 .ctx-pill.danger { color: #e5484d; border-color: #fecaca; }
-.ctx-panel {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  width: 260px;
-  background: #fff;
-  border: 1px solid #e6e9ed;
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(20, 24, 34, 0.12);
-  padding: 12px 14px;
-  z-index: 45;
-  font-size: 12px;
-}
-.ctx-head { font-weight: 600; margin-bottom: 8px; }
-.ctx-bar { height: 6px; background: #f0f1f5; border-radius: 3px; overflow: hidden; margin-bottom: 10px; }
-.ctx-fill { height: 100%; background: #2ec5b1; }
-.ctx-row { display: flex; justify-content: space-between; padding: 2px 0; color: #4a5160; }
 
 .send {
   flex: none;

@@ -23,7 +23,7 @@ web/src/
 ├─ api/auth.js         # Pinia 用户态 + axios 实例（satoken 头、401 跳登录）
 ├─ stores/chat.js      # 会话/项目/当前会话/消息/用量（侧栏与对话页共享）
 ├─ stores/terminal.js  # 终端面板开关（全局一块面板、一条会话）
-├─ components/         # AppSidebar / MarkdownView / FilePreviewModal / TerminalPanel / ToastHost / ConfirmDialog
+├─ components/         # AppSidebar / MarkdownView / FilePreviewModal / TerminalPanel / ToastHost / ConfirmDialog / ContextSidebar（上下文侧栏，查库组装）
 ├─ utils/              # time（本地时间）/ toast / confirm / errors / files（原文读取、预览分类、下载）
 └─ views/              # Chat / Papers / Literature / KB / Citations / Skills / Settings / Admin / Login / MainLayout
 ```
