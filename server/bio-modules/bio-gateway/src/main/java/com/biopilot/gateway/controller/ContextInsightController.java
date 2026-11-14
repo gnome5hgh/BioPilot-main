@@ -1,6 +1,8 @@
 package com.biopilot.gateway.controller;
 
 import com.biopilot.common.core.R;
+import com.biopilot.skill.dto.SkillView;
+import com.biopilot.skill.service.SkillService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,9 +20,10 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 上下文侧栏（读侧）：查库组装上下文时间线与窗口组成明细，供对话页侧栏回显。
  *
- * 平台读侧功能，引擎不提供服务端点：直读引擎落盘表（bio_message / bio_agent_state /
- * bio_memory_block，均为「Python 写、Java 只读」），与 SessionController 的会话列表
- * 同一模式。token 数值一律取引擎已算好的落盘值（meta.usage 与存量用量端点），Java
+ * 平台读侧功能，引擎不提供服务端点：引擎落盘表（bio_message / bio_agent_state /
+ * bio_memory_block，均为「Python 写、Java 只读」）直读，与 SessionController 的会话
+ * 列表同一模式；技能清单经 bio-skill 公开接口（{@link SkillService#list}）取得。
+ * token 数值一律取引擎已算好的落盘值（meta.usage 与存量用量端点），Java
  * 侧不做 token 估算（不复制引擎口径）。
  *
  * 跨栈只读契约（引擎侧变更需同步本类，已登记 bio-gateway/AGENTS.md）：
@@ -31,10 +34,10 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li>bio_agent_state.message_ids——当前 in-context 窗口的消息 id 清单，
  *       压缩后同步收缩。</li>
  * </ul>
- * 注意：agent_state 的 system/context_window_limit 两列建表存在但引擎当前不落值
- * （恒 NULL）——system_prompt 类目因此在真实会话中通常走「引擎内」降级标注，若引擎
- * 未来开始落值则自动恢复展示，无需改本类。时间线响应的 seq 是 1 起始的请求展示序号
- * （按消息落盘序编号），不是数据库 seq 列。
+ * 浏览器只返回三类可展示原文的类目：技能清单（bio-skill 公开接口的当前启用清单）、
+ * 记忆块、窗口内消息。系统提示词/可派发清单/意图/工具定义四类的原文只在引擎进程内组装，
+ * 平台侧无既有端点、落库即副本（违反单一落点），已从浏览器移除。时间线响应的 seq
+ * 是 1 起始的请求展示序号（按消息落盘序编号），不是数据库 seq 列。
  */
 @RestController
 @RequestMapping("/api/v1/conversations")
@@ -48,10 +51,12 @@ public class ContextInsightController {
     private static final double DROP_RATIO = 0.8;
 
     private final JdbcTemplate jdbc;
+    private final SkillService skillService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public ContextInsightController(JdbcTemplate jdbc) {
+    public ContextInsightController(JdbcTemplate jdbc, SkillService skillService) {
         this.jdbc = jdbc;
+        this.skillService = skillService;
     }
 
     /**
@@ -113,10 +118,10 @@ public class ContextInsightController {
     }
 
     /**
-     * 窗口组成明细：为上下文浏览器组装可展开原文。系统提示词/窗口内消息/记忆块
-     * 三类来自落盘表；技能清单/派发清单/意图块/工具定义四类原文只在引擎进程内
-     * 组装，items 留空（前端标注「引擎内组装，平台侧不可见」）。会话从未运行过
-     * （无 agent_state 行）时返回 null，前端显示空态。
+     * 窗口组成明细：为上下文浏览器组装可展开原文。技能清单/窗口内消息/记忆块
+     * 三类分别来自 bio-skill 公开接口与引擎落盘表（bio_message / bio_memory_block）；
+     * 系统提示词/可派发清单/意图/工具定义四类原文只在引擎进程内组装，无数据库落点，
+     * 已从浏览器移除。会话从未运行过（无 agent_state 行）时返回 null，前端显示空态。
      */
     @GetMapping("/{conversationId}/context-composition")
     public R<Map<String, Object>> composition(@PathVariable String conversationId) {
@@ -125,7 +130,7 @@ public class ContextInsightController {
             return R.ok(emptyComposition());
         }
         List<Map<String, Object>> states = jdbc.queryForList(
-                "SELECT `system`, context_window_limit, message_ids FROM bio_agent_state"
+                "SELECT context_window_limit, message_ids FROM bio_agent_state"
                         + " WHERE agent_id=? AND user_id=?",
                 conversationId, userId);
         if (states.isEmpty()) {
@@ -175,13 +180,24 @@ public class ContextInsightController {
             memoryItems.add(item);
         }
 
+        // 技能清单：经 bio-skill 公开接口取当前用户的技能视图（行级 user_id 过滤由
+        // 租户插件统一注入），过滤 enabled 展示当前启用清单（管理面状态）；非该轮
+        // 注入 head 的原文，引擎的渲染与截断口径不在此复刻
+        List<Map<String, Object>> skillItems = new ArrayList<>();
+        for (SkillView skill : skillService.list(Long.parseLong(userId))) {
+            if (!skill.enabled()) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("label", skill.name());
+            item.put("content", skill.description());
+            item.put("tool_calls", null);
+            skillItems.add(item);
+        }
+
         List<Map<String, Object>> categories = new ArrayList<>();
-        categories.add(category("system_prompt", singleItem("系统提示词", (String) state.get("system"))));
-        categories.add(category("skills", List.of()));
-        categories.add(category("agents_list", List.of()));
+        categories.add(category("skills", skillItems));
         categories.add(category("memory", memoryItems));
-        categories.add(category("intent", List.of()));
-        categories.add(category("tools_schema", List.of()));
         categories.add(category("messages", messageItems));
 
         Object limit = state.get("context_window_limit");
@@ -197,17 +213,6 @@ public class ContextInsightController {
         cat.put("key", key);
         cat.put("items", items);
         return cat;
-    }
-
-    private List<Map<String, Object>> singleItem(String label, String content) {
-        if (content == null || content.isEmpty()) {
-            return List.of();
-        }
-        Map<String, Object> item = new LinkedHashMap<>();
-        item.put("label", label);
-        item.put("content", content);
-        item.put("tool_calls", null);
-        return List.of(item);
     }
 
     /** DB 里的 tool_calls 是 OpenAI 原始形状（function.name/arguments），展平成展示用 {name, arguments}。 */

@@ -16,10 +16,12 @@
   上下文侧栏依赖的跨栈只读契约（引擎侧变更需同步 `ContextInsightController`）：
   `bio_message.meta` 的 `usage`/`model` 落盘字段、压缩摘要消息的固定开场白前缀
   （"This session is being continued…"）、`bio_agent_state.message_ids`（当前窗口消息
-  id 清单，压缩后收缩）。agent_state 的 `system`/`context_window_limit` 列引擎当前
-  不落值（恒 NULL），system_prompt 类目因此通常走「引擎内」降级标注，引擎未来落值后
-  自动恢复展示。时间线响应的 `seq` 是 1 起始的请求展示序号（按消息落盘序编号），
-  不是数据库 seq 列。
+  id 清单，压缩后收缩）。组成浏览器只返回三类可展示原文的类目（技能清单/记忆块/
+  窗口内消息）；系统提示词/可派发清单/意图/工具定义四类原文只在引擎进程内组装，
+  平台侧无既有端点、落库即副本（违反单一落点），已从浏览器移除。技能清单类目经
+  bio-skill 公开接口 `SkillService.list` 取当前启用清单（过滤 enabled），展示管理面
+  状态而非该轮注入原文。时间线响应的 `seq`
+  是 1 起始的请求展示序号（按消息落盘序编号），不是数据库 seq 列。
 
 ## Directory Structure
 
@@ -27,8 +29,8 @@
 - `controller/ChatProxyController` — 对话流、确认、历史、上下文用量、会话删除
 - `controller/EngineProxyController` — 模型、终端、设置、技能、知识库试检索
 - `controller/SessionController` — 用户侧会话列表（只读 `bio_agent_state`/`bio_message`）
-- `controller/ContextInsightController` — 上下文时间线与窗口组成明细（只读
-  `bio_message`/`bio_agent_state`/`bio_memory_block`）
+- `controller/ContextInsightController` — 上下文时间线与窗口组成明细（只读引擎表
+  `bio_message`/`bio_agent_state`/`bio_memory_block`；技能清单经 bio-skill 公开接口）
 - `config/WebSocketConfig` + `ws/TerminalRelayHandler` — 终端中继
 
 ## Core Logic
@@ -44,5 +46,6 @@
 
 ## Dependencies And Collaboration
 
-- 依赖 `bio-common-core/web/satoken/mybatis` 与 `bio-file`（仅归属校验）。
+- 依赖 `bio-common-core/web/satoken/mybatis`、`bio-file`（仅归属校验）、
+  `bio-skill`（仅上下文侧栏技能清单读侧）——对业务域模块只调公开接口。
 - 被 `bio-admin` 聚合启动；不依赖其他业务模块，业务模块也不得依赖本模块。

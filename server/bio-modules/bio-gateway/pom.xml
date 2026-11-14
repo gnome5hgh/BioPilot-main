@@ -33,6 +33,11 @@
       <groupId>com.biopilot</groupId>
       <artifactId>bio-file</artifactId>
     </dependency>
+    <!-- 上下文侧栏技能清单读侧（复用技能域的公开读服务） -->
+    <dependency>
+      <groupId>com.biopilot</groupId>
+      <artifactId>bio-skill</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>

@@ -123,12 +123,11 @@
             <button class="browser-cat-head" @click="toggleCat(cat.key)">
               <span class="part-dot" :style="{ background: catColor(cat.key) }"></span>
               <span class="browser-cat-label">{{ catLabel(cat.key) }}</span>
-              <span v-if="!cat.items.length" class="est-chip">引擎内</span>
               <span class="browser-cat-tokens">{{ catTokens(cat.key) }}</span>
               <span class="chev">{{ openCats[cat.key] ? '▾' : '▸' }}</span>
             </button>
             <div v-if="openCats[cat.key]" class="browser-items">
-              <div v-if="!cat.items.length" class="browser-noitem">引擎内组装，平台侧不可见</div>
+              <div v-if="!cat.items.length" class="browser-noitem">{{ catEmptyHint(cat.key) }}</div>
               <div v-for="(item, i) in cat.items" :key="i" class="browser-item">
                 <button class="browser-item-head" @click="toggleItem(cat.key, i)">
                   <span class="browser-item-label">{{ itemLabel(item, cat.key, i) }}</span>
@@ -157,7 +156,8 @@ import { useChatStore } from '../stores/chat'
 import { fmtTimeOrDate } from '../utils/time'
 import { usageLevelOf, usagePercentOf } from '../utils/contextUsage'
 
-// 七类分类色：与 head 组装顺序一一对应，时间线与浏览器沿用同一套
+// 七类分类色：与 head 组装顺序一一对应；组成条展示全部七类（引擎用量口径），
+// 浏览器类目是其子集（后端只返回可展示原文的三类），沿用同一套色与名
 const CATEGORY_COLORS = {
   system_prompt: '#2ec5b1',
   skills: '#5b8def',
@@ -176,6 +176,13 @@ const CATEGORY_LABELS = {
   intent: '意图规则',
   tools_schema: '工具定义',
   messages: '消息',
+}
+
+// 浏览器类目为空时的占位文案（后端只返回三类：技能清单/记忆块/消息）
+const EMPTY_HINTS = {
+  skills: '无已启用技能',
+  memory: '暂无记忆块',
+  messages: '暂无消息',
 }
 
 // 时间线柱段颜色：新输入/缓存命中/输出（压缩标记为红）
@@ -287,6 +294,11 @@ function catColor(key) {
 
 function catLabel(key) {
   return CATEGORY_LABELS[key] || key
+}
+
+/** 类目无条目时的占位文案。 */
+function catEmptyHint(key) {
+  return EMPTY_HINTS[key] || '无内容'
 }
 
 /** 类目 token 数：来自用量端点的七类 parts（引擎估算口径）；无数据显示 —。 */

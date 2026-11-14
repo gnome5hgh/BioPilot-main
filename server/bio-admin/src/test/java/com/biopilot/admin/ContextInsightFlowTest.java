@@ -21,7 +21,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * 上下文侧栏（读侧）：时间线从 bio_message.meta 重建（含压缩点），组成明细从
- * bio_agent_state（system/message_ids）+ bio_memory_block 组装；用户隔离与空态降级。
+ * bio_agent_state（message_ids）+ bio_memory_block + bio_skill（当前启用清单）组装，
+ * 只返回三类可展示原文的类目；用户隔离与空态降级。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
@@ -43,10 +44,22 @@ class ContextInsightFlowTest {
     @BeforeEach
     void cleanOwnRows() {
         // 只清本测试的行（引擎表共享，不能 DROP/TRUNCATE）：会话 id 固定为 conv-* 测试名，
-        // 记忆块用固定测试 id——user_id 是雪花号，不能按它清理
+        // 记忆块用固定测试 id、技能用固定测试名——user_id 是雪花号，不能按它清理。
+        // bio_skill 的建拆归 SkillFlowTest（每个用例前后 DROP），本类与它的执行顺序不保证，
+        // 先 IF NOT EXISTS 兜底建表（DDL 与 SkillFlowTest 保持等价）再清行
+        jdbc.execute("CREATE TABLE IF NOT EXISTS bio_skill ("
+                + "id BIGINT NOT NULL AUTO_INCREMENT, user_id VARCHAR(191) NOT NULL,"
+                + "name VARCHAR(64) NOT NULL, description VARCHAR(2000) NOT NULL DEFAULT '',"
+                + "version VARCHAR(64) NOT NULL DEFAULT '', source VARCHAR(16) NOT NULL,"
+                + "source_url VARCHAR(1024) NULL, source_ref VARCHAR(256) NULL,"
+                + "source_sha VARCHAR(64) NULL, oss_key VARCHAR(512) NOT NULL,"
+                + "content_sha VARCHAR(64) NOT NULL, enabled TINYINT NOT NULL DEFAULT 1,"
+                + "installed_at VARCHAR(40) NOT NULL, PRIMARY KEY (id),"
+                + "UNIQUE KEY uk_skill_user_name (user_id, name), KEY idx_skill_user (user_id))");
         jdbc.execute("DELETE FROM bio_message WHERE agent_id LIKE 'conv-%'");
         jdbc.execute("DELETE FROM bio_agent_state WHERE agent_id LIKE 'conv-%'");
         jdbc.execute("DELETE FROM bio_memory_block WHERE id = 'blk-1'");
+        jdbc.execute("DELETE FROM bio_skill WHERE name LIKE 'ctx-skill-%'");
     }
 
     @AfterEach
@@ -105,6 +118,9 @@ class ContextInsightFlowTest {
                         + " VALUES (?,?,?,?,?,0,1,?,?)",
                 "blk-1", user.userId(), "assistant", "身份块内容", 2000,
                 "2026-11-14T00:00:00", "2026-11-14T00:00:00");
+        // 技能清单来自 bio_skill 当前启用清单：停用技能不出现
+        insertSkill(user.userId(), "ctx-skill-a", "单细胞分析技能", true);
+        insertSkill(user.userId(), "ctx-skill-b", "已停用技能", false);
 
         Map<String, Object> composition = compositionOf(user, conv);
         assertThat(composition.get("mode")).isEqualTo("db");
@@ -112,13 +128,15 @@ class ContextInsightFlowTest {
         List<Map<String, Object>> categories =
                 (List<Map<String, Object>>) composition.get("categories");
         Map<String, Map<String, Object>> byKey = byKey(categories);
-        assertThat(byKey).containsKeys("system_prompt", "skills", "agents_list",
-                "memory", "intent", "tools_schema", "messages");
-        // system_prompt 原文来自 agent_state.system
-        List<Map<String, Object>> sysItems =
-                (List<Map<String, Object>>) byKey.get("system_prompt").get("items");
-        assertThat(sysItems).hasSize(1);
-        assertThat(sysItems.get(0).get("content")).isEqualTo(systemPrompt);
+        // 只返回三类可展示原文的类目；system 列有值也不再返回 system_prompt 类目
+        // （系统提示词/可派发清单/意图/工具定义四类原文只在引擎进程内组装）
+        assertThat(byKey).containsOnlyKeys("skills", "memory", "messages");
+        // 技能清单：bio_skill 当前启用条目（停用的不出现）
+        List<Map<String, Object>> skillItems =
+                (List<Map<String, Object>>) byKey.get("skills").get("items");
+        assertThat(skillItems).hasSize(1);
+        assertThat(skillItems.get(0).get("label")).isEqualTo("ctx-skill-a");
+        assertThat(skillItems.get(0).get("content")).isEqualTo("单细胞分析技能");
         // 窗口内消息逐条（窗口外的驱逐行不出现），tool_calls 展平为 {name, arguments}
         List<Map<String, Object>> msgItems =
                 (List<Map<String, Object>>) byKey.get("messages").get("items");
@@ -127,8 +145,6 @@ class ContextInsightFlowTest {
         List<Map<String, String>> calls =
                 (List<Map<String, String>>) msgItems.get(1).get("tool_calls");
         assertThat(calls.get(0).get("name")).isEqualTo("search");
-        // 四类引擎内组装的类目：items 空
-        assertThat((List<?>) byKey.get("tools_schema").get("items")).isEmpty();
         // 记忆块逐条原文
         List<Map<String, Object>> memItems =
                 (List<Map<String, Object>>) byKey.get("memory").get("items");
@@ -190,6 +206,14 @@ class ContextInsightFlowTest {
         String cachedPart = cached == null ? "" : ",\"cached_tokens\":" + cached;
         return "{\"model\":\"" + model + "\",\"usage\":{\"prompt_tokens\":" + prompt
                 + ",\"completion_tokens\":" + completion + cachedPart + "}}";
+    }
+
+    private void insertSkill(String userId, String name, String description, boolean enabled) {
+        jdbc.update("INSERT INTO bio_skill (user_id, name, description, version, source,"
+                        + " oss_key, content_sha, enabled, installed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                userId, name, description, "1.0.0", "archive",
+                "users/" + userId + "/skills/" + name + ".zip", "sha-" + name,
+                enabled ? 1 : 0, "2026-11-14T00:00:00");
     }
 
     private void insertAgentState(String userId, String conv, String messageIds) {
