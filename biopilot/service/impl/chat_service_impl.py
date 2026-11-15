@@ -10,6 +10,7 @@ from pathlib import Path
 
 from biopilot.domain.runtime_state import RuntimeState
 from biopilot.domain.web_config import WebConfig
+from biopilot.engine.agent.services.context_usage import context_usage
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.service.attachment_service import AttachmentService
@@ -165,7 +166,7 @@ class ChatServiceImpl(ChatService):
                 await built if asyncio.iscoroutine(built) else built)
             # 装配即快照固定开销基线（head 各块 + 工具 schema）
             try:
-                snap = self._runtime.agents[key].context_usage()
+                snap = context_usage(self._runtime.agents[key])
                 self._runtime.usage_baseline[
                     (user_id, state.user_models.get(user_id))] = {
                     "parts": {k: v for k, v in snap["parts"].items()

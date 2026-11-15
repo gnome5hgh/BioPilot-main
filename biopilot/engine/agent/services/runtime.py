@@ -45,6 +45,7 @@ import hashlib
 import json
 import logging
 import uuid
+from datetime import date
 from typing import Callable
 
 from biopilot.engine.llm import (
@@ -375,35 +376,16 @@ class Agent:
         """
         return self.window.wire()
 
-    def _memory_message(self) -> Message | None:
-        """编译当前记忆为 system 消息（assistant/profile 核心块）。
+    @property
+    def tool_schemas(self) -> list[dict]:
+        """OpenAI function calling JSON Schema 列表（构造期预计算，只读视图）。
 
-        有 block_manager 时先从 BlockManager 重建 memory（Memory(blocks=...）——
-        后台整合在会话内改写块后，下一轮 LLM 调用即见新内容（块变更即时生效，
-        而非重启才可见）。
+        用量估算等外部读侧消费方经此取用，不复算 schema。
+
+        Returns:
+            构造期由 `tool_to_openai_schema` 预计算的 JSON Schema 列表。
         """
-        if self.memory is None:
-            return None
-
-        # BlockManager 负责读写 MySQL 里的 bio_memory_block 表。list_blocks() 直接查库，
-        # 返回 list[Block]（每个 Block 是 pydantic 模型，含 label/value/版本号等）
-        # 每轮都从 BlockManager 重新读块重建 memory 对象——这就是「记忆会话内即时生效」的机制
-        # 注意：这里构建的是记忆块（bio_memory_block）——不是历史会话。历史会话在
-        # bio_message 表，由 MessageManager 管
-        if self.block_manager is not None:
-            from biopilot.engine.memory.schemas.memory import Memory
-            # 把「缓存的记忆对象」扔掉，从数据库重新读出所有块，拼一个新的 Memory 实例
-            self.memory = Memory(blocks=self.block_manager.list_blocks())
-
-        # compile() 只渲染 assistant/profile 两块（其余块经记忆工具按需读写）。compiled 的实际内容长这样：
-        #   <memory_blocks>
-        #   <block name="assistant">…助手工作方式记忆…</block>     ← 只有 assistant/profile 两块的内容
-        #   <block name="profile">…用户画像…</block>
-        #   </memory_blocks>
-        compiled = self.memory.compile()
-        if not compiled:
-            return None
-        return SystemMessage(content=compiled)
+        return self._tool_schemas
 
     def _intent_history(self) -> list[tuple[str, str]]:
         """截取最近若干轮对话文本，供意图层判定时参考上下文。
@@ -428,21 +410,79 @@ class Agent:
                    if m.role in ("user", "assistant") and (m.content or "").strip()]
         return history[-limit:]
 
-    async def _build_head(self, task: str) -> list[Message]:
-        """构建本轮 ReAct 循环的头部消息列表（system 层 + 用户任务）。
+    def _render_system(self) -> str:
+        """渲染 system 消息文本（head 全部 system 段在此拼装，唯一来源）。
+
+        段序：角色定义+行为基座 → 意图规则块 → skills 清单 → 可派发清单 →
+        session_context → 记忆块。静态段在前、记忆段殿后——记忆每轮刷新只重写
+        尾部，静态前缀保持稳定，利于 LLM 服务的前缀缓存。记忆段每轮从
+        BlockManager 现取：后台整合在会话内改写块后，下一轮 LLM 调用即见新内容
+        （块变更即时生效）；无记忆装配时整段省略。
+
+        Returns:
+            system 消息的完整文本；空段跳过，段间以空行分隔。
+        """
+        # BlockManager 负责读写 MySQL 里的 bio_memory_block 表。list_blocks() 直接查库，
+        # 返回 list[Block]（每个 Block 是 pydantic 模型，含 label/value/版本号等）。
+        # 每轮都从 BlockManager 重新读块重建 memory 对象——这就是「记忆会话内即时生效」
+        # 的机制。注意：这里构建的是记忆块（bio_memory_block）——不是历史会话，历史会话
+        # 在 bio_message 表，由 MessageManager 管
+        memory_section = ""
+        if self.memory is not None:
+            if self.block_manager is not None:
+                from biopilot.engine.memory.schemas.memory import Memory
+                # 把「缓存的记忆对象」扔掉，从数据库重新读出所有块，拼一个新的 Memory 实例
+                self.memory = Memory(blocks=self.block_manager.list_blocks())
+            memory_section = self.memory.compile()
+
+        sections = [self.system_prompt]
+
+        # 意图规则块：字段语义与各类别动作说明，由意图层产出（静态），
+        # 未装配意图服务时整段不存在
+        if self.intent_service is not None and self.intent_service.rules_block:
+            sections.append(self.intent_service.rules_block)
+
+        # skills 清单（L1 渐进披露，静态）；无已注册 skill 时 skills_block 为空串
+        if self.skills_block:
+            sections.append(self.skills_block)
+
+        # 可派发子 agent 清单（本 agent 的派发权限视图，静态）；无可派目标时为空串
+        if self.agents_block:
+            sections.append(self.agents_block)
+
+        # session_context 环境上下文（业界通行做法）：日期取渲染当日，归属/标识/角色
+        # 来自构造期已有字段，零额外查询
+        sections.append("\n".join([
+            "<session_context>",
+            f"当前日期：{date.today().isoformat()}",
+            f"用户：{self.user_id}",
+            f"会话：{self.session_id}",
+            f"对话：{self.conversation_id}",
+            f"角色：{self.agent_type}",
+            "</session_context>",
+        ]))
+
+        # 记忆段殿后（动态，每轮刷新）；空段省略
+        if memory_section:
+            sections.append(memory_section)
+
+        return "\n\n".join(sections)
+
+    async def _build_head(self, task: str) -> tuple[list[Message], str]:
+        """构建本轮 ReAct 循环的头部消息（system 消息 + 任务 user 消息）。
 
         **调用前 in-context 历史必须已加载**（`run()` 里先 `window.load()` 再建 head）——
         意图层要读最近几轮对话文本才能读懂「再下载一篇」这类指代。
 
-        此方法在每次 run 开始时被调用一次（不在 ReAct 轮次内重复），用于组装 LLM 输入的前置部分（system 消息）。
-        它按顺序拼接六块内容：
-            1. system: AGENT.md 系统提示（来自 agent 配置，定义角色与行为规范）
-            2. system: SKILLS 清单块（L1 渐进披露清单，若装配了 SkillRegistry 且有可见 skill）
-            3. system: 可派发子 agent 清单块（本 agent 有权派发的目标，按 allowed_spawns 渲染）
-            4. system: 记忆块（Memory.compile() 输出的 assistant/profile）
-            5. system: 意图规则块与 INTENT 块（仅装配意图服务时；规则块给出字段语义与
-               非派发意图的处理说明，INTENT 块是路由先验）
-            6. 末尾追加 user task。
+        此方法在每次 run 开始时被调用一次（不在 ReAct 轮次内重复）。head 只有
+        两条消息（业界主流：system 只有一条，多段内容拼接其内）：
+
+            1. system（多段拼接，段序见 `_render_system`）：AGENT.md 系统提示与
+               行为基座、意图规则块、SKILLS 清单、可派发子 agent 清单、
+               session_context、记忆块
+            2. user 任务消息：本轮任务原文；装配意图服务且本轮有判定结果时，
+               任务文本前附 `<intent>` 标签块（`INTENT: {...}` JSON）——意图信号
+               只作提示不作命令，随任务消息注入但不落盘、不持跨轮状态
 
         意图层只产出一条 INTENT 块：不修改任务文本、不阻塞本轮，也不持有跨轮状态。
 
@@ -450,68 +490,53 @@ class Agent:
             task: 本轮用户输入文本（原始任务）。
 
         Returns:
-            list[Message]: 头部消息列表 [system_prompt, skills(可选), available_agents(可选), memory(可选), rules(可选), intent(可选), user_task]。
+            tuple: (head, task_text)——head 是 [system, user_task] 两条消息；
+            task_text 是落盘用的任务文本（不含 INTENT 标签；意图层约定不改写任务，
+            故与输入一致，经 `Turn.task` 走一道以兼容将来需要改写的扩展）。
         """
-        # ====== 第1层：AGENT.md 系统提示 ======
-        head: list[Message] = [SystemMessage(content=self.system_prompt)]
-
-        # ====== 第2层：SKILLS 清单（L1 渐进披露，静态） ======
-        # skill 指令的约束力声明写在块内；无已注册 skill 时 skills_block 为空串，整块省略
-        if self.skills_block:
-            head.append(SystemMessage(content=self.skills_block))
-
-        # ====== 第 2.5 层：可派发子 agent 清单（本 agent 的派发权限视图，静态） ======
-        # 派发顺序与并行由派发方自主决定，因此它必须先知道有哪些子 agent、各自能做什么；
-        # 清单是自身 allowed_spawns 的派生视图（supervisor 为全部），无可派目标时为空串，
-        # 整块省略（不产生空 system 消息）。
-        if self.agents_block:
-            head.append(SystemMessage(content=self.agents_block))
-
-        # ====== 第3层：记忆块（核心记忆 + 文件系统索引） ======
-        if self.memory is not None:
-            m = self._memory_message()
-            if m is not None:
-                head.append(m)
-
-        # ====== 第4层：意图识别（可选预处理层）======
-        # 未装配意图服务时整块零开销跳过。装配时：先注入规则块（字段语义与
-        # 非派发意图的处理说明，由意图层产出而非写死在 AGENT.md），再跑前置
-        # 预处理拿 INTENT 块与任务文本。
+        # ====== 意图预处理（可选层）======
+        # 跑前置识别拿 INTENT 块；规则块在 _render_system 里随 system 段注入。
+        intent_block = ""
         if self.intent_service is not None:
-            if self.intent_service.rules_block:
-                head.append(SystemMessage(content=self.intent_service.rules_block))
             turn = await self.intent_service.begin(task, history=self._intent_history())
             task = turn.task
             if turn.head_block:
-                head.append(SystemMessage(content=turn.head_block))
+                intent_block = turn.head_block
 
-        # ====== 第5层：用户任务 ======
-        # 最后将当前用户输入作为 user 消息追加。
-        head.append(UserMessage(content=task))
-        return head
+        # ====== system（多段拼接，各段见 _render_system）======
+        head: list[Message] = [self.system_message()]
+
+        # ====== user 任务消息（恒末位）======
+        # INTENT 块以标签形式附在任务文本前（同 Claude Code 的 system-reminder
+        # 模式：动态信号进 user 消息、system 保持静态）；无判定结果时就是纯任务。
+        task_content = f"<intent>\n{intent_block}\n</intent>\n\n{task}" if intent_block else task
+        head.append(UserMessage(content=task_content))
+        return head, task
+
+    def system_message(self) -> SystemMessage:
+        """构建 system 消息（`_render_system` 整体拼装，记忆段随之现取）。
+
+        head 构建、记忆刷新与用量估算三方共用此入口——渲染口径只有这一份，
+        估算与真实发送严格同源。
+
+        Returns:
+            拼装完成的 system 消息；无记忆装配时不含记忆段。
+        """
+        return SystemMessage(content=self._render_system())
 
     def _refresh_head_memory(self, head: list[Message]) -> None:
-        """会话内刷新 head 里的记忆 system 消息（块被改写后即时生效）。
+        """会话内刷新 head 里的记忆段（块被改写后即时生效）。
 
-        有 block_manager 时在 ReAct 每轮开头重建记忆块并替换 head 中旧的
-        <memory_blocks> 消息——同一轮里被后台整合改写的块,下一轮 LLM 调用即见。
-        无记忆装配（memory 或 block_manager 为 None）时零开销空操作。
+        有 block_manager 时在 ReAct 每轮开头重读块并重渲染 head[0]（system
+        消息，记忆段在其中）——同一轮里被后台整合改写的块，下一轮 LLM 调用
+        即见。无记忆装配（memory 或 block_manager 为 None）时零开销空操作。
 
         Args:
-            head: list[Message]，本轮 head 消息列表（就地替换/插入记忆消息）
+            head: list[Message]，本轮 head 消息列表（head[0] 就地替换）
         """
         if self.memory is None or self.block_manager is None:
             return
-        new_msg = self._memory_message()
-        for i, m in enumerate(head):
-            if m.role == "system" and (m.content or "").startswith("<memory_blocks>"):
-                if new_msg is None:
-                    head.pop(i)
-                else:
-                    head[i] = new_msg
-                return
-        if new_msg is not None:
-            head.insert(1, new_msg)
+        head[0] = self.system_message()
 
     def _needs_compaction(self, messages: list[Message]) -> bool:
         """in-context 消息是否超压缩阈值（只检查，执行在 run() 里）。
@@ -594,41 +619,6 @@ class Agent:
         finally:
             await asyncio.to_thread(lock.release, lock_name)
 
-    def context_usage(self) -> dict:
-        """计算当前会话的上下文窗口用量分解（同步、只读、不发 LLM 请求）。
-
-        head 各块（系统提示/技能/可派发清单/记忆/意图）按构建口径逐块估算，
-        工具 schema 按 function calling JSON 估算，消息窗口按当前 in-context
-        内容估算。窗口上限 = 显式 context_size > 模型窗口（与压缩判定同口径）。
-        必须在 window.load() 之后的时点调用才有消息计数（适配层对缓存 Agent
-        调用时窗口已加载）。
-
-        Returns:
-            dict: {total, limit, parts: {...}}，parts 键与 head 组装顺序一致。
-        """
-        from biopilot.common.utils.tokenization import estimate_text_tokens
-        from biopilot.engine.memory.services.compaction import estimate_tokens
-
-        parts: dict[str, int] = {}
-        parts["system_prompt"] = estimate_text_tokens(self.system_prompt)
-        parts["skills"] = estimate_text_tokens(self.skills_block)
-        parts["agents_list"] = estimate_text_tokens(self.agents_block)
-        memory_text = ""
-        if self.memory is not None:
-            memory_text = self.memory.compile()
-        parts["memory"] = estimate_text_tokens(memory_text)
-        intent_text = ""
-        if self.intent_service is not None:
-            intent_text = (self.intent_service.rules_block or "")
-        parts["intent"] = estimate_text_tokens(intent_text)
-        parts["tools_schema"] = estimate_text_tokens(
-            json.dumps(self._tool_schemas, ensure_ascii=False))
-        parts["messages"] = estimate_tokens(self.window.messages)
-        total = sum(parts.values())
-        limit = (self.compaction.context_size if self.compaction
-                 and self.compaction.context_size else self.llm.context_window)
-        return {"total": total, "limit": limit, "parts": parts}
-
     async def _run_react_bound(self, task: str, stream_callback=None) -> str:
         """在绑定记忆工具上下文的任务上下文里跑 ReAct 本体。
 
@@ -682,11 +672,10 @@ class Agent:
         ReAct 循环步骤::
 
             1. 生成本次 run 的 trace_id（32 位 hex，W3C 128-bit）并清洗 task 的未配对 surrogate
-            2. 构建 head：① AGENT（AGENT.md 系统提示）→ ② SKILLS 清单块（若装配
-               SkillRegistry 且有可见 skill）→ ③ 可派发子 agent 清单块（本 agent
-               有权派发的目标）→ ④ Memory.compile()（system/ 记忆块，若有）→ ⑤ 意图
-               规则块与 INTENT 块（装配意图服务时）→ user_task。
-               意图层只注入一条 INTENT 块，不修改任务文本
+            2. 构建 head：system 消息（AGENT.md+行为基座 → 意图规则块 → SKILLS
+               清单 → 可派发子 agent 清单 → session_context → 记忆块，段序见
+               `_render_system`）→ user 任务消息（INTENT 信号以 <intent> 标签附在
+               任务文本前，落盘不含标签）。意图层只注入一条 INTENT 块，不修改任务文本
             3. 从 MessageManager 加载该会话的 in-context 消息（跨轮回放），当前
                user task 落盘；消息归属 self.window（in-context 窗口）
             4. 调用 LLM 前检查压缩（compaction.should_compress → run_compaction
@@ -718,12 +707,14 @@ class Agent:
         # 意图层要读最近几轮对话文本（它得读懂指代类输入）。
         self.window.load()
 
-        # head:① AGENT ② SKILLS ③ 可派发子 agent 清单 ④ Memory ⑤ 意图规则块+INTENT 块,每轮重建
-        # 不进累积;末尾 user task。意图层只在 _build_head 内注入 INTENT 块。
-        head = await self._build_head(task)
-        #: 当前 user task 落盘(供窗口回放),下轮经窗口回放；它排在 head 末尾参与每次
-        # 请求,不进消息缓冲,故只落盘记账。
-        self.window.persist(head[-1])
+        # head:system 消息(AGENT+基座/意图规则/SKILLS/可派发清单/session_context/记忆)
+        # + 末尾 user 任务消息,每轮重建、不进累积。INTENT 信号以 <intent> 标签附在
+        # 任务文本前,由 _build_head 注入。
+        head, task_text = await self._build_head(task)
+        #: 当前 user task 落盘(供窗口回放),下轮经窗口回放。落盘用纯任务文本:
+        # INTENT 标签是每轮信号,不落盘、不持跨轮状态(否则下轮回放会把上一轮的
+        # 旧意图当作有效先验)。它排在 head 末尾参与每次请求,不进消息缓冲,故只落盘记账。
+        self.window.persist(UserMessage(content=task_text))
 
         #: 截断续写累积器：半截回答在此暂存，完整回答返回前合并。
         #: 只在截断→续写场景使用；非截断路径保持空列表，零额外行为。
@@ -736,8 +727,8 @@ class Agent:
             # (head 是本地列表,_refresh_head_memory 就地替换记忆消息)。
             self._refresh_head_memory(head)
 
-            #: LLM 输入 = head 前段(AGENT/SKILLS/memory/INTENT) + in-context 回放历史 +
-            #: 末尾当前 user task(恒末位——否则 LLM 会把回放历史里的旧任务误当当前任务)。
+            #: LLM 输入 = head 前段(system 消息) + in-context 回放历史 +
+            #: 末尾当前 user 任务消息(恒末位——否则 LLM 会把回放历史里的旧任务误当当前任务)。
             messages = list(head[:-1]) + self.window.messages + [head[-1]]
 
             # 压缩检查:只改 in-context 窗口(驱逐旧对话 + 插摘要),

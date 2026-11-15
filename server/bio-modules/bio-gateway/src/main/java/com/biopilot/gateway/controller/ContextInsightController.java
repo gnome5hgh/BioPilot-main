@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,7 +33,11 @@ import org.springframework.web.bind.annotation.RestController;
  *       reasoning_tokens} 与 model 字段——响应信封落盘格式；</li>
  *   <li>压缩摘要消息的固定开场白前缀 {@link #SUMMARY_PREFIX}；</li>
  *   <li>bio_agent_state.message_ids——当前 in-context 窗口的消息 id 清单，
- *       压缩后同步收缩。</li>
+ *       压缩后同步收缩；</li>
+ *   <li>引擎 Memory.compile() 的渐进暴露口径——system 消息只常驻
+ *       {@link #RESIDENT_MEMORY_LABELS} 两块，其余块经 memory_read 工具按 label
+ *       按需读取（{@link #MEMORY_READ_TOOL}）；记忆类目据此只展示 agent 实际
+ *       读到的块。</li>
  * </ul>
  * 浏览器只返回三类可展示原文的类目：技能清单（bio-skill 公开接口的当前启用清单）、
  * 记忆块、窗口内消息。系统提示词/可派发清单/意图/工具定义四类的原文只在引擎进程内组装，
@@ -46,6 +51,12 @@ public class ContextInsightController {
     /** 压缩摘要消息（UserMessage）的固定开场白前缀；用于标记压缩点位置。 */
     static final String SUMMARY_PREFIX =
             "This session is being continued from a previous conversation that ran out of context.";
+
+    /** 引擎 Memory.compile() 常驻 system 消息的记忆块 label（渐进暴露口径的跨栈契约）。 */
+    static final List<String> RESIDENT_MEMORY_LABELS = List.of("assistant", "profile");
+
+    /** 读记忆工具名：会话内出现带 label 的该调用，即视为 agent 读过该块的原文。 */
+    private static final String MEMORY_READ_TOOL = "memory_read";
 
     /** 输入骤降阈值：prompt 比上一报用量请求低两成以上视为压缩点（窗口收缩是唯一让输入变小的因素）。 */
     private static final double DROP_RATIO = 0.8;
@@ -167,12 +178,45 @@ public class ContextInsightController {
             }
         }
 
-        // 记忆块原文：逐块展示（引擎 Memory.compile() 的素材源）
+        // 记忆块原文：只展示 agent 实际读到的——system 消息常驻的 assistant/profile
+        // 两块（引擎 Memory.compile() 口径）加上本会话内 memory_read 读过的分册
+        // （从消息 tool_calls 解析 label；不传 label 的「列目录」调用不揭示内容、
+        // 不计入）。读过即展示、单调累积：压缩驱逐读记录后，读过获得的内容已进
+        // 摘要，展示仍成立。
+        LinkedHashSet<String> memoryLabels = new LinkedHashSet<>(RESIDENT_MEMORY_LABELS);
+        List<Map<String, Object>> readRows = jdbc.queryForList(
+                "SELECT tool_calls FROM bio_message"
+                        + " WHERE agent_id=? AND user_id=? AND role='assistant'"
+                        + " AND tool_calls IS NOT NULL ORDER BY seq",
+                conversationId, userId);
+        for (Map<String, Object> row : readRows) {
+            List<Map<String, String>> calls = parseToolCalls((String) row.get("tool_calls"));
+            if (calls == null) {
+                continue;
+            }
+            for (Map<String, String> call : calls) {
+                if (!MEMORY_READ_TOOL.equals(call.get("name"))) {
+                    continue;
+                }
+                String label = extractReadLabel(call.get("arguments"));
+                if (label != null) {
+                    memoryLabels.add(label);
+                }
+            }
+        }
         List<Map<String, Object>> memoryItems = new ArrayList<>();
         List<Map<String, Object>> blocks = jdbc.queryForList(
                 "SELECT label, value FROM bio_memory_block WHERE user_id=? ORDER BY seq",
                 userId);
+        Map<String, Map<String, Object>> blockByLabel = new HashMap<>();
         for (Map<String, Object> block : blocks) {
+            blockByLabel.put((String) block.get("label"), block);
+        }
+        for (String label : memoryLabels) {
+            Map<String, Object> block = blockByLabel.get(label);
+            if (block == null) {
+                continue;
+            }
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("label", block.get("label"));
             item.put("content", block.get("value"));
@@ -230,6 +274,19 @@ public class ContextInsightController {
                         "arguments", fn.path("arguments").asText("")));
             }
             return calls;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 从 memory_read 调用的 arguments JSON 里取 label；缺参或解析失败返回 null（列目录调用不计入）。 */
+    private String extractReadLabel(String argumentsJson) {
+        if (argumentsJson == null || argumentsJson.isEmpty()) {
+            return null;
+        }
+        try {
+            JsonNode label = objectMapper.readTree(argumentsJson).path("label");
+            return label.isTextual() && !label.asText().isBlank() ? label.asText() : null;
         } catch (Exception e) {
             return null;
         }

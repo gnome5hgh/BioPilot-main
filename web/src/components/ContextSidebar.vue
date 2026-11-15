@@ -123,7 +123,7 @@
             <button class="browser-cat-head" @click="toggleCat(cat.key)">
               <span class="part-dot" :style="{ background: catColor(cat.key) }"></span>
               <span class="browser-cat-label">{{ catLabel(cat.key) }}</span>
-              <span class="browser-cat-tokens">{{ catTokens(cat.key) }}</span>
+              <span class="browser-cat-tokens">{{ catTokens(cat) }}</span>
               <span class="chev">{{ openCats[cat.key] ? '▾' : '▸' }}</span>
             </button>
             <div v-if="openCats[cat.key]" class="browser-items">
@@ -156,8 +156,10 @@ import { useChatStore } from '../stores/chat'
 import { fmtTimeOrDate } from '../utils/time'
 import { usageLevelOf, usagePercentOf } from '../utils/contextUsage'
 
-// 七类分类色：与 head 组装顺序一一对应；组成条展示全部七类（引擎用量口径），
-// 浏览器类目是其子集（后端只返回可展示原文的三类），沿用同一套色与名
+// 分类色与名：用量端点只返回三类（system_prompt/tools_schema/messages，引擎用量
+// 口径，与真实请求的 system 消息/独立 tools 字段/窗口历史一一对应，组成条
+// 全部展示）；上下文浏览器的类目（skills/memory 等，后端只返回可展示原文的）沿用
+// 同一套色与名，其 token 数不再来自用量端点（已并入 system_prompt 估算），按条目粗估
 const CATEGORY_COLORS = {
   system_prompt: '#2ec5b1',
   skills: '#5b8def',
@@ -301,16 +303,24 @@ function catEmptyHint(key) {
   return EMPTY_HINTS[key] || '无内容'
 }
 
-/** 类目 token 数：来自用量端点的七类 parts（引擎估算口径）；无数据显示 —。 */
-function catTokens(key) {
-  const value = store.usage?.parts?.[key]
-  return value != null ? fmtTok(value) : '—'
+/** 字符数 → token 粗估（÷4，至少 1），加 ≈ 前缀标示近似值。 */
+function approxTokOf(chars) {
+  return `≈${fmtTok(Math.max(1, Math.ceil(chars / 4)))}`
 }
 
-/** 条目 token 近似值：Java 端点不算 token，按字符数 ÷4 粗估并标 ≈。 */
+/** 类目 token 数：用量端点有对应键（system_prompt/tools_schema/messages）则直取；
+ * 浏览器专属类目（skills/memory，已并入系统提示词估算）按条目字符数粗估并标 ≈。 */
+function catTokens(cat) {
+  const value = store.usage?.parts?.[cat.key]
+  if (value != null) return fmtTok(value)
+  const chars = (cat.items || []).reduce(
+    (sum, item) => sum + (item.content?.length || 0), 0)
+  return chars ? approxTokOf(chars) : '—'
+}
+
+/** 条目 token 近似值：Java 端点不算 token，按字符数粗估并标 ≈。 */
 function approxTok(content) {
-  if (!content) return ''
-  return `≈${fmtTok(Math.max(1, Math.ceil(content.length / 4)))}`
+  return content ? approxTokOf(content.length) : ''
 }
 
 function itemLabel(item, key, index) {
