@@ -5,6 +5,7 @@ import json
 import logging
 
 from biopilot.domain.runtime_state import RuntimeState
+from biopilot.engine.agent.services.context_usage import context_usage
 from biopilot.mapper import agent_state_mapper, message_mapper
 from biopilot.mapper.base import shared_db
 from biopilot.service import state
@@ -83,7 +84,7 @@ class SessionServiceImpl(SessionService):
             (user_id, conversation_id, state.user_models.get(user_id)))
         if agent is not None:
             try:
-                return {"usage": agent.context_usage()}
+                return {"usage": context_usage(agent)}
             except Exception:
                 logger.warning("上下文用量计算失败", exc_info=True)
         # 未装配路径：基线（head + 工具 schema）+ 消息份（从 DB 逐行估算）
