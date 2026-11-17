@@ -208,7 +208,7 @@ class RAGService:
 
     @property
     def image_store(self):
-        """图表原图的存取器（惰性单例；关掉开关时是空实现）。
+        """图表原图的存取器（惰性单例，无锁——构造是纯本地判断；关掉开关时是空实现）。
 
         Returns:
             ImageStore: 存取器。

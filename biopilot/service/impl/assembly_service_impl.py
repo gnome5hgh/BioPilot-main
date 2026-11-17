@@ -42,6 +42,7 @@ from biopilot.engine.tools.adapters.tool_result_store import make_tool_result_st
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.common.platform import shared_platform_client
+from biopilot.engine.memory.adapters.named_lock import NamedLock
 from biopilot.engine.tools.adapters.skills.load_skill import LoadSkillTool
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,7 @@ class AssemblyServiceImpl(AssemblyService):
 
         agent = Agent(
             llm=llm, agent_registry=registry, agent_type="supervisor",
+            run_mutex=NamedLock(db.dsn),
             skill_registry=skill_registry,
             memory=agent_state.memory,
             agent_manager=agent_manager, block_manager=block_manager,

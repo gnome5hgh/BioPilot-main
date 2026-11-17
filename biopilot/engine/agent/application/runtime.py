@@ -613,8 +613,9 @@ class Agent:
         elif not lock_dsn:
             return await self._run_react_bound(task, stream_callback)
         else:
-            # 降级路径：组装根未注入端口时，从记忆块管理器的连接池惰性取锁。
-            # 保留到装配层完成端口注入后删除（见 ADR 0013 组装根收敛）。
+            # 未注入端口的常态路径（spawn 子 agent 即此形态）：每次 run 现取锁——
+            # 不能复用父实例，独立 conversation_id 的锁若共用一条 GET_LOCK 连接
+            # 会互踩（子 agent 拿锁会隐式释放父锁）。见 ADR 0013。
             from biopilot.engine.memory.adapters.named_lock import NamedLock
             lock = NamedLock(lock_dsn)
         lock_name = f"run:{self.conversation_id}"
