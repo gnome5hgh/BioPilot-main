@@ -9,40 +9,40 @@ from pathlib import Path
 from biopilot.config import BioPilotConfig, user_cache_root
 from biopilot.domain.web_session import WebSession
 from biopilot.engine.agent import Agent, AgentRegistry
-from biopilot.engine.intent.rules.taxonomy import TaxonomyError, load_taxonomy
-from biopilot.engine.intent.services.jev import JevClient, JevUnavailable
-from biopilot.engine.intent.services.service import IntentService
+from biopilot.engine.intent.domain.rules.taxonomy import TaxonomyError, load_taxonomy
+from biopilot.engine.intent.adapters.jev import JevClient, JevUnavailable
+from biopilot.engine.intent.application.service import IntentService
 from biopilot.engine.llm import LLMClient, StructuredOutput
-from biopilot.engine.memory.services.agent_manager import AgentManager
-from biopilot.engine.memory.services.block_manager import BlockManager
-from biopilot.engine.memory.services.consolidation import (
+from biopilot.engine.memory.application.agent_manager import AgentManager
+from biopilot.engine.memory.application.block_manager import BlockManager
+from biopilot.engine.memory.application.consolidation import (
     ConsolidationQueue,
     MemoryConsolidator,
 )
-from biopilot.engine.memory.services.message_manager import MessageManager
-from biopilot.engine.memory.storage.database import MemoryDB
+from biopilot.engine.memory.application.message_manager import MessageManager
+from biopilot.engine.memory.adapters.database import MemoryDB
 from biopilot.engine.security import (
     AuditMiddleware,
     CommandGuardMiddleware,
     ContentGuardMiddleware,
     PolicyEngineMiddleware,
 )
-from biopilot.engine.security.services.classifier import build_classifier
+from biopilot.engine.security.adapters.classifier import build_classifier
 from biopilot.engine.skills import (
     SkillRegistry,
     apply_pre_approval,
     merge_tools,
     sync_user_skills,
 )
-from biopilot.engine.tool.services.offload import make_tool_result_offloader
-from biopilot.engine.tool.services.runtime_context import (
+from biopilot.engine.tools.application.offload import make_tool_result_offloader
+from biopilot.engine.tools.application.runtime_context import (
     MemoryToolsContext,
     set_memory_context,
 )
-from biopilot.engine.tool.services.tool_result_store import make_tool_result_store
+from biopilot.engine.tools.adapters.tool_result_store import make_tool_result_store
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
-from biopilot.tools.skills.load_skill import LoadSkillTool
+from biopilot.engine.tools.adapters.skills.load_skill import LoadSkillTool
 
 logger = logging.getLogger(__name__)
 

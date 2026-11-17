@@ -5,7 +5,7 @@ import json
 import logging
 
 from biopilot.domain.runtime_state import RuntimeState
-from biopilot.engine.agent.services.context_usage import context_usage
+from biopilot.engine.agent.application.context_usage import context_usage
 from biopilot.mapper import agent_state_mapper, message_mapper
 from biopilot.mapper.base import shared_db
 from biopilot.service import state

@@ -1,7 +1,7 @@
 """note-agent 的工具装配:原子文件工具 + 派发 review-agent 的审稿 spawn。
 
 装配 read_file/read_pdf/write_file/edit_file/delete_file 五个原子工具(复用
-biopilot/tools/ 的集中式安全边界与风险语义)、glob/grep 定位工具,以及
+engine/tools/ 的集中式安全边界与风险语义)、glob/grep 定位工具,以及
 SpawnSubAgentTool——AGENT.md 的审稿循环用它派发 review-agent 子 agent 审阅草稿,
 拿回裁决后经 edit_file 修订。
 delete_file：删除自己的笔记产物（笔记不进检索知识库,删除无需任何入库/收敛动作）。
@@ -12,15 +12,15 @@ spawn 工具需要构造参数(agent_timeouts),故 make_tools 传已实例化的
 from biopilot.config import BioPilotConfig
 from pathlib import Path
 
-from biopilot.tools import (
+from biopilot.engine.tools import (
     ReadFileTool, ReadPdfTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool, ReadReferenceTool,
 )
-from biopilot.tools.services.assembly import make_tools
-from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
-from biopilot.tools.docs import SaveDocumentTool
-from biopilot.tools.recall import get_recall_tools
-from biopilot.tools.vision.analyze_figures import AnalyzeFiguresTool
+from biopilot.engine.tools.application.assembly import make_tools
+from biopilot.engine.tools.adapters.orchestration.spawn import SpawnSubAgentTool
+from biopilot.engine.tools.adapters.docs import SaveDocumentTool
+from biopilot.engine.tools.adapters.recall import get_recall_tools
+from biopilot.engine.tools.adapters.vision.analyze_figures import AnalyzeFiguresTool
 
 
 # 装配 10 工具:6 原子工具(含 delete_file) + 共享 spawn_sub_agent

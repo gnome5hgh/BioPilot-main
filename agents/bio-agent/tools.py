@@ -7,13 +7,13 @@ read_file/glob/grep 负责找到并读取任务给定的数据文件；save_docu
 scratch 带回宿主路径，报告走 save_document）。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.tools import (
+from biopilot.engine.tools import (
     GlobTool, GrepTool, ReadFileTool, ReadPdfTool,
 )
-from biopilot.tools.code.run_python import RunPythonTool
-from biopilot.tools.code.run_shell import RunShellTool
-from biopilot.tools.docs import SaveDocumentTool
-from biopilot.tools.recall import get_recall_tools
+from biopilot.engine.tools.adapters.code.run_python import RunPythonTool
+from biopilot.engine.tools.adapters.code.run_shell import RunShellTool
+from biopilot.engine.tools.adapters.docs import SaveDocumentTool
+from biopilot.engine.tools.adapters.recall import get_recall_tools
 
 # 沙箱执行工具的政策来自装配配置；本角色不走 make_tools（无写文件工具可注入），
 # 配置就地直注——缺了它 execute 恒返回「未装配配置」，沙箱链路整体空转。

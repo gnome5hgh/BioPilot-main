@@ -14,10 +14,11 @@
 
 ```text
 llm/
-├─ domain/dto/   # messages/（wire 消息家族：基类 + system/user/assistant/tool 四子类）
+├─ domain/       # dto/messages/（wire 消息家族）+ dto/（信封/用量）+ port.py（ModelClient 端口）
 │                #   + 响应信封与 token 用量（层间载体，不是消息类型）
 ├─ config/       # StructuredOutputConfig（组件自有参数，不进全局配置）
-└─ services/     # client.py（异步客户端，非流式与流式两个模式）
+├─ application/  # structured.py（结构化输出编排）
+└─ adapters/     # client.py（OpenAI 兼容客户端）+ wire.py（消息⇄协议纯函数漏斗）
                  #   + structured.py（结构化输出 / JSON 抽取）
 ```
 
@@ -37,8 +38,8 @@ llm/
 
 ## Key Entry Points
 
-- `services/client.py` — 两个模式的客户端
-- `services/structured.py` — 结构化输出
+- `adapters/client.py` — 两个模式的客户端
+- `application/structured.py` — 结构化输出
 - `domain/dto/messages/` — 消息家族与 wire 转换
 - `domain/dto/` — 响应信封与用量
 
@@ -46,7 +47,7 @@ llm/
 
 - **`on_delta` 跑在线程池线程里**：它只能追加或打印，**不要碰事件循环**（不能 await、不要直接改异步状态）。
 - **api_key 留空即 fail-fast**，且要给出可行动的配置指引（配哪个字段、或哪个环境变量），不要退化成一句「未配置」。
-- 出网有统一出口（`engine/security/services/` 的端点守卫），**不要在客户端里自建连接绕过它**。
+- 出网有统一出口（`biopilot/common/net/` 的端点守卫），**不要在客户端里自建连接绕过它**。
 - 新增端点兼容性适配时，先看是否已由参数降级重试覆盖，不要为某个端点写特例分支。
 
 ## Dependencies And Collaboration

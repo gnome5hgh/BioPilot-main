@@ -1,6 +1,6 @@
 """Supervisor 工具装配——调度工具 + 只读召回。
 
-SpawnSubAgentTool 在共享层 biopilot/tools/orchestration/spawn.py 定义,
+SpawnSubAgentTool 在 engine/tools/adapters/orchestration/spawn.py 定义,
 本文件装配后供 supervisor 使用。Supervisor 是唯一装配 spawn 工具的 agent
 (权限最小化:子 agent 不能递归调度)。spawn 结果自带结构化摘要 digest,
 supervisor 按交付物类型读各结果组织回答。
@@ -12,8 +12,8 @@ supervisor 按交付物类型读各结果组织回答。
 （memory_read / read_tool_result）查阅。只读召回不产生领域产物,装配给所有 agent。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
-from biopilot.tools.recall import get_recall_tools
+from biopilot.engine.tools.adapters.orchestration.spawn import SpawnSubAgentTool
+from biopilot.engine.tools.adapters.recall import get_recall_tools
 
 
 def _make_supervisor_tools() -> list:

@@ -14,12 +14,12 @@
 
 ```text
 agent/
-├─ services/     # 运行时协作者：runtime.py（Agent 主循环）+ registry.py（插件发现）
+├─ application/  # 运行时协作者：runtime.py（Agent 主循环）+ registry.py（插件发现）
 │                #   + state.py（运行期状态容器）+ context_window.py + tool_executor.py
 │                #   + context_usage.py（窗口用量估算，读侧）
 ├─ constants/    # base_prompt.py（BASE_PROMPT 行为基座）+ enums/（引擎事件类型）
 ├─ config/       # AgentConfig：插件配置（组件自有参数）
-└─ domain/dto/   # 引擎事件（AgentEvent）
+└─ domain/       # 引擎事件（AgentEvent）+ RunMutex 端口（ports.py）
 ```
 
 ## Responsibilities
@@ -33,7 +33,7 @@ agent/
 
 - **ReAct 是唯一执行模型**：没有确定性 pipeline——路由、工具选择、任务拆解全由模型决定，工具只是喂给它的 JSON Schema 定义。
 - **依赖全走构造参数注入**：安全中间件、确认回调、意图服务、会话 id、记忆服务句柄、流式回调。`None` 一律表示「这一路关掉」，对应代码路径必须零开销跳过——**不要在实现里另读全局配置绕过注入**。
-- **运行期状态只放两个容器**（`services/state.py`）：`SessionState` 跨 run 存活，`RunState` 按一次任务 / `trace_id` 隔离。**不要新增模块级字典**攒跨调用状态；两者都按 TTL 惰性清扫（取用时顺手剔除过期项，不起定时任务）。
+- **运行期状态只放两个容器**（`application/state.py`）：`SessionState` 跨 run 存活，`RunState` 按一次任务 / `trace_id` 隔离。**不要新增模块级字典**攒跨调用状态；两者都按 TTL 惰性清扫（取用时顺手剔除过期项，不起定时任务）。
 - **工具调用并发执行，但结果按调用顺序回填**：并发不等于乱序，模型看到的工具结果必须与它发出的调用次序一致。并发度有上限，确认是串行的（确认框非线程安全）。
 - **截断必须续写**：模型因长度被截断时，把半截内容与续写提示放回 in-context 继续循环，不能把那半截当最终回答交付。
 - **错误一律降级为文本**：工具与中间件层的错误转成结果文本回传模型；唯一向上抛的异常是回合数超限（模型陷入无法自主退出的循环，必须由调用方介入）。
@@ -41,11 +41,11 @@ agent/
 
 ## Key Entry Points
 
-- `services/runtime.py` — `Agent.run()`：主循环
-- `services/registry.py` — 插件发现与配置加载
-- `services/tool_executor.py` — 工具执行管道（中间件洋葱、确认、异常降级）
+- `application/runtime.py` — `Agent.run()`：主循环
+- `application/registry.py` — 插件发现与配置加载
+- `application/tool_executor.py` — 工具执行管道（中间件洋葱、确认、异常降级）
 - `services/context_window.py` — in-context 窗口与压缩触发
-- `services/state.py` — 两个状态容器
+- `application/state.py` — 两个状态容器
 - `constants/base_prompt.py` — 行为基座（诚实性协议、交付契约语义、协作语义）
 
 ## Usage And Change Notes
@@ -65,8 +65,8 @@ agent/
 
 ## Investigation Rule
 
-1. 主循环行为（轮次、head、压缩、续写）看 `services/runtime.py`；工具执行（中间件、确认、异常）看 `services/tool_executor.py`。
-2. 窗口与压缩看 `services/context_window.py`；跨调用状态看 `services/state.py`；插件加载看 `services/registry.py`；通用行为措辞看 `constants/base_prompt.py`。
+1. 主循环行为（轮次、head、压缩、续写）看 `application/runtime.py`；工具执行（中间件、确认、异常）看 `application/tool_executor.py`。
+2. 窗口与压缩看 `services/context_window.py`；跨调用状态看 `application/state.py`；插件加载看 `application/registry.py`；通用行为措辞看 `constants/base_prompt.py`。
 3. 排查「子 agent 拿不到某能力」先看继承面与装配层，再看插件自己的 `AGENT.md`。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -91,7 +91,7 @@ conda run -n biopilot python -m pytest tests/agent tests/core -q
 
 ## References
 
-- [`services/runtime.py`](services/runtime.py)
-- [`services/state.py`](services/state.py)
+- [`application/runtime.py`](application/runtime.py)
+- [`application/state.py`](application/state.py)
 - [`constants/base_prompt.py`](constants/base_prompt.py)
 - [`../../../agents/AGENTS.md`](../../../agents/AGENTS.md)

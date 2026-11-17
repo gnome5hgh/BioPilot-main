@@ -9,10 +9,10 @@
 管理面（安装/启停/更新/卸载）在 Java 的 bio-skill 模块；引擎只做只读消费。
 """
 
-from biopilot.engine.skills.services.assembly import apply_pre_approval, merge_tools
-from biopilot.engine.skills.services.layout import user_skills_cache_dir
-from biopilot.engine.skills.services.registry import SkillRegistry
-from biopilot.engine.skills.services.user_skills import sync_user_skills
+from biopilot.engine.skills.application.assembly import apply_pre_approval, merge_tools
+from biopilot.engine.skills.application.layout import user_skills_cache_dir
+from biopilot.engine.skills.application.registry import SkillRegistry
+from biopilot.engine.skills.application.user_skills import sync_user_skills
 from biopilot.engine.skills.config import SkillConfig
 
 __all__ = [

@@ -15,9 +15,9 @@
 ```text
 security/
 ├─ domain/dto/    # 调用上下文快照 + 审计事件快照（六类事件共用）
-├─ middleware/    # base.py 协议与异常体系 + 审计落盘
+├─ application/  # application/middleware/（base.py 协议与异常体系 + 审计/策略/守卫）+ command.py（命令解析）
 │                 #   + 内容防护 + 命令防护 + 策略引擎（唯一确认决策点）
-└─ services/      # 被工具与客户端直接调用的防护能力：
+└─ adapters/     # 被工具与客户端直接调用的防护能力：
                   #   命令解析、可选语义判定
 ```
 
@@ -37,16 +37,16 @@ security/
 
 ## Key Entry Points
 
-- `middleware/base.py` — `SecurityMiddleware` 协议与异常体系
-- `middleware/command_guard.py` — 命令防护（接管 `format="shell_command"` 参数）
-- `middleware/policy_engine.py` — 唯一的确认决策点
-- `middleware/audit.py` — 审计落盘
-- `services/sandbox.py` — 进程外执行能力（`run_python` / `run_shell` 的容器墙）
+- `application/application/middleware/base.py` — `SecurityMiddleware` 协议与异常体系
+- `application/application/middleware/command_guard.py` — 命令防护（接管 `format="shell_command"` 参数）
+- `application/application/middleware/policy_engine.py` — 唯一的确认决策点
+- `application/application/middleware/audit.py` — 审计落盘（SQL 翻译在 `adapters/audit_store.py`）
+- `adapters/sandbox.py` — 进程外执行能力（`run_python` / `run_shell` 的容器墙）
 
 ## Usage And Change Notes
 
-- **协议与实现同子包**：协议层与四个实现都在 `middleware/`——协议只服务它们，分开放只会让「谁定义契约」变含糊。
-- **异常跟着协议或服务走**：安全异常家族与协议同处 `middleware/base.py`，命令/分类器异常跟各自服务。`domain/` 只放数据载体，不放行为。
+- **协议与实现同子包**：协议层与四个实现都在 `application/middleware/`——协议只服务它们，分开放只会让「谁定义契约」变含糊。
+- **异常跟着协议或服务走**：安全异常家族与协议同处 `application/middleware/base.py`，命令/分类器异常跟各自服务。`domain/` 只放数据载体，不放行为。
 - **本包不另立风险词汇**：风险等级与副作用取值在 `engine/constants/`（枚举即单一真相源），从这里取，不要复制一份。
 - **不要建 `constants/`**：扫描规则、不可见字符表、伪装系统消息模板、安全命令表、根目标表都只服务各自那一个中间件或服务，**就地声明**才对；真被两处消费了再搬。
 - **未配对代理字符清洗不在这里**：它被多个包横向消费，已归 `biopilot/common/utils/text.py`——需要时从那里取，别在本包再实现一份。
@@ -61,8 +61,8 @@ security/
 ## Investigation Rule
 
 1. 先判断是「拦错了」还是「没拦住」：前者看对应中间件的判据，后者看策略引擎的升级因合并。
-2. 平台资源引用问题看 `engine/tool/services/validation.py` 的 `validate_ref_args`；内容问题看内容防护；命令问题看 `command_guard` 与 `services/command.py`。
-3. 审计字段与格式看 `middleware/audit.py`；审计真相源是 MySQL 的 `bio_security_audit_event` 表（insert-only，payload 存全量取证）。
+2. 平台资源引用问题看 `engine/tool/adapters/validation.py` 的 `validate_ref_args`；内容问题看内容防护；命令问题看 `command_guard` 与 `adapters/command.py`。
+3. 审计字段与格式看 `application/middleware/audit.py`；审计真相源是 MySQL 的 `bio_security_audit_event` 表（insert-only，payload 存全量取证）。
 4. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands
@@ -85,6 +85,6 @@ conda run -n biopilot python -m pytest tests/security -q
 
 ## References
 
-- [`middleware/base.py`](middleware/base.py)
-- [`middleware/command_guard.py`](middleware/command_guard.py)
-- [`middleware/policy_engine.py`](middleware/policy_engine.py)
+- [`application/middleware/base.py`](application/middleware/base.py)
+- [`application/middleware/command_guard.py`](application/middleware/command_guard.py)
+- [`application/middleware/policy_engine.py`](application/middleware/policy_engine.py)

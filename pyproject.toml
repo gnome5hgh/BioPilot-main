@@ -51,7 +51,7 @@ include = ["biopilot*"]
 # 意图知识库随包发布（mypy/测试之外也进 wheel）：它与类别枚举做 fail-closed 校验，
 # 必须与代码同版本；不声明 package-data 时非 editable 安装会缺这两份 YAML。
 [tool.setuptools.package-data]
-"biopilot.engine.intent" = ["data/*.yaml", "data/*.md"]
+"biopilot.engine.intent.domain" = ["data/*.yaml", "data/*.md"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

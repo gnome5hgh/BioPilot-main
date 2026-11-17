@@ -15,11 +15,11 @@
 ```text
 vision/
 ├─ constants/    # 图表类型枚举
-├─ schemas/      # 提取出的图表对象 + 视觉模型的结构化分析
+├─ domain/       # domain/schemas/（图表对象与视觉分析）+ geometry.py（共用几何）
 ├─ common/       # 几何原语（框、词、行、段），被解析/检测/模型/渲染横向消费
-├─ services/     # extractor.py（管线编排）+ analyzer.py（看图）+ renderer.py（栅格化）
-├─ parsers/      # 管线各步解析：文本、版面、图注、图元
-└─ detectors/    # 图区定位 + 区域分类
+├─ application/  # analyzer.py（看图）+ describer.py（图注描述）+ application/detectors/ + application/parsers/（纯算法）
+├─ adapters/     # extractor.py（管线编排）+ renderer.py（栅格化）+ text_extractor.py（PyMuPDF 文本）
+└─ application/detectors/    # 图区定位 + 区域分类
 ```
 
 ## Responsibilities
@@ -30,16 +30,16 @@ vision/
 
 ## Core Logic
 
-- **提取与看图是两段式**：先用管线拿到图区候选（proposal + 打分选优 + no-overlap 互斥），再由视觉模型结构化看图。两段之间只经 `schemas/` 的数据模型衔接，不要跨段直接调内部函数。
+- **提取与看图是两段式**：先用管线拿到图区候选（proposal + 打分选优 + no-overlap 互斥），再由视觉模型结构化看图。两段之间只经 `domain/schemas/` 的数据模型衔接，不要跨段直接调内部函数。
 - **两类消费方，按需取字段**：看图方要编号、图注、图像字节与 mime；**造检索块**方要图注、坐标词（表格重建靠坐标分行列）、区域边界与页码，并跳过栅格化。新增字段时两个消费方都要过一遍。
 - **全链路降级**：视觉 key 缺失、页面无图、管线失败一律返回**带原因的不可用结果**，绝不抛进 ReAct 循环。
 
 ## Key Entry Points
 
-- `services/extractor.py` — 管线编排入口
-- `services/analyzer.py` — 视觉模型调用（本包唯一出网点）
-- `detectors/` — 图区定位与区域分类
-- `common/geometry.py` — 几何原语
+- `adapters/extractor.py` — 管线编排入口
+- `application/analyzer.py` — 视觉模型调用（经 ModelClient 端口；构造在 `adapters/builders.py`）
+- `application/detectors/` — 图区定位与区域分类
+- `domain/geometry.py` — 几何原语
 
 ## Usage And Change Notes
 
@@ -55,8 +55,8 @@ vision/
 
 ## Investigation Rule
 
-1. 先分清是「图区没找到」还是「看图失败」——前者在 `detectors/` 与 `parsers/`，后者在 `services/analyzer.py`。
-2. 管线编排看 `services/extractor.py`；视觉调用看 `services/analyzer.py`；几何原语看 `common/`。
+1. 先分清是「图区没找到」还是「看图失败」——前者在 `application/detectors/` 与 `application/parsers/`，后者在 `application/analyzer.py`。
+2. 管线编排看 `application/extractor.py`；视觉调用看 `application/analyzer.py`；几何原语看 `common/`。
 3. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands
@@ -79,6 +79,6 @@ conda run -n biopilot python -m pytest tests/vision -q
 
 ## References
 
-- [`services/extractor.py`](services/extractor.py)
-- [`services/analyzer.py`](services/analyzer.py)
+- [`application/extractor.py`](application/extractor.py)
+- [`application/analyzer.py`](application/analyzer.py)
 - [`../rag/AGENTS.md`](../rag/AGENTS.md)

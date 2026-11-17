@@ -15,10 +15,9 @@
 ```text
 intent/
 ├─ constants/   # 类别枚举（词表唯一声明点）、知识库路径
-├─ data/        # 知识库资产：taxonomy.yaml / rules.yaml / README（随包发布）
-├─ schemas/     # 产出契约与判定结果、知识库的数据模型
-├─ rules/       # 实体抽取 + 知识库装载与 fail-closed 校验
-└─ services/    # 判定服务客户端 + 集成缝（注入 head 的唯一钩子）
+├─ domain/      # schemas/（产出契约）+ rules/（实体抽取 + 知识库装载校验）+ data/（知识库资产）
+├─ application/ # service.py 集成缝（注入 head 的唯一钩子）
+└─ adapters/    # jev.py 判定服务客户端
 ```
 
 ## Responsibilities
@@ -40,10 +39,10 @@ intent/
 
 ## Key Entry Points
 
-- `services/service.py` — 集成缝（注入 head 的唯一钩子）与规则块产出
-- `services/jev.py` — 判定服务客户端
-- `rules/entities.py`、`rules/taxonomy.py` — 实体抽取与知识库装载校验
-- `schemas/intent.py` — 产出契约
+- `application/service.py` — 集成缝（注入 head 的唯一钩子）与规则块产出
+- `adapters/jev.py` — 判定服务客户端
+- `domain/rules/entities.py`、`domain/rules/taxonomy.py` — 实体抽取与知识库装载校验
+- `domain/schemas/intent.py` — 产出契约
 
 ## Usage And Change Notes
 
@@ -51,7 +50,7 @@ intent/
 - **判定服务不可用就整层不装配**：它依赖账户侧先完成绑定，启动探测失败（或密钥缺失）的后果是「意图层关闭」，**不是启动失败**，也不要留半套。
 - **任何失败都退回规则层**，绝不抛进 ReAct 循环。
 - 新增或改名类别要同时改枚举、知识库与校验三处。
-- **知识库是随包发布的代码资产**（`data/` 下两份：判定口径与示例、高精度规则），不是运行期数据，也不跟随运行数据根重定向；不要在代码里另写一份类别说明。非 editable 安装靠 `pyproject.toml` 的 `package-data` 把 `data/*.yaml` 带进 wheel。
+- **知识库是随包发布的代码资产**（`domain/data/` 下两份：判定口径与示例、高精度规则），不是运行期数据，也不跟随运行数据根重定向；不要在代码里另写一份类别说明。非 editable 安装靠 `pyproject.toml` 的 `package-data` 把 `domain/data/*.yaml` 带进 wheel。
 - **旧实现不要复活**：混合路由器与稠密/稀疏编码、LLM 兜底面、跨轮状态机与追问检测、路由知识库与向量缓存都已整体退役。旧文档里的描述不作论据。
 
 ## Dependencies And Collaboration
@@ -62,7 +61,7 @@ intent/
 ## Investigation Rule
 
 1. 先确认开关是否打开——意图层在本机默认是关的，先看清「没生效」是不是配置所致。
-2. 集成缝与规则块看 `services/`；判定客户端看 `services/`；实体抽取与知识库校验看 `rules/`；数据模型看 `schemas/`。
+2. 集成缝看 `application/`；判定客户端看 `adapters/`；实体抽取与知识库校验看 `domain/rules/`；数据模型看 `domain/schemas/`。
 3. 标定原始题集在 `scripts/intent/calibration/`、按现行类别重标的评测集在 `scripts/intent/eval/`（都不入库，删掉不可恢复）。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -86,8 +85,8 @@ conda run -n biopilot python -m pytest tests/intent -q
 
 ## References
 
-- [`data/`](data/)
-- [`rules/`](rules/)
-- [`services/`](services/)
-- [`schemas/`](schemas/)
+- [`domain/data/`](domain/data/)
+- [`domain/rules/`](domain/rules/)
+- [`adapters/`](adapters/)
+- [`domain/schemas/`](domain/schemas/)
 - [`../../../AGENTS.md`](../../../AGENTS.md)

@@ -15,13 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from biopilot.config import BioPilotConfig
-from biopilot.engine.memory.storage.named_lock import NamedLock
+from biopilot.engine.memory.adapters.named_lock import NamedLock
 from biopilot.engine.rag.constants import (
     IndexOutcomeStatus,
     paper_doc_key,
     paper_id_of,
 )
-from biopilot.engine.rag.storage.index_state_store import list_domain_states
+from biopilot.engine.rag.adapters.index_state_store import list_domain_states
 from biopilot.mapper import rag_paper_status_mapper as status_mapper
 from biopilot.mapper.base import shared_db
 from biopilot.service import state
@@ -115,7 +115,7 @@ class KbServiceImpl(KbService):
 
     def _index_user_kb_locked(self, user_id: str, cfg) -> dict:
         """持有该用户索引锁后执行一轮完整索引（对账 → 逐篇索引 → 清理）。"""
-        from biopilot.engine.rag.services.rag_service import get_rag_service
+        from biopilot.engine.rag.adapters.factory import get_rag_service
 
         db = shared_db()
         svc = get_rag_service(cfg, user_id=user_id, db=db)
@@ -380,7 +380,7 @@ class KbServiceImpl(KbService):
         except (TypeError, ValueError):
             top_k = 8
         top_k = max(1, min(top_k, 30))
-        from biopilot.engine.rag.services.rag_service import get_rag_service
+        from biopilot.engine.rag.adapters.factory import get_rag_service
 
         cfg = BioPilotConfig.from_env()
         svc = get_rag_service(cfg, user_id=user_id)
@@ -398,7 +398,7 @@ class KbServiceImpl(KbService):
 
     async def chunks(self, user_id: str, paper_id: str) -> dict:
         """读取一篇论文的全部分块（索引持锁时快速失败）。"""
-        from biopilot.engine.rag.services.rag_service import get_rag_service
+        from biopilot.engine.rag.adapters.factory import get_rag_service
 
         cfg = BioPilotConfig.from_env()
         svc = get_rag_service(cfg, user_id=user_id, db=shared_db())

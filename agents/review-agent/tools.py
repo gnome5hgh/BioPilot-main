@@ -6,12 +6,12 @@
 from pathlib import Path
 
 from biopilot.config import BioPilotConfig
-from biopilot.tools.services.assembly import make_tools
-from biopilot.tools import (
+from biopilot.engine.tools.application.assembly import make_tools
+from biopilot.engine.tools import (
     ReadFileTool, ReadPdfTool, FormatCheckTool, SubmitReviewTool, GlobTool, GrepTool,
     ReadReferenceTool,
 )
-from biopilot.tools.recall import get_recall_tools
+from biopilot.engine.tools.adapters.recall import get_recall_tools
 
 _REFERENCES = Path(__file__).resolve().parent / "references"
 

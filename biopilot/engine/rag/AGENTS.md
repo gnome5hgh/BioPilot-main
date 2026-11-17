@@ -14,12 +14,12 @@
 
 ```text
 rag/
-├─ domain/       # entity/（检索块、章节）+ dto/（解析产物、索引结果、改写结果）
+├─ domain/       # entity/（检索块、章节）+ dto/（解析产物、索引结果、改写结果）+ ports.py（Embedder/Reranker/ImageStore 端口）
 ├─ constants/    # 块 id 规则与块类型词（被分块/索引/存储共同消费的契约）
-├─ services/     # rag_service.py（门面）+ indexer.py + retriever.py + query_rewriter.py
-├─ parsers/      # pdf_extract.py（PDF → 带版面的文本）+ chunker.py + table.py（表格重建）
-├─ encoders/     # bm25.py（稀疏）+ embedder.py（稠密）+ reranker.py（精排）
-└─ storage/      # vector_store.py（Milvus）+ image_store.py（图表原图）+ index_state_store.py（索引状态）
+├─ application/  # rag_service.py（门面）+ indexer.py + retriever.py + query_rewriter.py + chunker/table/bm25
+├─ adapters/     # vector_store.py（Milvus）+ image_store.py（图表原图）+ index_state_store.py（索引状态）
+│                #   embedder.py（稠密）+ reranker.py（精排）+ pdf_extract.py（PDF 解析）
+│                #   components.py（适配器构造工厂）+ factory.py（每用户域单例组装点）
 ```
 
 ## Responsibilities
@@ -44,12 +44,12 @@ rag/
 
 ## Key Entry Points
 
-- `services/rag_service.py` — 门面与单例
-- `services/indexer.py` — 增量索引与一致性恢复
-- `services/retriever.py` — 混合检索与重排
-- `parsers/chunker.py`、`parsers/pdf_extract.py` — 分块与解析（含字节入口）
-- `storage/vector_store.py` — 向量库
-- `storage/index_state_store.py` — 索引状态（MySQL，每用户一行）
+- `application/rag_service.py` — 门面与单例
+- `application/indexer.py` — 增量索引与一致性恢复
+- `application/retriever.py` — 混合检索与重排
+- `application/chunker.py`、`adapters/pdf_extract.py` — 分块与解析（含字节入口）
+- `adapters/vector_store.py` — 向量库
+- `adapters/index_state_store.py` — 索引状态（MySQL，每用户一行）
 
 ## Usage And Change Notes
 
@@ -68,7 +68,7 @@ rag/
 ## Investigation Rule
 
 1. 先读本文件确认问题落在解析、索引还是检索。
-2. 门面与单例看 `services/rag_service.py`；扫描与恢复看 `services/indexer.py`；混合检索与改写看 `services/retriever.py` 与 `services/query_rewriter.py`；解析分块看 `parsers/`；存储看 `storage/`。
+2. 门面与单例看 `application/rag_service.py`；扫描与恢复看 `application/indexer.py`；混合检索与改写看 `application/retriever.py` 与 `application/query_rewriter.py`；解析分块看 `parsers/`；存储看 `adapters/`。
 3. **`read_pdf` 不走本包的索引栈**（走同模块的 markdown 出口，也不占那把全局锁）——排查「读 PDF 慢或卡住」时别先怀疑索引。
 4. 文档与代码冲突时以代码事实为准。
 
@@ -93,7 +93,7 @@ conda run -n biopilot python -m pytest tests/rag -q
 
 ## References
 
-- [`services/rag_service.py`](services/rag_service.py)
-- [`services/indexer.py`](services/indexer.py)
-- [`services/retriever.py`](services/retriever.py)
+- [`application/rag_service.py`](application/rag_service.py)
+- [`application/indexer.py`](application/indexer.py)
+- [`application/retriever.py`](application/retriever.py)
 - [`../vision/AGENTS.md`](../vision/AGENTS.md)

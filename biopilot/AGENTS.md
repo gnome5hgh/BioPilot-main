@@ -2,7 +2,7 @@
 
 ## Scope
 
-- 覆盖 `biopilot/` 主包。`api/`、`service/`、`controller/`、`domain/`、`mapper/`、`schema/`、`config/`、`engine/`、`tools/` 与各子包各有自己的 manifest（见 Routing）；**改对应模块前先读它那份**。
+- 覆盖 `biopilot/` 主包。`api/`、`service/`、`controller/`、`domain/`、`mapper/`、`schema/`、`config/`、`engine/`（及其子包）与各子包各有自己的 manifest（见 Routing）；**改对应模块前先读它那份**。工具实现已并入 `engine/tools/`，顶层不再有 `tools/`。
 - 根 manifest 的硬红线在本层同样成立，这里不重复。
 
 ## Module Positioning
@@ -24,8 +24,8 @@ biopilot/
 ├─ domain/        # 应用层 dataclass / Protocol（有 manifest）
 ├─ config/        # 全局可调参数（有 manifest）
 ├─ common/        # 跨层共享基础设施（有 manifest）
-├─ engine/        # agent 系统技术核心，内含 rag/ vision/（有 manifest）
-└─ tools/         # 面向 LLM 的工具声明与装配（有 manifest）
+└─ engine/        # agent 系统：按 domain/application/adapters 三层组织的域包，
+                  #   含工具域 tools/（契约 + 运行时 + 实现）与 rag/ vision/（有 manifest）
 ```
 
 - `main.py` 是唯一允许留在包根的代码模块；其余关注点必须落进上述子包。
@@ -33,12 +33,13 @@ biopilot/
 
 ## Layering
 
-- 依赖方向：`api → controller → service → mapper → common/engine/tools`。
-- `engine/` 与 `tools/` 不得 import `api/`、`controller/`、`service/`、`mapper/`、`schema/`；这是「某组件该不该搬进 engine」的硬依据。
+- **engine 子包内部按三层组织**（详见 `engine/AGENTS.md`）：`domain/`（词汇与契约，零外部依赖）、`application/`（编排）、`adapters/`（外部世界翻译）；应用层依赖 domain 端口，适配器构造收口在组装根或各域工厂。
+- 依赖方向：`api → controller → service → mapper → common/engine`。
+- `engine/` 不得 import `api/`、`controller/`、`service/`、`mapper/`、`schema/`；这是「某组件该不该搬进 engine」的硬依据。
 - `controller/` 只做参数解析、`Depends` 注入、调用 service、返回响应；不写 SQL、不装配 Agent。
-- `service/` 每个服务一个 `abc.ABC` 接口，实现放 `service/impl/`；跨模块共享的进程级状态在 `service/state.py`，每个 FastAPI 应用实例的状态在 `domain/runtime_state.py`。
+- `service/` 每个服务一个 `abc.ABC` 接口，实现放 `service/impl/`；跨模块共享的进程级状态在 `service/state.py`，每个 FastAPI 应用实例的状态在 `domain/runtime_state.py`（该包为应用层对象，见 Directory Structure）。
 - `mapper/` 只放 SQL；service 不写裸 SQL。
-- `schema/` 只放 HTTP 请求/响应模型；engine 各模块自己的领域 schema（`engine/memory/schemas/`、`engine/intent/schemas/`、`engine/rag/domain/{dto,entity}/` 等）原地保留，不向顶层集中。
+- `schema/` 只放 HTTP 请求/响应模型；engine 各模块自己的领域 schema（`engine/memory/domain/schemas/`、`engine/intent/domain/schemas/`、`engine/rag/domain/{dto,entity}/` 等）原地保留，不向顶层集中。
 
 ## Responsibilities
 
@@ -67,7 +68,7 @@ biopilot/
 - `service/container.py` — 服务容器装配
 - `service/impl/assembly_service_impl.py` — Web 会话对象图装配
 - `config/sections.py` — 参数与默认值
-- `engine/agent/services/runtime.py` — ReAct 主循环
+- `engine/agent/application/runtime.py` — ReAct 主循环
 
 ## Usage And Change Notes
 
@@ -79,10 +80,10 @@ biopilot/
 
 ## Dependencies And Collaboration
 
-- `api/` 是入口与装配层，依赖 `controller/`、`service/`、`config/`、`engine/`、`tools/`；被依赖方不反向 import `api/`。
+- `api/` 是入口与装配层，依赖 `controller/`、`service/`、`config/`、`engine/`；被依赖方不反向 import `api/`。
 - `controller/` 依赖 `service/` 与 `schema/`；不直接依赖 `engine/`。
-- `service/` 依赖 `mapper/`、`domain/`、`config/`、`engine/`、`tools/`。
-- `engine/` 依赖 `tools/` 的抽象（`Tool` / `ToolResult`）但不反向；`tools/` 是被消费方。
+- `service/` 依赖 `mapper/`、`domain/`、`config/`、`engine/`。
+- `engine/` 内部：各域包（agent/memory/rag…）不 import `engine/tools/`；`engine/tools/` 消费各域包与 `Tool`/`ToolResult` 契约（同包 domain），方向恒为 tools → 域包。
 
 ## Investigation Rule
 
@@ -108,8 +109,8 @@ conda run -n biopilot python -m pytest tests/api tests/core -q
 ## Routing
 
 - 上级：[`../AGENTS.md`](../AGENTS.md)
-- 直接子包：[`api/`](api/AGENTS.md) / [`service/`](service/AGENTS.md) / [`controller/`](controller/AGENTS.md) / [`domain/`](domain/AGENTS.md) / [`mapper/`](mapper/AGENTS.md) / [`schema/`](schema/AGENTS.md) / [`config/`](config/AGENTS.md) / [`engine/`](engine/AGENTS.md) / [`tools/`](tools/AGENTS.md) / [`common/`](common/AGENTS.md)
-- `engine/` 之下：[`agent/`](engine/agent/AGENTS.md) / [`llm/`](engine/llm/AGENTS.md) / [`memory/`](engine/memory/AGENTS.md) / [`intent/`](engine/intent/AGENTS.md) / [`rag/`](engine/rag/AGENTS.md) / [`vision/`](engine/vision/AGENTS.md) / [`security/`](engine/security/AGENTS.md) / [`skills/`](engine/skills/AGENTS.md) / [`tool/`](engine/tool/AGENTS.md) / [`constants/`](engine/constants/AGENTS.md)
+- 直接子包：[`api/`](api/AGENTS.md) / [`service/`](service/AGENTS.md) / [`controller/`](controller/AGENTS.md) / [`domain/`](domain/AGENTS.md) / [`mapper/`](mapper/AGENTS.md) / [`schema/`](schema/AGENTS.md) / [`config/`](config/AGENTS.md) / [`engine/`](engine/AGENTS.md) / [`common/`](common/AGENTS.md)
+- `engine/` 之下：[`agent/`](engine/agent/AGENTS.md) / [`llm/`](engine/llm/AGENTS.md) / [`memory/`](engine/memory/AGENTS.md) / [`intent/`](engine/intent/AGENTS.md) / [`rag/`](engine/rag/AGENTS.md) / [`vision/`](engine/vision/AGENTS.md) / [`security/`](engine/security/AGENTS.md) / [`skills/`](engine/skills/AGENTS.md) / [`tools/`](engine/tools/AGENTS.md) / [`constants/`](engine/constants/AGENTS.md)
 
 ## References
 

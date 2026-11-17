@@ -15,9 +15,9 @@
 检索与索引维护不产生需要沉淀的清单或历史。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.tools.services.assembly import make_tools
-from biopilot.tools.rag import IndexStatusTool, RagRetrieveTool, ViewImageTool
-from biopilot.tools.recall import get_recall_tools
+from biopilot.engine.tools.application.assembly import make_tools
+from biopilot.engine.tools.adapters.rag import IndexStatusTool, RagRetrieveTool, ViewImageTool
+from biopilot.engine.tools.adapters.recall import get_recall_tools
 
 # config 在 import 时构造（每进程静态、无副作用，对齐 make_tools 惯例）
 TOOLS = make_tools(BioPilotConfig.from_env(), [

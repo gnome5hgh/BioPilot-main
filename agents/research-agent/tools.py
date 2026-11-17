@@ -6,16 +6,16 @@
 它）。课题/方向有歧义时把问题写进最终回答（问用户不需要工具）。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.tools.orchestration.spawn import SpawnSubAgentTool
+from biopilot.engine.tools.adapters.orchestration.spawn import SpawnSubAgentTool
 from pathlib import Path
 
-from biopilot.tools import (
+from biopilot.engine.tools import (
     ReadFileTool, ReadPdfTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool, ReadReferenceTool,
 )
-from biopilot.tools.services.assembly import make_tools
-from biopilot.tools.docs import SaveDocumentTool
-from biopilot.tools.recall import get_recall_tools
+from biopilot.engine.tools.application.assembly import make_tools
+from biopilot.engine.tools.adapters.docs import SaveDocumentTool
+from biopilot.engine.tools.adapters.recall import get_recall_tools
 
 
 TOOLS = make_tools(BioPilotConfig.from_env(), [

@@ -16,10 +16,10 @@
 ```text
 skills/
 ├─ config/      # SkillConfig：name / description / 正文 / metadata / 目录
-└─ services/    # layout.py     用户技能缓存路径
-                # registry.py   单根扫描 + frontmatter 校验 + 渐进披露
-                # user_skills.py 按 content_sha 物化用户技能缓存
-                # assembly.py   merge_tools / apply_pre_approval（工具命名空间）
+├─ application/ # registry.py   单根扫描 + frontmatter 校验 + 渐进披露
+│                # user_skills.py 按 content_sha 物化用户技能缓存
+│                # assembly.py   merge_tools / apply_pre_approval（工具命名空间）
+└─ adapters/    # skill_store.py（bio_skill 只读 SQL）
 ```
 
 ## Responsibilities
@@ -38,10 +38,10 @@ skills/
 
 ## Key Entry Points
 
-- `services/registry.py` — 发现、校验与 L1/L2/L3。
-- `services/user_skills.py` — 用户技能物化与缓存清理。
-- `services/layout.py` — 用户缓存路径。
-- `services/assembly.py` — 工具命名空间校验（与 agent 工具合并共用）。
+- `application/registry.py` — 发现、校验与 L1/L2/L3。
+- `application/user_skills.py` — 用户技能物化与缓存清理（bio_skill 读 SQL 在 `adapters/skill_store.py`）。
+- `application/layout.py` — 用户缓存路径。
+- `application/assembly.py` — 工具命名空间校验（与 agent 工具合并共用）。
 
 ## Usage And Change Notes
 
@@ -77,7 +77,7 @@ python -m pytest tests/core -k "skill" -q
 
 ## References
 
-- [`services/registry.py`](services/registry.py)
-- [`services/user_skills.py`](services/user_skills.py)
-- [`services/layout.py`](services/layout.py)
+- [`application/registry.py`](application/registry.py)
+- [`application/user_skills.py`](application/user_skills.py)
+- [`application/layout.py`](application/layout.py)
 - [`../../../agents/AGENTS.md`](../../../agents/AGENTS.md)
