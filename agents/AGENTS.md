@@ -38,7 +38,7 @@
 
 - 各 `agents/<name>/AGENT.md` — 契约与启发式（frontmatter 含名字、描述、可派发清单）
 - 各 `agents/<name>/tools.py` — 模块级工具列表
-- `biopilot/engine/agent/services/registry.py` — 插件发现的唯一入口
+- `biopilot/engine/agent/application/registry.py` — 插件发现的唯一入口
 - `biopilot/engine/agent/constants/base_prompt.py` — 全 agent 共有的行为基座
 
 ## Usage And Change Notes
@@ -64,7 +64,7 @@
 ## Investigation Rule
 
 1. 先读目标角色的 `AGENT.md`（契约与启发式），再看 `tools.py`（实际能力），最后才看装配层。
-2. 角色拿到或拿不到某个工具，看装配层；派发被拒看 `biopilot/tools/orchestration/spawn.py`；插件没被发现看 `biopilot/engine/agent/services/registry.py`。
+2. 角色拿到或拿不到某个工具，看装配层；派发被拒看 `biopilot/engine/tools/adapters/orchestration/spawn.py`；插件没被发现看 `biopilot/engine/agent/application/registry.py`。
 3. 文档与代码冲突时以代码事实为准。
 
 ## Core Commands
@@ -88,5 +88,5 @@ conda run -n biopilot python -m pytest tests/agents -q
 ## References
 
 - [`supervisor/AGENT.md`](supervisor/AGENT.md)
-- [`AGENT.md` 与 `tools.py` 的加载实现](../biopilot/engine/agent/services/registry.py)
+- [`AGENT.md` 与 `tools.py` 的加载实现](../biopilot/engine/agent/application/registry.py)
 - [`../biopilot/engine/agent/constants/base_prompt.py`](../biopilot/engine/agent/constants/base_prompt.py)
