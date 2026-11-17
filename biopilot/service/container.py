@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from biopilot.domain.runtime_state import RuntimeState
-from biopilot.domain.web_config import WebConfig
+from biopilot.service.runtime_state import RuntimeState
+from biopilot.service.web_config import WebConfig
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.service.attachment_service import AttachmentService
 from biopilot.service.chat_service import ChatService

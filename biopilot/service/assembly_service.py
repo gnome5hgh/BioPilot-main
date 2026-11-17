@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from biopilot.domain.web_session import WebSession
+from biopilot.service.web_session import WebSession
 
 
 class AssemblyService(ABC):

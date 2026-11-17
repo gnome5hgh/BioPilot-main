@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+#: 数据文件附件注入历史时的统一标题头——展示与注入两侧共用同一字符串，
+#: 常量放接口层（跨实现词汇），不留在某个 Impl 里被另一个 Impl 深引。
+ATTACHMENT_HEADER = "【附件】以下数据文件已就位"
+
 
 class AttachmentService(ABC):
     """把消息体里的附件引用落成本地副本并回填展示元数据。"""

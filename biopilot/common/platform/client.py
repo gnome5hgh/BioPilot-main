@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from urllib.parse import quote, unquote
 
 import httpx
@@ -277,6 +278,30 @@ class PlatformClient:
             json=payload).json()
 
 
+def _resolve_endpoint(config) -> tuple[str, str, float, float]:
+    """解析平台端点四元组（``platform`` 段缺失时回落到声明点默认值）。
+
+    Args:
+        config: ``BioPilotConfig`` 实例。
+
+    Returns:
+        (base_url, internal_token, search_timeout, transfer_timeout)——
+        构造与共享缓存键共用同一份解析。
+    """
+    # 函数内导入：common 层不在模块加载期反向依赖 config 的 dataclass 定义
+    from biopilot.config.sections import PlatformConfig
+
+    default = PlatformConfig()
+    platform = getattr(config, "platform", None)
+    base_url = (getattr(platform, "base_url", "") or default.base_url)
+    token = (getattr(platform, "internal_token", "")
+             or os.environ.get("BIOPILOT_INTERNAL_TOKEN", "") or "")
+    search_timeout = float(getattr(platform, "search_timeout", 0) or default.search_timeout)
+    transfer_timeout = float(getattr(platform, "transfer_timeout", 0)
+                             or default.transfer_timeout)
+    return base_url, token, search_timeout, transfer_timeout
+
+
 def make_platform_client(config, *, client: httpx.Client | None = None) -> PlatformClient:
     """按引擎配置构造平台客户端（``platform`` 段缺失时回落到声明点默认值）。
 
@@ -287,22 +312,46 @@ def make_platform_client(config, *, client: httpx.Client | None = None) -> Platf
     Returns:
         绑定当前部署地址与超时的 PlatformClient。
     """
-    # 函数内导入：common 层不在模块加载期反向依赖 config 的 dataclass 定义
-    from biopilot.config.sections import PlatformConfig
-
-    default = PlatformConfig()
-    platform = getattr(config, "platform", None)
-    base_url = (getattr(platform, "base_url", "") or default.base_url)
-    token = (getattr(platform, "internal_token", "")
-             or os.environ.get("BIOPILOT_INTERNAL_TOKEN", "") or "")
+    base_url, token, search_timeout, transfer_timeout = _resolve_endpoint(config)
     return PlatformClient(
         base_url,
         token,
-        timeout=float(getattr(platform, "search_timeout", 0) or default.search_timeout),
-        transfer_timeout=float(getattr(platform, "transfer_timeout", 0)
-                               or default.transfer_timeout),
+        timeout=search_timeout,
+        transfer_timeout=transfer_timeout,
         client=client,
     )
+
+
+#: 按 (base_url, token) 键的进程级共享客户端（:func:`shared_platform_client` 用）。
+_SHARED_CLIENTS: dict[tuple[str, str], PlatformClient] = {}
+_SHARED_CLIENTS_LOCK = threading.Lock()
+
+
+def shared_platform_client(config) -> PlatformClient:
+    """按 (base_url, internal_token) 键的进程级共享平台客户端。
+
+    技能物化等每会话调用复用同一客户端与连接池；键含地址与 token——设置页
+    改了平台地址或内部 token 后新键建新客户端，不会吃到陈旧配置（旧键的
+    客户端自然闲置，连接随进程回收）。
+
+    Args:
+        config: ``BioPilotConfig`` 实例（决定键与端点参数）。
+
+    Returns:
+        PlatformClient：该端点的进程级唯一实例。
+    """
+    base_url, token, search_timeout, transfer_timeout = _resolve_endpoint(config)
+    key = (base_url, token)
+    client = _SHARED_CLIENTS.get(key)
+    if client is None:
+        with _SHARED_CLIENTS_LOCK:
+            client = _SHARED_CLIENTS.get(key)
+            if client is None:
+                client = PlatformClient(base_url, token,
+                                        timeout=search_timeout,
+                                        transfer_timeout=transfer_timeout)
+                _SHARED_CLIENTS[key] = client
+    return client
 
 
 def _int_header(value: str | None) -> int:

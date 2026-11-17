@@ -464,3 +464,25 @@ class VectorStore:
         """
         stats = self._client.get_collection_stats(self._collection, timeout=self._read_timeout)
         return int(stats.get("row_count", 0))
+
+
+def purge_user_vectors(config, user_id: str) -> None:
+    """物理清除该用户的向量 collection（删户两阶段清理的向量库侧）。
+
+    向量 collection 按 ``{collection}_{user_id}`` 按用户域独立——不清会让重建后
+    的同 id 账号检索到旧数据。collection 不存在时是幂等空操作；Milvus 不可达时
+    异常上抛，由调用方按「跳过并告警」降级。
+
+    Args:
+        config: BioPilotConfig，取 ``rag.storage`` 段的 uri 与 collection 前缀。
+        user_id: 归属用户（collection 后缀）。
+    """
+    from pymilvus import MilvusClient
+
+    collection = f"{config.rag.storage.collection}_{user_id}"
+    client = MilvusClient(uri=config.rag.storage.uri)
+    try:
+        if client.has_collection(collection):
+            client.drop_collection(collection)
+    finally:
+        client.close()

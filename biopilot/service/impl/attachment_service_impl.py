@@ -9,13 +9,12 @@ from typing import Callable
 from biopilot.common.utils.paths import safe_component
 from biopilot.mapper import message_mapper
 from biopilot.mapper.base import shared_db
-from biopilot.service.attachment_service import AttachmentService
+from biopilot.service.attachment_service import ATTACHMENT_HEADER, AttachmentService
 from biopilot.service.config_helpers import cfg_user_cache_root
 
 logger = logging.getLogger(__name__)
 
 #: 附件清单注入任务文本时使用的固定抬头：历史回放据此把注入块从展示正文中剥掉。
-ATTACHMENT_HEADER = "【附件】以下数据文件已就位"
 
 
 class AttachmentServiceImpl(AttachmentService):

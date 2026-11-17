@@ -244,6 +244,17 @@ def _parse_dsn(dsn: str) -> dict:
     }
 
 
+#: 按 DSN 键的进程级共享池（:meth:`MemoryDB.shared` 用）。
+_SHARED_POOLS: dict[str, "MemoryDB"] = {}
+_SHARED_LOCK = threading.Lock()
+
+#: DSN 缺失的统一报错文案（__init__ 与 shared() 共用）。
+_MISSING_DSN_MSG = (
+    "未指定记忆库 DSN：装配层应传 config.runtime.memory_dsn，"
+    "或设置环境变量 BIOPILOT_MEMORY_MYSQL_DSN"
+    "（形如 mysql://root@127.0.0.1:3307/biopilot）")
+
+
 class MemoryDB:
     """MySQL 连接池：建库建表 + 线程安全的事务。
 
@@ -278,10 +289,7 @@ class MemoryDB:
         # 这里不设默认库，避免与 config 的默认值双写漂移。
         self.dsn = dsn or os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")
         if not self.dsn:
-            raise ValueError(
-                "未指定记忆库 DSN：装配层应传 config.runtime.memory_dsn，"
-                "或设置环境变量 BIOPILOT_MEMORY_MYSQL_DSN"
-                "（形如 mysql://root@127.0.0.1:3307/biopilot）")
+            raise ValueError(_MISSING_DSN_MSG)
         self._kwargs = _parse_dsn(self.dsn)
         self._pool: queue.LifoQueue = queue.LifoQueue()
         self._pool_size = pool_size
@@ -289,6 +297,36 @@ class MemoryDB:
         self._create_lock = threading.Lock()
         self._pinned = threading.local()
         self.init_schema()
+
+    @classmethod
+    def shared(cls, dsn: str | None = None) -> "MemoryDB":
+        """按 DSN 的进程级共享连接池（双重检查加锁）。
+
+        组装根（每会话装配）、mapper 轻量 SQL 与索引状态共用一口池——构造
+        会建表 + 增量迁移（幂等但昂贵），每会话新建池纯属浪费。键 = 解析后的
+        DSN：配置切换连接串时新键建新池，旧池自然淘汰，不会串库。
+
+        Args:
+            dsn: 连接串；None 时按环境变量取（与 __init__ 同序）。
+
+        Returns:
+            MemoryDB：该 DSN 的进程级唯一实例。
+
+        Raises:
+            ValueError: DSN 缺失（与 __init__ 同一口径）。
+        """
+        resolved = dsn or os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")
+        if not resolved:
+            # 与 __init__ 的 DSN 缺失报错同一口径（同一句常量，避免双写漂移）
+            raise ValueError(_MISSING_DSN_MSG)
+        pool = _SHARED_POOLS.get(resolved)
+        if pool is None:
+            with _SHARED_LOCK:
+                pool = _SHARED_POOLS.get(resolved)
+                if pool is None:
+                    pool = cls(resolved)
+                    _SHARED_POOLS[resolved] = pool
+        return pool
 
     # ------------------------------------------------------------------ 连接池
     def _new_conn(self):

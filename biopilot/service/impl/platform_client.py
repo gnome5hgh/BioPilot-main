@@ -1,14 +1,9 @@
-"""Java 平台内部端点客户端的进程级单例。"""
+"""Java 平台内部端点客户端的共享入口（转发到按端点键的进程级缓存）。"""
 from __future__ import annotations
-
-_platform_instance = None
 
 
 def shared_platform_client():
-    """返回进程级共享的平台内部客户端（懒建单例）。"""
-    global _platform_instance
-    if _platform_instance is None:
-        from biopilot.common.platform import make_platform_client
-        from biopilot.config import BioPilotConfig
-        _platform_instance = make_platform_client(BioPilotConfig.from_env())
-    return _platform_instance
+    """返回共享的平台内部客户端（键含地址与 token，配置变更不吃陈旧值）。"""
+    from biopilot.common.platform import shared_platform_client as _shared
+    from biopilot.config import BioPilotConfig
+    return _shared(BioPilotConfig.from_env())

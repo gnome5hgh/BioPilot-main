@@ -19,7 +19,7 @@
 - **一个服务一个接口**：controller 只依赖接口，具体实现放 `impl/`。
 - **service 不写裸 SQL**：读写 `bio_*` 引擎表一律经 `mapper/`。
 - **service 不处理 HTTP**：不 import FastAPI；需要退出码语义时抛 `service/errors.py` 的领域异常。
-- **状态作用域**：进程级共享量在 `state.py`；每个 FastAPI 应用实例的状态在 `domain/runtime_state.py`，由 `create_app()` 创建并注入。
+- **状态作用域**：进程级共享量在 `state.py`；每个 FastAPI 应用实例的状态在 `runtime_state.py`（本包根），由 `create_app()` 创建并注入。
 - **懒加载**：重量组件（RAG、平台客户端、Agent 装配）在方法内导入或由容器注入，导入期不拉重型依赖。
 - 新增服务：接口 + 实现 + `container.py` 装配 + controller 依赖，顺序不能省。
 

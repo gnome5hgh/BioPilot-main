@@ -16,11 +16,14 @@ Agent 注册表 —— 扫描 agents/ 目录,统一加载配置和工具。
   渲染,不再另写一份散文,避免权限与广告各说一遍而走样
 """
 
+import copy
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 
 from biopilot.engine.agent.config import AgentConfig
 from biopilot.common.utils.frontmatter import parse_frontmatter
+from biopilot.engine.skills import apply_pre_approval, merge_tools
 from biopilot.engine.tools import Tool, validate_tool
 
 
@@ -217,6 +220,42 @@ class AgentRegistry:
 
         """
         return list(self._agents.keys())
+
+    def with_session_tools(self, framework_tools: list[Tool],
+                           pre_approved: set[str],
+                           approved_level: str = "medium") -> "AgentRegistry":
+        """派生会话级注册表：共享静态扫描结果，在 AgentConfig 副本上合并会话工具。
+
+        注册表本体进程级共享（扫描 agents/ + importlib 执行 tools.py 只做一次）；
+        每会话的工具合并（框架工具并入、预批准降档）落在本方法产出的**副本**上——
+        直接改写共享 ``AgentConfig.tools`` 会撞「工具名冲突」（第二个会话重复并入
+        load_skill），共享 Tool 实例上的风险档位改写更会跨会话泄漏安全语义，所以
+        副本同时深拷贝工具实例。
+
+        Args:
+            framework_tools: 本会话并入每个 agent 的框架工具（如 LoadSkillTool）。
+            pre_approved: 预批准工具名集合（security.pre_approved_tools）。
+            approved_level: 预批准工具降到哪一档。
+
+        Returns:
+            AgentRegistry：会话级副本（不影响本体的共享配置）。
+        """
+        # object.__new__ 克隆依赖「AgentRegistry 仅有 _agents 一个实例属性」——
+        # 新增实例属性时必须同步在这里复制（本类没有 __dict__ 之外的槽位约束）。
+        clone = object.__new__(AgentRegistry)
+        clone._agents = {}
+        for name, cfg in self._agents.items():
+            # 深拷贝工具实例：apply_pre_approval 会就地改 risk_level，
+            # 共享实例会让一个会话的信任降档泄漏进其他会话的安全语义。
+            # framework_tools 由调用方保证每会话新建（装配根每次 new
+            # LoadSkillTool），故不在此拷贝；改为传入共享实例时即复现本方法
+            # 要防的泄漏——契约与实现的不对称在此显式声明。
+            tools = [copy.deepcopy(t) for t in cfg.tools]
+            tools = merge_tools(("agent", tools),
+                                ("framework", list(framework_tools)))
+            apply_pre_approval(tools, pre_approved, approved_level)
+            clone._agents[name] = replace(cfg, tools=tools)
+        return clone
 
     def agents_block(self, agent_type: str) -> str:
         """渲染该 agent 的 <available_agents> 清单（其可派发子 agent 的派生视图）。

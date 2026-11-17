@@ -8,15 +8,15 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
-from biopilot.domain.runtime_state import RuntimeState
-from biopilot.domain.web_config import WebConfig
+from biopilot.service.runtime_state import RuntimeState
+from biopilot.service.web_config import WebConfig
 from biopilot.engine.agent.application.context_usage import context_usage
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.service.attachment_service import AttachmentService
 from biopilot.service.chat_service import ChatService
 from biopilot.service.errors import NotFoundError, RequestValidationError, TooManyRequestsError
-from biopilot.service.impl.attachment_service_impl import ATTACHMENT_HEADER
+from biopilot.service.attachment_service import ATTACHMENT_HEADER
 from biopilot.service.session_service import SessionService
 
 logger = logging.getLogger(__name__)

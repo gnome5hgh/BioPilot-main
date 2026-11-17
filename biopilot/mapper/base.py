@@ -1,13 +1,8 @@
-"""共享记忆库连接（懒建单例）。"""
+"""共享记忆库连接（转发到 MemoryDB.shared 的按 DSN 单例）。"""
 from __future__ import annotations
-
-_db_instance = None
 
 
 def shared_db():
-    """适配层共享的 MemoryDB（懒建；标题更新等轻量 SQL 用）。"""
-    global _db_instance
-    if _db_instance is None:
-        from biopilot.engine.memory.adapters.database import MemoryDB
-        _db_instance = MemoryDB()
-    return _db_instance
+    """适配层共享的 MemoryDB（标题更新等轻量 SQL 与会话装配同一口池）。"""
+    from biopilot.engine.memory.adapters.database import MemoryDB
+    return MemoryDB.shared()

@@ -3,6 +3,8 @@ from biopilot.common.platform.client import (
     PlatformClient,
     PlatformError,
     make_platform_client,
+    shared_platform_client,
 )
 
-__all__ = ["PlatformClient", "PlatformError", "make_platform_client"]
+__all__ = ["PlatformClient", "PlatformError", "make_platform_client",
+           "shared_platform_client"]

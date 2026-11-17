@@ -132,7 +132,7 @@ class ConfigStore:
         """
         self.dsn = dsn or ""
         self.workspace = Path(workspace or ".").expanduser().resolve()
-        self.db = MemoryDB(self.dsn or None)
+        self.db = MemoryDB.shared(self.dsn or None)
         self._key_material: bytes | None = None
         self._key_lock = threading.Lock()
 

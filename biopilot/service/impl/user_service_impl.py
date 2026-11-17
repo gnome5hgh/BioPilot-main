@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from biopilot.common.utils.paths import safe_component
-from biopilot.domain.runtime_state import RuntimeState
+from biopilot.service.runtime_state import RuntimeState
 from biopilot.mapper import (
     agent_state_mapper,
     rag_index_mapper,
@@ -56,17 +56,11 @@ class UserServiceImpl(UserService):
         agent_state_mapper.delete_by_user(db, target_id)
 
         # 向量库按用户域独立 collection：不清会让重建后的同 id 账号检索到旧数据。
+        # 适配器实现细节（pymilvus 客户端的构造与关闭）收口在 rag adapters。
         try:
-            from pymilvus import MilvusClient
             from biopilot.config import BioPilotConfig
-            cfg = BioPilotConfig.from_env()
-            collection = f"{cfg.rag.storage.collection}_{target_id}"
-            client = MilvusClient(uri=cfg.rag.storage.uri)
-            try:
-                if client.has_collection(collection):
-                    client.drop_collection(collection)
-            finally:
-                client.close()
+            from biopilot.engine.rag.adapters.vector_store import purge_user_vectors
+            purge_user_vectors(BioPilotConfig.from_env(), target_id)
         except Exception as exc:
             logger.warning("删户清理向量库失败（跳过）：%r", exc)
 

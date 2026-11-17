@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import Header, HTTPException, Request
 
 from biopilot.common.utils.env import os_env
-from biopilot.domain.runtime_state import RuntimeState
+from biopilot.service.runtime_state import RuntimeState
 from biopilot.service.container import ServiceContainer
 
 

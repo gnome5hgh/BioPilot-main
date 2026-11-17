@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from biopilot.domain.runtime_state import RuntimeState
+from biopilot.service.runtime_state import RuntimeState
 from biopilot.service import state
 from biopilot.service.errors import RequestValidationError
 from biopilot.service.schedule_service import ScheduleService

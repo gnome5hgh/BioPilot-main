@@ -42,7 +42,7 @@ def default_db(config):
 
     dsn = (os.environ.get("BIOPILOT_MEMORY_MYSQL_DSN")
            or config.runtime.memory_dsn)
-    return MemoryDB(dsn)
+    return MemoryDB.shared(dsn)
 
 
 def build_embedder(config):

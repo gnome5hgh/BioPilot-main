@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from biopilot.config import BioPilotConfig, user_cache_root
-from biopilot.domain.web_session import WebSession
+from biopilot.service.web_session import WebSession
 from biopilot.engine.agent import Agent, AgentRegistry
 from biopilot.engine.intent.domain.rules.taxonomy import TaxonomyError, load_taxonomy
 from biopilot.engine.intent.adapters.jev import JevClient, JevUnavailable
@@ -30,8 +31,6 @@ from biopilot.engine.security import (
 from biopilot.engine.security.adapters.classifier import build_classifier
 from biopilot.engine.skills import (
     SkillRegistry,
-    apply_pre_approval,
-    merge_tools,
     sync_user_skills,
 )
 from biopilot.engine.tools.application.offload import make_tool_result_offloader
@@ -42,29 +41,34 @@ from biopilot.engine.tools.application.runtime_context import (
 from biopilot.engine.tools.adapters.tool_result_store import make_tool_result_store
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
+from biopilot.common.platform import shared_platform_client
 from biopilot.engine.tools.adapters.skills.load_skill import LoadSkillTool
 
 logger = logging.getLogger(__name__)
 
+#: 进程级共享 AgentRegistry（按 agents_dir 键）：扫描 agents/ 与动态 import tools.py
+#: 有副作用且昂贵，进程内只做一次；会话级工具合并走 with_session_tools 副本。
+_AGENT_REGISTRIES: dict[str, AgentRegistry] = {}
+_AGENT_REGISTRY_LOCK = threading.Lock()
 
-#: 平台内部客户端单例：技能物化每次会话都要取包，复用同一个 httpx 客户端。
-_PLATFORM_CLIENT: object | None = None
 
-
-def _shared_platform_client(config: BioPilotConfig):
-    """返回进程级共享的平台内部客户端（懒建单例）。
+def _shared_agent_registry(agents_dir: str) -> AgentRegistry:
+    """返回 agents_dir 对应的进程级共享注册表（双重检查加锁）。
 
     Args:
-        config: 引擎配置（决定平台地址与内部 token）。
+        agents_dir: Agent 插件根目录路径。
 
     Returns:
-        PlatformClient 单例。
+        AgentRegistry：该目录的进程级唯一实例。
     """
-    global _PLATFORM_CLIENT
-    if _PLATFORM_CLIENT is None:
-        from biopilot.common.platform import make_platform_client
-        _PLATFORM_CLIENT = make_platform_client(config)
-    return _PLATFORM_CLIENT
+    registry = _AGENT_REGISTRIES.get(agents_dir)
+    if registry is None:
+        with _AGENT_REGISTRY_LOCK:
+            registry = _AGENT_REGISTRIES.get(agents_dir)
+            if registry is None:
+                registry = AgentRegistry(agents_dir)
+                _AGENT_REGISTRIES[agents_dir] = registry
+    return registry
 
 
 def _approved_tools(config: BioPilotConfig) -> set[str]:
@@ -94,7 +98,8 @@ class AssemblyServiceImpl(AssemblyService):
         """
         config = config or BioPilotConfig.from_env()
 
-        db = MemoryDB(config.runtime.memory_dsn)
+        # 进程级共享池（按 DSN 键）：构造含建表 + 迁移，每会话新建纯属浪费
+        db = MemoryDB.shared(config.runtime.memory_dsn)
         block_manager = BlockManager(db, user_id=user_id)
         block_manager.migrate_legacy_labels()
         block_manager.purge_removed_blocks()
@@ -124,12 +129,13 @@ class AssemblyServiceImpl(AssemblyService):
         agents_dir = (config.runtime.agents_dir
                       if Path(config.runtime.agents_dir).is_dir()
                       else str(Path(__file__).resolve().parents[3] / "agents"))
-        registry = AgentRegistry(agents_dir)
+        # 注册表本体进程级共享（扫描 + 动态 import 只做一次）
+        registry = _shared_agent_registry(agents_dir)
 
         # Skill 体系装配：只物化当前用户的技能缓存（平台 OSS 是内容真相）
         _user_cache = None
         try:
-            _platform = _shared_platform_client(config)
+            _platform = shared_platform_client(config)
             _user_cache = await asyncio.to_thread(
                 sync_user_skills, db, _platform, str(user_cache_root(config)),
                 user_id)
@@ -138,14 +144,13 @@ class AssemblyServiceImpl(AssemblyService):
                            exc_info=True)
         skill_registry = SkillRegistry(
             str(_user_cache) if _user_cache is not None else None)
-        _load_skill_tool = LoadSkillTool(skill_registry)
-        for _agent_type in registry.list_agents():
-            _cfg = registry.get_config(_agent_type)
-            _cfg.tools = merge_tools(
-                ("agent", _cfg.tools),
-                ("framework", [_load_skill_tool]),
-            )
-            apply_pre_approval(_cfg.tools, _approved_tools(config))
+        # 本会话的工具合并（框架工具并入 + 预批准降档）落在会话副本上，
+        # 防共享突变——直接改写共享 AgentConfig.tools 会撞「工具名冲突」，
+        # 共享 Tool 实例上的风险档位改写会跨会话泄漏安全语义。
+        # load_skill 无条件并入：技能物化降级时 SkillRegistry 是空表，
+        # 工具面与基线一致（工具在，只是查不到技能）。
+        registry = registry.with_session_tools(
+            [LoadSkillTool(skill_registry)], _approved_tools(config))
 
         structured = StructuredOutput(llm)
         summary_structured = None

@@ -9,8 +9,8 @@ from biopilot.api.exception_handlers import register_exception_handlers
 from biopilot.api.lifespan import lifespan
 from biopilot.api.router import api_router
 from biopilot.common.utils.env import os_env
-from biopilot.domain.runtime_state import RuntimeState
-from biopilot.domain.web_config import WebConfig
+from biopilot.service.runtime_state import RuntimeState
+from biopilot.service.web_config import WebConfig
 from biopilot.service.container import build_services
 
 logger = logging.getLogger(__name__)
