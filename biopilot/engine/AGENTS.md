@@ -34,13 +34,13 @@
 ## Core Logic
 
 - **只放子包**，不放裸 `.py` 模块（外加本 manifest 与 `__init__.py`）。散在根下的模块按「服务于谁」收进子包；跨包共享的叶子进 `biopilot/common/`，不要让 engine 兼任 common 层。
-- **子包内部按三层分**：`domain/`（本域词汇与契约：实体/DTO/schema/**端口**，零外部依赖）、`application/`（编排与用例：流程、循环、状态机；**不得构造外部世界适配器**）、`adapters/`（外部世界翻译：模型协议、SQL、对象存储、子进程、HTTP 判定服务）。另有 `config/`（组件行为参数，跟组件走）与 `constants/`（本包词汇）——这两者不属于三层，是正交的参数与词汇载体。新增子包照这套分。
+- **子包内部按三层分**：`domain/`（本域词汇与契约：实体/DTO/schema/**端口**，零外部依赖；第三方词汇库仅 pydantic/yaml——数据校验与随包知识库解析，无 I/O 无协议，类型词汇用 TYPE_CHECKING 守卫）、`application/`（编排与用例：流程、循环、状态机；**不得构造外部世界适配器**）、`adapters/`（外部世界翻译：模型协议、SQL、对象存储、子进程、HTTP 判定服务）。另有 `config/`（组件行为参数，跟组件走）与 `constants/`（本包词汇）——这两者不属于三层，是正交的参数与词汇载体。新增子包照这套分。
 - **适配器判据**：模块 import 外部世界客户端库（`openai` / `httpx` / `pymysql` / `pymilvus` / `minio` / `fitz` / `subprocess`）→ adapters；纯编排与算法 → application；词汇/契约/端口 → domain。本地文件系统、`importlib` 动态加载、ContextVar 不算外部世界（插件发现、技能物化因此归 application）。
 - **应用层依赖端口，不依赖适配器实现**：跨「外部世界」的依赖（模型、存储、对象存储、判定服务、互斥锁）在 domain/ 里以 Protocol/ABC 声明端口（`llm/domain/port.py` 的 `ModelClient`、`memory/domain/ports.py`、`agent/domain/ports.py` 的 `RunMutex`、`rag/domain/ports.py`），实现放 adapters，组装根注入。例外白名单（application → adapters 直接 import）：① 目标适配器模块自身无客户端库 import（纯函数翻译，如 `llm/adapters/wire.py`）；② 自有持久化（memory 的 database/message/block/agent_state/named_lock、rag 的 index_state_store——MySQL 是硬依赖自有设施，非可替换外部服务）；③ 各域的构造工厂（`rag/adapters/components.py`、`vision/adapters/builders.py`——组装根在域内的延伸，惰性构造语义的落点）。白名单是唯一豁免清单：新增豁免必须同步更新架构守护测试（tests/core/test_architecture.py）。
 - **枚举一枚举一文件**：各子包的 `constants/` 里，枚举放 `enums/<snake_case>.py`，其余常量放同层 `constants.py`；`constants/__init__.py` 只做再导出。判据是「有没有第二个消费方」。
 - **两类 `config/`**：顶层 `biopilot/config/` 是设置页（数据库）与环境变量可调的全局参数；子包的 `config/` 放该包**组件自己的行为参数**（调用点各给一套、不进全局配置）。后者不是层间搬运的数据，故不住 `domain/dto/`。
 - **`rag` 与 `vision` 必须同层**：rag 的媒体块要向 vision 取图与视觉描述（core 内部的惰性 import），分开摆会让包级依赖成环。
-- **`engine` 其余域包不得 import `engine.tools`**：tools 是面向模型的执行入口，方向恒为 tools → 各域包（spawn 派发除外，它消费 engine.agent 的应用层）。
+- **`engine` 其余域包不得 import `engine.tools.adapters`**：工具实现是模型的 tool-call 入向适配器，方向恒为 tools → 各域包。tools 的 `domain/` / `constants/`（契约与键名）与 `application/`（加载期校验、runtime_context）是被 agent 消费的契约与运行时协作者，放行——与「agent → tool 契约」的既定方向一致。spawn（tools 内）消费 engine.agent 应用层是合法反向。
 
 ## Key Entry Points
 

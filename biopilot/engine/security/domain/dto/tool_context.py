@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 
 from biopilot.engine.security.constants import ApprovalOutcome
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 
 
 @dataclass

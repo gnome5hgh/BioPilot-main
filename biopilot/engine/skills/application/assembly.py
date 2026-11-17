@@ -6,7 +6,7 @@ PolicyEngine / Audit / WorkspacePolicy / 确认看门狗原样生效，安全管
 """
 
 from biopilot.engine.constants import RISK_ORDER
-from biopilot.engine.tools import Tool
+from biopilot.engine.tools.domain import Tool
 
 #: 外部来源工具的风险下限：第三方代码自报的档位不可信——安装时的人工过目只覆盖
 #: 当时那一版，而 skill 可以更新换版本。故装配时抬到至少这一档（逐次确认）。

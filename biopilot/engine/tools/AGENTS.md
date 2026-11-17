@@ -58,7 +58,7 @@
 
 - 新增工具：在 `adapters/<域>/` 写文件 → 声明安全元数据与参数格式 → 在包 `__init__`（若是常用工具）登记 → 在装配层决定装给谁。**领域写入只装给该领域责任人**，其余角色需要时派发它；只读召回是例外，装给所有 agent。
 - 工具的运行时上下文由装配层注入；缺失时要降级为提示，不要抛异常。工具内不要直接构造重量组件（视觉/主模型客户端的执行期自构是登记例外，注入口保留供测试）。
-- 方向约束：本包消费 engine 各域包（domain/application/adapters 均可），各域包**不得**反向 import 本包。
+- 方向约束：本包消费 engine 各域包（domain/application/adapters 均可）；各域包**不得** import 本包的 `adapters/`（工具实现），`domain/`、`constants/` 与 `application/`（校验、runtime_context 等运行时协作者）放行。
 
 ## Dependencies And Collaboration
 
