@@ -17,8 +17,8 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from biopilot.engine.skills.adapters import skill_store
 from biopilot.engine.skills.application.layout import user_skills_cache_dir
+from biopilot.engine.skills.domain.ports import SkillPackageSource, SkillSource
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +30,13 @@ _MAX_ENTRIES = 2000
 _MAX_BYTES = 50 * 1024 * 1024
 
 
-def sync_user_skills(db, platform_client, cache_root: str, user_id: str) -> Path | None:
+def sync_user_skills(source: SkillSource, packages: SkillPackageSource | None,
+                     cache_root: str, user_id: str) -> Path | None:
     """把该用户启用的技能物化到本地缓存目录。
 
     Args:
-        db: MemoryDB 实例（只读 ``bio_skill``；表缺失/查询失败时降级为空）。
-        platform_client: 平台内部客户端（``skill_package`` 取包字节）；可为 None。
+        source: SkillSource，启用技能清单端口（表缺失/查询失败时降级为空）。
+        packages: SkillPackageSource，技能包获取端口；None 时保留现有缓存。
         cache_root: 按用户隔离的派生缓存根（``config.user_cache_root``）。
         user_id: 归属用户。
 
@@ -43,7 +44,7 @@ def sync_user_skills(db, platform_client, cache_root: str, user_id: str) -> Path
         缓存目录路径（存在且有内容时）；无可用技能时返回 None。
     """
     try:
-        desired = skill_store.read_enabled_skills(db, user_id)
+        desired = source.read_enabled_skills(user_id)
     except Exception:
         # 表尚未迁移 / 平台库不可达：技能层降级为空，不阻塞对话
         logger.warning("读取 bio_skill 失败，用户技能按空处理（%s）", user_id, exc_info=True)
@@ -63,11 +64,11 @@ def sync_user_skills(db, platform_client, cache_root: str, user_id: str) -> Path
         target = root / name
         if target.is_dir() and manifest.get(name) == sha:
             continue
-        if platform_client is None:
-            logger.warning("缺少平台客户端，保留技能 '%s' 的现有缓存", name)
+        if packages is None:
+            logger.warning("缺少技能包获取端口，保留技能 '%s' 的现有缓存", name)
             continue
         try:
-            data, header_sha = platform_client.skill_package(user_id, name)
+            data, header_sha = packages.skill_package(user_id, name)
             actual = header_sha or sha
             if header_sha and sha and header_sha != sha:
                 logger.warning("技能 '%s' 内容 sha 与数据库不一致（%s != %s），以实际包为准",

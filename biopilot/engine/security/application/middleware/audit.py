@@ -45,7 +45,7 @@ from typing import Any
 from pathlib import Path
 
 from biopilot.engine.security.constants import ApprovalOutcome, ToolDecision, ToolResultStatus
-from biopilot.engine.security.adapters import audit_store
+from biopilot.engine.security.domain.ports import AuditSink
 from biopilot.engine.security.application.middleware.base import (
     SecurityMiddleware, SecurityBlocked, ConfirmRequired,
 )
@@ -227,16 +227,16 @@ class AuditMiddleware(SecurityMiddleware):
     """审计中间件：把工具调用与审批/LLM 事件 insert-only 写入 MySQL 审计表。
 
     Attributes:
-        db: MemoryDB，审计事件落库句柄（与记忆/会话同实例，insert-only 并发安全）
+        sink: AuditSink，审计事件的写入与读回端口（MySQL 实现在 adapters）
     """
 
-    def __init__(self, db):
-        """指定审计事件落库句柄。
+    def __init__(self, sink: AuditSink):
+        """指定审计事件端口。
 
         Args:
-            db: MemoryDB，MySQL 连接池（bio_security_audit_event 表经 _SCHEMA 幂等建表）。
+            sink: AuditSink（MySqlAuditSink 或测试假件）。
         """
-        self.db = db
+        self.sink = sink
 
     def _write_event(self, entry: AuditEntry) -> None:
         """把一条事件 insert-only 写入 MySQL 审计表；失败降级为 stderr 告警，不抛异常。
@@ -255,7 +255,7 @@ class AuditMiddleware(SecurityMiddleware):
             # 写库前清洗代理码点：入参/结果可能带 surrogate（surrogateescape 残留），
             # 严格 utf8mb4 写入会炸——清洗后再写，审计不丢行。
             payload = sanitize_surrogates(json.dumps(data, ensure_ascii=False))
-            audit_store.insert_event(self.db, payload, data)
+            self.sink.write(payload, data)
         except Exception as e:
             # 写库失败（连接断/库不可达）不得中断工具结果返回：打印告警后降级跳过，
             # 与 _run_after_hooks 的哲学一致——审计是横切关注点，失败不该毁掉主流程
@@ -269,7 +269,7 @@ class AuditMiddleware(SecurityMiddleware):
         Returns:
             事件 dict 列表（键为标准审计字段名），按插入顺序。
         """
-        return audit_store.read_payloads(self.db)
+        return self.sink.read_all()
 
     async def before(self, ctx: ToolContext) -> None:
         """工具执行前：为本次调用建立审计 span 并写入 tool_started 起始事件。

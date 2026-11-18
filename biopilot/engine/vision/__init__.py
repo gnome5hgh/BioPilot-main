@@ -1,14 +1,12 @@
-"""视觉分析子包：PDF 图表提取 + 视觉模型看图分析。
+"""视觉分析域包。
 
-三层职责：``domain/``（数据模型、共用几何、常量词汇）、``application/``（视觉分析编排
-与纯算法：analyzer/describer/detectors/parsers）、``adapters/``（PyMuPDF 外部世界翻译：
-extractor/renderer/text_extractor）。包根只做再导出。
+公开面统一在 ``adapters/api.py``（本文件只做它的再导出别名）：图表结构化分析
+（``FigureAnalyzer``）、检索用图注描述（``FigureDescriber``）、PDF 图表定位与
+渲染（``FigureExtractor`` / ``render_figure``）。分层：domain（几何/图式）→
+application（分析/描述/检测/解析）→ adapters（PyMuPDF 管线与视觉客户端构造）。
+模块外一律经 ``adapters.api`` 或本别名 import。
 """
-from biopilot.engine.vision.domain.schemas import Figure, FigureAnalysis
-from biopilot.engine.vision.application.analyzer import FigureAnalyzer
-from biopilot.engine.vision.adapters.extractor import FigureExtractor
-from biopilot.engine.vision.adapters.renderer import render_figure
+from biopilot.engine.vision.adapters.api import *  # noqa: F401,F403
+from biopilot.engine.vision.adapters.api import __all__ as _api_all
 
-__all__ = [
-    "FigureExtractor", "FigureAnalyzer", "render_figure", "Figure", "FigureAnalysis",
-]
+__all__ = list(_api_all)

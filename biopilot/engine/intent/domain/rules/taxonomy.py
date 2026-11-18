@@ -13,13 +13,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
-import yaml
-
-from biopilot.engine.intent.constants import (
-    INTENT_CLASSES, RULES_PATH, TAXONOMY_PATH,
-)
+from biopilot.engine.intent.constants import INTENT_CLASSES
 from biopilot.engine.intent.domain.schemas import IntentClass, Rule
 
 
@@ -67,30 +62,6 @@ class Taxonomy:
             if rule.pattern.search(t):
                 return rule.intent
         return None
-
-
-def _read_yaml(path: Path, what: str) -> dict:
-    """读一份知识库 YAML；文件缺失或不是映射都视为配置错误。
-
-    Args:
-        path: Path，知识库文件路径。
-        what: str，人类可读的名字（报错用）。
-
-    Returns:
-        dict：YAML 顶层映射。
-
-    Raises:
-        TaxonomyError: 文件不存在、解析失败、或顶层不是映射。
-    """
-    if not path.exists():
-        raise TaxonomyError(f"{what}不存在：{path}")
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise TaxonomyError(f"{what}解析失败：{path}（{exc}）") from exc
-    if not isinstance(data, dict):
-        raise TaxonomyError(f"{what}顶层必须是映射，实际是 {type(data).__name__}：{path}")
-    return data
 
 
 def _parse_classes(raw: dict) -> dict[str, IntentClass]:
@@ -177,20 +148,19 @@ def _parse_rules(raw: dict, classes: dict[str, IntentClass]) -> tuple[Rule, ...]
     return tuple(rules)
 
 
-def load_taxonomy(taxonomy_path: Path | None = None,
-                  rules_path: Path | None = None) -> Taxonomy:
-    """装载意图知识库并做完整性校验（fail-closed）。
+def taxonomy_from_raw(raw_classes: dict, raw_rules: dict) -> Taxonomy:
+    """从已装载的知识库映射构造并校验 Taxonomy（fail-closed，纯函数无 I/O）。
 
     Args:
-        taxonomy_path: Path | None，类别知识库路径；None 用随仓库发布的默认路径。
-        rules_path: Path | None，规则层路径；None 用随仓库发布的默认路径。
+        raw_classes: dict，taxonomy.yaml 的顶层映射。
+        raw_rules: dict，rules.yaml 的顶层映射。
 
     Returns:
         Taxonomy：校验通过的类别表与规则表。
 
     Raises:
-        TaxonomyError: 任一份资产缺失、解析失败或校验不过（报错点名具体类别）。
+        TaxonomyError: 任一份资产缺条目、指向未知类别或校验不过（报错点名具体类别）。
     """
-    classes = _parse_classes(_read_yaml(taxonomy_path or TAXONOMY_PATH, "意图类别知识库"))
-    rules = _parse_rules(_read_yaml(rules_path or RULES_PATH, "规则层知识库"), classes)
+    classes = _parse_classes(raw_classes)
+    rules = _parse_rules(raw_rules, classes)
     return Taxonomy(classes=classes, rules=rules)

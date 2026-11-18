@@ -52,3 +52,28 @@ def read_payloads(db) -> list[dict]:
     rows = db.execute(
         "SELECT payload FROM bio_security_audit_event ORDER BY id").fetchall()
     return [json.loads(r["payload"]) for r in rows]
+
+
+class MySqlAuditSink:
+    """``AuditSink`` 的 MySQL 实现：bio_security_audit_event 的 insert-only 写入。"""
+
+    def __init__(self, db):
+        """绑定连接。
+
+        Args:
+            db: MemoryDB，审计事件落库句柄（与记忆/会话同实例，insert-only 并发安全）。
+        """
+        self._db = db
+
+    def write(self, payload: str, data: dict) -> None:
+        """写入一条审计事件。
+
+        Args:
+            payload: 全量取证 JSON 字符串（固定键集）。
+            data: 核心列拆解（event_type/span_id/trace_id/...）。
+        """
+        insert_event(self._db, payload, data)
+
+    def read_all(self) -> list[dict]:
+        """按插入序读回全部审计事件（payload 还原为 to_json_dict 的 dict 形态）。"""
+        return read_payloads(self._db)

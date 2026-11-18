@@ -27,3 +27,29 @@ def read_enabled_skills(db, user_id: str) -> dict[str, str]:
         for row in rows
         if row.get("enabled", 1) and str(row.get("name", "")).strip()
     }
+
+
+class MySqlSkillSource:
+    """``SkillSource`` 的 MySQL 实现：``bio_skill`` 只读翻译。
+
+    降级语义（表缺失/库不可达按空处理）由应用层承担——这里如实上抛查询异常。
+    """
+
+    def __init__(self, db):
+        """绑定连接。
+
+        Args:
+            db: MemoryDB，连接池（只读 bio_skill）。
+        """
+        self._db = db
+
+    def read_enabled_skills(self, user_id: str) -> dict[str, str]:
+        """读该用户全部启用技能的 name → content_sha 清单。
+
+        Args:
+            user_id: 归属用户（行级隔离键）。
+
+        Returns:
+            dict[str, str]：启用技能的 name → content_sha（名字去空白后非空才收录）。
+        """
+        return read_enabled_skills(self._db, user_id)
