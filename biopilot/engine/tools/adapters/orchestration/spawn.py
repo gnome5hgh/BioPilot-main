@@ -25,7 +25,7 @@ from biopilot.engine.agent import Agent, AgentEvent, AgentEventKind
 # 失败计数在会话作用域(跨 run 累计)。容器取用时顺手清扫过期条目,故此处不再单独清理。
 from biopilot.engine.agent import get_run_state, get_session_state
 from biopilot.engine.llm import StructuredOutput
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.adapters.orchestration.constants import (
     SubAgentStatus)
 

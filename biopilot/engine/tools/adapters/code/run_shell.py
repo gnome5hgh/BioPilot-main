@@ -9,7 +9,7 @@
 命令防护按命令内容决定，而不是每次调用都弹框。
 """
 from biopilot.engine.security.adapters import sandbox as sb
-from biopilot.engine.tools import ToolResult
+from biopilot.engine.tools.domain import ToolResult
 from biopilot.engine.tools.adapters.code.sandboxed import SandboxedTool
 
 

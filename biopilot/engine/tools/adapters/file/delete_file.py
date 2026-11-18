@@ -4,7 +4,7 @@
 交给 GC，失败只留孤儿，不会留下指向不存在对象的行。
 """
 from biopilot.common.platform import PlatformError
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.adapters.file._support import current_user_id, platform_for
 
 

@@ -1,5 +1,5 @@
 """MemoryReadTool：读长期记忆块（只读，装配给所有 agent）。"""
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.application.runtime_context import get_memory_context
 
 __all__ = ["MemoryReadTool"]

@@ -5,7 +5,7 @@
 """
 from dataclasses import dataclass, field
 
-from biopilot.engine.tools.domain import Tool
+from biopilot.engine.tools.adapters.api import Tool
 
 
 @dataclass

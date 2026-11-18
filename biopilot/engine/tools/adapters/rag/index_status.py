@@ -6,7 +6,7 @@
 
 不写任何东西、不触发重扫。发现不一致时让用户在知识库页重新索引。
 """
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.rag.adapters.factory import get_rag_service
 from biopilot.engine.tools.application.runtime_context import get_rag_domain
 

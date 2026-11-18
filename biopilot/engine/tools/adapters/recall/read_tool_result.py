@@ -1,5 +1,5 @@
 """ReadToolResultTool：按 tool_call_id 或对象键取回被外置的工具原文。"""
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.adapters.tool_result_store import session_key_prefix
 from biopilot.engine.tools.application.runtime_context import get_memory_context
 

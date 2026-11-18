@@ -24,8 +24,8 @@ from pathlib import Path
 from biopilot.engine.agent.config import AgentConfig
 from biopilot.common.utils.frontmatter import parse_frontmatter
 from biopilot.engine.skills import apply_pre_approval, merge_tools
-from biopilot.engine.tools.application.validation import validate_tool
-from biopilot.engine.tools.domain import Tool
+from biopilot.engine.tools.adapters.api import validate_tool
+from biopilot.engine.tools.adapters.api import Tool
 
 
 class AgentRegistry:

@@ -52,7 +52,7 @@ from biopilot.engine.llm import (
     AssistantMessage, Message, SystemMessage, ToolMessage, UserMessage,
     tool_to_openai_schema,
 )
-from biopilot.engine.llm.domain.port import ModelClient
+from biopilot.engine.llm.adapters.api import ModelClient
 from biopilot.engine.agent.application.context_window import (
     CANCELLED_TOOL_MSG, ContextWindow,
 )
@@ -62,19 +62,19 @@ from biopilot.engine.agent.constants import AgentEventKind
 logger = logging.getLogger(__name__)
 from biopilot.engine.agent.domain.dto.agent_event import AgentEvent
 from biopilot.engine.agent.domain.ports import RunMutex
-from biopilot.engine.memory.domain.ports import (
+from biopilot.engine.memory.adapters.api import (
     AgentStateStore, MemoryBlockReader, MessageStore,
 )
 from biopilot.engine.agent.application.registry import AgentRegistry
 from biopilot.engine.skills import SkillRegistry
 from biopilot.engine.agent.constants.base_prompt import BASE_PROMPT
 from biopilot.engine.security import ConfirmRequired, SecurityMiddleware
-from biopilot.engine.tools.constants import SUMMARY_TERMINAL
-from biopilot.engine.tools.domain import ToolResult
+from biopilot.engine.tools.adapters.api import SUMMARY_TERMINAL
+from biopilot.engine.tools.adapters.api import ToolResult
 from biopilot.common.utils.text import sanitize_surrogates
 
 #: Agent 与意图识别之间只有一个缝：可选的集成适配器。未装配时整套意图层不存在。
-from biopilot.engine.intent.application.service import IntentService
+from biopilot.engine.intent.adapters.api import IntentService
 
 def _compute_agent_version(config) -> str:
     """agent 配置的内容哈希（sha256 前 16 位）：system_prompt + 每个工具的全签名。
@@ -437,7 +437,7 @@ class Agent:
         memory_section = ""
         if self.memory is not None:
             if self.block_manager is not None:
-                from biopilot.engine.memory.domain.schemas.memory import Memory
+                from biopilot.engine.memory.adapters.api import Memory
                 # 把「缓存的记忆对象」扔掉，从数据库重新读出所有块，拼一个新的 Memory 实例
                 self.memory = Memory(blocks=self.block_manager.list_blocks())
             memory_section = self.memory.compile()
@@ -560,7 +560,7 @@ class Agent:
         Returns:
             True 表示已超压缩阈值（无持久化层时恒 False）。
         """
-        from biopilot.engine.memory.application.compaction import estimate_tokens, should_compress
+        from biopilot.engine.memory.adapters.api import estimate_tokens, should_compress
         self._last_sent_estimate = estimate_tokens(messages)
         if self.compaction is None or self.message_manager is None:
             return False
@@ -576,7 +576,7 @@ class Agent:
         Args:
             response: 本轮 LLM 返回的消息（可能带响应信封）。
         """
-        from biopilot.engine.memory.application.compaction import blend_token_ratio
+        from biopilot.engine.memory.adapters.api import blend_token_ratio
         meta = getattr(response, "meta", None)
         usage = getattr(meta, "usage", None) if meta is not None else None
         actual = getattr(usage, "prompt_tokens", None) if usage is not None else None
@@ -606,18 +606,11 @@ class Agent:
         Raises:
             MaxTurnsExceeded: 超过 max_turns 轮仍未停止
         """
-        lock_dsn = getattr(getattr(self.block_manager, "db", None), "dsn", None)
-        if self._run_mutex is not None:
-            # 组装根注入的互斥端口：Agent 不感知锁实现（MySQL GET_LOCK 的适配器）
-            lock = self._run_mutex
-        elif not lock_dsn:
+        lock = self._run_mutex
+        if lock is None:
+            # 未注入互斥端口：无锁执行（无锁是显式接线结果，不再是运行期兜底构造——
+            # spawn 子 agent 的 conversation_id 唯一，无需互斥）。
             return await self._run_react_bound(task, stream_callback)
-        else:
-            # 未注入端口的常态路径（spawn 子 agent 即此形态）：每次 run 现取锁——
-            # 不能复用父实例，独立 conversation_id 的锁若共用一条 GET_LOCK 连接
-            # 会互踩（子 agent 拿锁会隐式释放父锁）。见 ADR 0013。
-            from biopilot.engine.memory.adapters.named_lock import NamedLock
-            lock = NamedLock(lock_dsn)
         lock_name = f"run:{self.conversation_id}"
         try:
             acquired = await asyncio.to_thread(lock.acquire, lock_name, 0)
@@ -647,10 +640,10 @@ class Agent:
         token = None
         rag_token = None
         if self._memory_context is not None:
-            from biopilot.engine.tools.application.runtime_context import set_memory_context
+            from biopilot.engine.tools.adapters.api import set_memory_context
             token = set_memory_context(self._memory_context)
         # RAG 用户域随 run 绑定：检索/索引工具落在本用户的 collection
-        from biopilot.engine.tools.application.runtime_context import (
+        from biopilot.engine.tools.adapters.api import (
             reset_rag_domain, set_rag_domain)
         rag_token = set_rag_domain(self.user_id)
         # 流式回调按次覆盖：缓存的 Agent 逐次运行可换回调（会话锁保证同
@@ -663,7 +656,7 @@ class Agent:
         finally:
             self.stream_callback = old_cb
             if token is not None:
-                from biopilot.engine.tools.application.runtime_context import reset_memory_context
+                from biopilot.engine.tools.adapters.api import reset_memory_context
                 reset_memory_context(token)
             reset_rag_domain(rag_token)
 
@@ -752,7 +745,7 @@ class Agent:
             if self._needs_compaction(messages) and self.structured is not None:
                 # 截断续写与压缩重建互斥:压缩可能驱逐"半截+续写提示"(in-context 重建),先弃掉累积器里的半截——续写无参照即完整重答,避免「半截 + 完整重答」重复交付。
                 accumulated.clear()
-                from biopilot.engine.memory.application.compaction import run_compaction
+                from biopilot.engine.memory.adapters.api import run_compaction
                 new_window = await run_compaction(
                     self.window.messages, self.compaction, self.structured,
                     context_window=self.llm.context_window,

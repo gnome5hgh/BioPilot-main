@@ -207,7 +207,7 @@ class QueryRewriter:
             max_queries: 最终查询集封顶（含原 query）。
             max_query_chars: 单条改写查询的字符上限（超限丢弃）。
         """
-        from biopilot.engine.llm.application.structured import StructuredOutput, StructuredOutputConfig
+        from biopilot.engine.llm.adapters.api import StructuredOutput, StructuredOutputConfig
         self._history_limit = history_limit
         self._max_queries = max_queries
         self._max_query_chars = max_query_chars

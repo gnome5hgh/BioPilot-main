@@ -35,7 +35,7 @@ def context_usage(agent: Agent) -> dict:
         dict: {total, limit, parts: {...}}，parts 键：system_prompt / tools_schema / messages。
     """
     from biopilot.common.utils.tokenization import estimate_text_tokens
-    from biopilot.engine.memory.application.compaction import estimate_tokens
+    from biopilot.engine.memory.adapters.api import estimate_tokens
 
     parts: dict[str, int] = {}
     parts["system_prompt"] = estimate_text_tokens(agent.system_message().content)

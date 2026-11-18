@@ -9,7 +9,7 @@
 绝不退回进程内执行。
 """
 from biopilot.engine.security.adapters import sandbox as sb
-from biopilot.engine.tools import ToolResult
+from biopilot.engine.tools.domain import ToolResult
 from biopilot.engine.tools.adapters.code.sandboxed import SandboxedTool
 
 

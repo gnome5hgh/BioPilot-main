@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from biopilot.common.platform import PlatformError, make_platform_client
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.application.runtime_context import get_memory_context
 from biopilot.engine.tools.adapters.file._support import normalize_name
 

@@ -13,7 +13,7 @@ import asyncio
 import base64
 
 from biopilot.engine.llm import LLMClient, UserMessage
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 
 #: 不给问题时默认问什么。要的是「这张图画了什么」，不是泛泛的图片描述。
 _DEFAULT_QUESTION = "这张图/表展示了什么？说清它的核心内容、关键结论与坐标轴或列名的含义。"

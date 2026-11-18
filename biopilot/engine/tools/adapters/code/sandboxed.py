@@ -17,7 +17,7 @@ from pathlib import Path
 
 from biopilot.config import user_cache_root
 from biopilot.engine.security.adapters import sandbox as sb
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.application.roots import semantic_roots
 
 logger = logging.getLogger(__name__)

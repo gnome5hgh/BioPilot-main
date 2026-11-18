@@ -6,8 +6,8 @@ query），再持锁检索。检索与融合算法本身在 `rag/services/retrie
 """
 import logging
 
-from biopilot.engine.tools import Tool, ToolResult
-from biopilot.engine.rag.domain import section_label
+from biopilot.engine.tools.domain import Tool, ToolResult
+from biopilot.engine.rag.adapters.api import section_label
 from biopilot.engine.rag.adapters.factory import get_rag_service
 from biopilot.engine.tools.application.runtime_context import get_rag_domain
 from biopilot.engine.tools.application.runtime_context import get_memory_context

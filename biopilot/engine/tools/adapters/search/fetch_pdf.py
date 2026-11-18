@@ -8,7 +8,7 @@ from __future__ import annotations
 from urllib.parse import unquote, urlparse
 
 from biopilot.common.platform import PlatformError
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.common.utils.text import normalize_title
 from biopilot.engine.tools.adapters.file._support import current_run_id, current_user_id, platform_for
 

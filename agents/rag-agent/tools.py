@@ -15,7 +15,7 @@
 检索与索引维护不产生需要沉淀的清单或历史。
 """
 from biopilot.config import BioPilotConfig
-from biopilot.engine.tools.application.assembly import make_tools
+from biopilot.engine.tools.adapters.api import make_tools
 from biopilot.engine.tools.adapters.rag import IndexStatusTool, RagRetrieveTool, ViewImageTool
 from biopilot.engine.tools.adapters.recall import get_recall_tools
 

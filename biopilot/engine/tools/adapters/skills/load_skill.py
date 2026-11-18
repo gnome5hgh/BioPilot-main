@@ -15,7 +15,7 @@ L1（name+description 清单）由 SkillRegistry.skills_block 在装配期注入
 """
 
 from biopilot.engine.skills import SkillRegistry
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 
 
 class LoadSkillTool(Tool):

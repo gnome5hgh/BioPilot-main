@@ -13,7 +13,7 @@ from biopilot.engine.tools import (
     ReadFileTool, ReadPdfTool, WriteFileTool, EditFileTool,
     DeleteFileTool, GlobTool, GrepTool, ReadReferenceTool,
 )
-from biopilot.engine.tools.application.assembly import make_tools
+from biopilot.engine.tools.adapters.api import make_tools
 from biopilot.engine.tools.adapters.docs import SaveDocumentTool
 from biopilot.engine.tools.adapters.recall import get_recall_tools
 

@@ -9,7 +9,7 @@
 
 from pathlib import Path
 
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 
 
 class ReadReferenceTool(Tool):

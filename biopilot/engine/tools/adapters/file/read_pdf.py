@@ -5,7 +5,7 @@
 """
 from biopilot.common.platform import PlatformError
 from biopilot.engine.rag.adapters.pdf_extract import extract_pdf_bytes
-from biopilot.engine.tools import Tool, ToolResult
+from biopilot.engine.tools.domain import Tool, ToolResult
 from biopilot.engine.tools.adapters.file._support import current_user_id, platform_for
 
 

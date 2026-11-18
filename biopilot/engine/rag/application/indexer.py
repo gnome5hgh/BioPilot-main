@@ -351,7 +351,7 @@ class RagIndexer:
             return []
 
         # 惰性 import：vision 有自己的重依赖，不在包导入期拉起
-        from biopilot.engine.vision.constants import FigureType
+        from biopilot.engine.vision.adapters.api import FigureType
 
         # 第一遍：定下哪些区域成块（此时不渲染）
         chunks: list[Chunk] = []
