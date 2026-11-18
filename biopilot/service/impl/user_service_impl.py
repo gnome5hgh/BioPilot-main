@@ -7,13 +7,12 @@ from pathlib import Path
 
 from biopilot.common.utils.paths import safe_component
 from biopilot.service.runtime_state import RuntimeState
-from biopilot.mapper import (
-    agent_state_mapper,
-    rag_index_mapper,
-    rag_paper_status_mapper,
-    user_mapper,
+from biopilot.engine.memory.adapters.api import (
+    delete_consolidation_cursor,
+    mark_user_deleting,
+    purge_user,
 )
-from biopilot.mapper.base import shared_db
+from biopilot.mapper import rag_index_mapper, rag_paper_status_mapper
 from biopilot.service import state
 from biopilot.service.user_service import UserService
 
@@ -28,32 +27,25 @@ class UserServiceImpl(UserService):
 
     def mark_deleting(self, target_id: str) -> dict:
         """删户第一阶段：把 agent_state 归属改名为 deleting:<uid>。"""
-        agent_state_mapper.mark_deleting(shared_db(), target_id)
+        mark_user_deleting(target_id)
         return {"status": "marked"}
 
     def purge(self, target_id: str) -> dict:
         """物理清除该用户的全部引擎数据（幂等，可重复执行）。"""
-        db = shared_db()
-        for table in ("bio_message", "bio_memory_block",
-                      "bio_memory_block_history"):
-            try:
-                user_mapper.delete_from_table(db, table, target_id)
-            except Exception:
-                logger.warning("删户清理跳过 %s（表不存在或不可达）", table)
-        # 整合游标按 agent_id 存、没有 user_id：必须在删 agent_state 前先清
+        # 记忆域数据（消息/块/历史/游标/状态行）由 memory 适配层一次性清理
+        purge_user(target_id)
         try:
-            agent_state_mapper.delete_consolidation_cursor(db, target_id)
+            delete_consolidation_cursor(target_id)
         except Exception:
             logger.warning("删户清理跳过 bio_memory_consolidation_cursor")
         try:
-            rag_index_mapper.delete_by_user(db, target_id)
+            rag_index_mapper.delete_by_user(target_id)
         except Exception:
             logger.warning("删户清理跳过 bio_rag_index_state（表不存在或不可达）")
         try:
-            rag_paper_status_mapper.delete_by_user(db, target_id)
+            rag_paper_status_mapper.delete_by_user(target_id)
         except Exception:
             logger.warning("删户清理跳过 bio_rag_paper_status（表不存在或不可达）")
-        agent_state_mapper.delete_by_user(db, target_id)
 
         # 向量库按用户域独立 collection：不清会让重建后的同 id 账号检索到旧数据。
         # 适配器实现细节（pymilvus 客户端的构造与关闭）收口在 rag adapters。

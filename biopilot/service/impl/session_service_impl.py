@@ -5,9 +5,9 @@ import json
 import logging
 
 from biopilot.service.runtime_state import RuntimeState
-from biopilot.engine.agent.application.context_usage import context_usage
+from biopilot.engine.agent import context_usage
+from biopilot.engine.memory.adapters.api import delete_conversation
 from biopilot.mapper import agent_state_mapper, message_mapper
-from biopilot.mapper.base import shared_db
 from biopilot.service import state
 from biopilot.service.attachment_service import AttachmentService
 from biopilot.service.errors import NotFoundError, RequestValidationError
@@ -27,11 +27,10 @@ class SessionServiceImpl(SessionService):
                         task: str) -> None:
         """首条任务生成会话标题：name 为空才设，取任务前 20 字。"""
         try:
-            db = shared_db()
-            row = agent_state_mapper.select_name(db, conversation_id, user_id)
+            row = agent_state_mapper.select_name(conversation_id, user_id)
             if row is not None and row["name"] is None:
                 title = task.strip().replace("\n", " ")[:20]
-                agent_state_mapper.update_name(db, title, conversation_id, user_id)
+                agent_state_mapper.update_name(title, conversation_id, user_id)
         except Exception as e:      # pragma: no cover
             logger.warning("会话标题生成失败: %r", e)
 
@@ -39,7 +38,7 @@ class SessionServiceImpl(SessionService):
         """取一段会话的可见历史（user/assistant 两条腿，按时间正序）。"""
         if not conversation_id:
             return {"messages": []}
-        rows = message_mapper.select_history(shared_db(), user_id, conversation_id)
+        rows = message_mapper.select_history(user_id, conversation_id)
         messages = []
         for row in rows:
             item = {
@@ -61,10 +60,7 @@ class SessionServiceImpl(SessionService):
         """删除一个会话：消息行 + agent_state 行（归属双条件）。"""
         if not conversation_id:
             raise RequestValidationError("缺少 conversation_id")
-        db = shared_db()
-        message_mapper.delete_for_conversation(db, user_id, conversation_id)
-        gone = agent_state_mapper.delete_for_conversation(
-            db, user_id, conversation_id)
+        gone = delete_conversation(user_id, conversation_id)
         self._runtime.agents.pop(
             (user_id, conversation_id, state.user_models.get(user_id)), None)
         # 键含模型名（会话内可切换模型），按用户+会话整体清
@@ -95,8 +91,7 @@ class SessionServiceImpl(SessionService):
         parts = dict(baseline["parts"])
         try:
             from biopilot.common.utils.tokenization import estimate_text_tokens
-            rows = message_mapper.select_context_rows(
-                shared_db(), user_id, conversation_id)
+            rows = message_mapper.select_context_rows(user_id, conversation_id)
             msg_tokens = 0
             for r in rows:
                 text = f"{r['role']}: {r['content'] or ''}"

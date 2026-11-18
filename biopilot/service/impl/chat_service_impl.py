@@ -10,7 +10,7 @@ from pathlib import Path
 
 from biopilot.service.runtime_state import RuntimeState
 from biopilot.service.web_config import WebConfig
-from biopilot.engine.agent.application.context_usage import context_usage
+from biopilot.engine.agent import context_usage
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.service.attachment_service import AttachmentService

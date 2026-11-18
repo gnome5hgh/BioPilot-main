@@ -1,4 +1,4 @@
-"""共享记忆库连接（转发到 MemoryDB.shared 的按 DSN 单例）。"""
+"""共享记忆库连接（委托 memory 适配层的按 DSN 单例）。"""
 from __future__ import annotations
 
 

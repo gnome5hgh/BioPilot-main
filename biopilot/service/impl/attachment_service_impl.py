@@ -8,7 +8,6 @@ from typing import Callable
 
 from biopilot.common.utils.paths import safe_component
 from biopilot.mapper import message_mapper
-from biopilot.mapper.base import shared_db
 from biopilot.service.attachment_service import ATTACHMENT_HEADER, AttachmentService
 from biopilot.service.config_helpers import cfg_user_cache_root
 
@@ -104,7 +103,7 @@ class AttachmentServiceImpl(AttachmentService):
         prefix = task.split("\n\n", 1)[0] + "\n\n"
         try:
             message_mapper.update_user_message_meta(
-                shared_db(), user_id, conversation_id, len(prefix), prefix,
+                user_id, conversation_id, len(prefix), prefix,
                 json.dumps({"attachments": attachments}, ensure_ascii=False))
         except Exception:
             logger.warning("附件元数据回填失败（不影响本轮回答）", exc_info=True)

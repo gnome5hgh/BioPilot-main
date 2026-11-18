@@ -1,49 +1,48 @@
-"""Web 会话装配实现：把配置、记忆、安全、意图与工具组装成 supervisor。"""
+"""Web 会话装配实现：把配置、记忆、安全、意图与工具组装成 supervisor。
+
+本类是 Python 侧的组装根：唯一的 engine 模块 build_* 调用点——所有具体实现
+的构造都经各模块适配层暴露的组装入口（``build_memory`` / ``build_intent`` /
+``build_middlewares`` / ``build_skills`` / ``build_agent``），不直接摸任何
+application/domain 内部。
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 from biopilot.config import BioPilotConfig, user_cache_root
 from biopilot.service.web_session import WebSession
 from biopilot.engine.agent import Agent, AgentRegistry
-from biopilot.engine.intent.domain.rules.taxonomy import TaxonomyError, load_taxonomy
-from biopilot.engine.intent.adapters.jev import JevClient, JevUnavailable
-from biopilot.engine.intent.application.service import IntentService
+from biopilot.engine.intent.adapters.api import (
+    JevClient,
+    JevUnavailable,
+    TaxonomyError,
+    build_intent,
+    load_taxonomy,
+)
 from biopilot.engine.llm import LLMClient, StructuredOutput
-from biopilot.engine.memory.application.agent_manager import AgentManager
-from biopilot.engine.memory.application.block_manager import BlockManager
-from biopilot.engine.memory.application.consolidation import (
-    ConsolidationQueue,
+from biopilot.engine.memory.adapters.api import (
     MemoryConsolidator,
+    ConsolidationQueue,
+    MemoryDB,
+    NamedLock,
+    build_memory,
 )
-from biopilot.engine.memory.application.message_manager import MessageManager
-from biopilot.engine.memory.adapters.database import MemoryDB
-from biopilot.engine.security import (
-    AuditMiddleware,
-    CommandGuardMiddleware,
-    ContentGuardMiddleware,
-    PolicyEngineMiddleware,
-)
-from biopilot.engine.security.adapters.classifier import build_classifier
-from biopilot.engine.skills import (
-    SkillRegistry,
-    sync_user_skills,
-)
-from biopilot.engine.tools.application.offload import make_tool_result_offloader
-from biopilot.engine.tools.application.runtime_context import (
+from biopilot.engine.security import build_middlewares
+from biopilot.engine.skills import SkillRegistry, build_skill_source, sync_user_skills
+from biopilot.engine.tools.adapters.api import (
     MemoryToolsContext,
+    make_tool_result_offloader,
     set_memory_context,
 )
+from biopilot.engine.tools.adapters.skills.load_skill import LoadSkillTool
 from biopilot.engine.tools.adapters.tool_result_store import make_tool_result_store
 from biopilot.service import state
 from biopilot.service.assembly_service import AssemblyService
 from biopilot.common.platform import shared_platform_client
-from biopilot.engine.memory.adapters.named_lock import NamedLock
-from biopilot.engine.tools.adapters.skills.load_skill import LoadSkillTool
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +100,13 @@ class AssemblyServiceImpl(AssemblyService):
 
         # 进程级共享池（按 DSN 键）：构造含建表 + 迁移，每会话新建纯属浪费
         db = MemoryDB.shared(config.runtime.memory_dsn)
-        block_manager = BlockManager(db, user_id=user_id)
+        memory = build_memory(db, user_id=user_id)
+        block_manager = memory.block_manager
+        message_manager = memory.message_manager
+        agent_manager = memory.agent_manager
         block_manager.migrate_legacy_labels()
         block_manager.purge_removed_blocks()
         block_manager.ensure_default_blocks()
-        message_manager = MessageManager(db)
-        agent_manager = AgentManager(db, block_manager, message_manager)
-        message_manager.agent_manager = agent_manager
 
         # 会话：同用户存在则复用（回续语义），不存在则创建；他人占用即拒绝
         try:
@@ -138,8 +137,8 @@ class AssemblyServiceImpl(AssemblyService):
         try:
             _platform = shared_platform_client(config)
             _user_cache = await asyncio.to_thread(
-                sync_user_skills, db, _platform, str(user_cache_root(config)),
-                user_id)
+                sync_user_skills, build_skill_source(db), _platform,
+                str(user_cache_root(config)), user_id)
         except Exception:
             logger.warning("用户技能物化失败，本次会话不加载额外技能（%s）", user_id,
                            exc_info=True)
@@ -171,16 +170,10 @@ class AssemblyServiceImpl(AssemblyService):
             block_manager=block_manager,
             message_manager=message_manager,
             tool_result_store=tool_result_store,
-            db=db,
         )
         set_memory_context(memory_ctx)
 
-        middlewares = [
-            AuditMiddleware(db=db),
-            ContentGuardMiddleware(classifier=build_classifier(config)),
-            CommandGuardMiddleware(),
-            PolicyEngineMiddleware(confirm_above=config.runtime.confirm_above),
-        ]
+        middlewares = build_middlewares(config, db)
 
         # 意图层（可选）：判定服务不可达则整层不装配
         intent_service = None
@@ -200,9 +193,8 @@ class AssemblyServiceImpl(AssemblyService):
             except JevUnavailable as exc:
                 logger.warning("意图判定服务不可用，web 会话走纯 ReAct: %s", exc.reason)
             else:
-                intent_service = IntentService(
-                    taxonomy=taxonomy, judge=judge,
-                    history_messages=config.intent.history_messages)
+                intent_service = build_intent(taxonomy=taxonomy, judge=judge,
+                                              history_messages=config.intent.history_messages)
 
         async def _fail_safe_confirm(req) -> bool:
             """无确认回调时的兜底：拒绝（确认永不静默放行）。"""
@@ -230,6 +222,7 @@ class AssemblyServiceImpl(AssemblyService):
         )
         consolidator = MemoryConsolidator(
             agent_state, block_manager, message_manager,
+            memory.cursor_store, memory.lock_factory,
             structured, enable=config.memory.consolidation_enabled)
         consolidation_queue = ConsolidationQueue(
             consolidator, conversation_id,

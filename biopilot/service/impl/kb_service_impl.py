@@ -16,7 +16,7 @@ from pathlib import Path
 
 from biopilot.config import BioPilotConfig
 from biopilot.engine.memory.adapters.named_lock import NamedLock
-from biopilot.engine.rag.constants import (
+from biopilot.engine.rag import (
     IndexOutcomeStatus,
     paper_doc_key,
     paper_id_of,
@@ -130,7 +130,7 @@ class KbServiceImpl(KbService):
             logger.warning("向量库对账读取失败，本轮跳过漂移检测（%s）", user_id,
                            exc_info=True)
         if vector_counts is not None:
-            rows = status_mapper.select_for_reconcile(db, user_id)
+            rows = status_mapper.select_for_reconcile(user_id)
             enabled_ids = {str(row["id"]) for row in rows if row["kb_enabled"]}
             # 1) 向量库里不属于任何「已加入」论文的块：删掉
             swept, vector_counts = _sweep_orphan_vectors(
@@ -155,11 +155,11 @@ class KbServiceImpl(KbService):
             # 每遍先收敛状态行：清孤儿行、补 queued、把崩溃遗留的 indexing
             # 拉回（本流程持索引锁，重排是安全的）。
             try:
-                status_mapper.normalize(db, user_id, requeue_indexing=True)
+                status_mapper.normalize(user_id, requeue_indexing=True)
             except Exception as exc:
                 logger.warning("知识库状态收敛失败（%s），本轮跳过：%s", user_id, exc)
                 break
-            rows = status_mapper.select_papers_for_index(db, user_id)
+            rows = status_mapper.select_papers_for_index(user_id)
             enabled = {str(row["id"]): row for row in rows if row["kb_enabled"]}
             todo = []
             for paper_id, row in enabled.items():
@@ -175,7 +175,7 @@ class KbServiceImpl(KbService):
                 break
             try:
                 accepted = set(status_mapper.mark_indexing(
-                    db, user_id, [paper_id for paper_id, _row in todo]))
+                    user_id, [paper_id for paper_id, _row in todo]))
             except Exception as exc:
                 logger.warning("索引状态置位失败（%s），本轮跳过：%s", user_id, exc)
                 break
@@ -218,7 +218,7 @@ class KbServiceImpl(KbService):
             applied: dict = {}
             if results:
                 try:
-                    applied = status_mapper.apply_results(db, user_id, results)
+                    applied = status_mapper.apply_results(user_id, results)
                     reported = True
                 except Exception as exc:
                     # 状态未知：保留已建好的索引，下一轮按 indexing 重排后幂等重建
@@ -238,7 +238,7 @@ class KbServiceImpl(KbService):
                     _drop_paper_index(svc, paper_id)
 
         # 已移出知识库（或已删除）的论文：按向量库实际持有的文档标识清理
-        rows = status_mapper.select_paper_states(db, user_id)
+        rows = status_mapper.select_paper_states(user_id)
         enabled = {str(row["id"]) for row in rows if row["kb_enabled"]}
         try:
             counts = svc.document_chunk_counts()
@@ -251,7 +251,7 @@ class KbServiceImpl(KbService):
 
         # 收尾再收敛一次（不重排本轮刚置 indexing 的行）
         try:
-            status_mapper.normalize(db, user_id, requeue_indexing=False)
+            status_mapper.normalize(user_id, requeue_indexing=False)
         except Exception as exc:
             logger.warning("知识库收尾收敛失败（%s）：%s", user_id, exc)
 
@@ -262,7 +262,7 @@ class KbServiceImpl(KbService):
 
     def users_with_kb(self) -> list[str]:
         """列出知识库里还有勾选论文的用户（启动对账用）。"""
-        rows = status_mapper.select_users_with_kb(shared_db())
+        rows = status_mapper.select_users_with_kb()
         return sorted({str(row["user_id"]) for row in rows
                        if row.get("user_id")})
 
@@ -279,7 +279,7 @@ class KbServiceImpl(KbService):
         Returns:
             list[str]: 需要跑一轮索引的用户 id（升序去重）。
         """
-        rows = status_mapper.select_all_papers(shared_db())
+        rows = status_mapper.select_all_papers()
         stale: set[str] = set()
         for row in rows:
             user_id = str(row.get("user_id") or "")
@@ -292,7 +292,7 @@ class KbServiceImpl(KbService):
             elif has_row:
                 stale.add(user_id)
         stale |= {str(row["user_id"]) for row
-                  in status_mapper.select_users_with_orphan_rows(shared_db())
+                  in status_mapper.select_users_with_orphan_rows()
                   if row.get("user_id")}
         return sorted(stale | self._users_with_orphan_index(rows))
 
@@ -365,7 +365,7 @@ class KbServiceImpl(KbService):
             dict: ``{status, already_running}``，status 恒为 "started"。
         """
         if force:
-            status_mapper.requeue_all(shared_db(), user_id)
+            status_mapper.requeue_all(user_id)
         self.schedule_user_index(user_id)
         return {"status": "started",
                 "already_running": user_id in state.reindex_running}
@@ -423,7 +423,7 @@ class KbServiceImpl(KbService):
         ids = list(dict.fromkeys([*(retry_paper_ids or []),
                                   *(requeue_paper_ids or [])]))
         if ids:
-            status_mapper.requeue(shared_db(), user_id, ids)
+            status_mapper.requeue(user_id, ids)
         self.schedule_user_index(user_id)
         return {"status": "ok"}
 
