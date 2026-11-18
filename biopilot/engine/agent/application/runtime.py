@@ -185,7 +185,7 @@ class Agent:
         skill_registry: SkillRegistry | None = None,   # Skill 注册表；None = 无 skill 体系
         trace_id: str | None = None,   # 继承的追踪 ID；None = 每次 run 自行生成
         memory_context=None,        # MemoryToolsContext | None（记忆工具运行时绑定；多会话进程内每个 Agent 各持一份）
-        run_mutex: RunMutex | None = None,  # 会话运行互斥端口；None 时走内置降级路径
+        run_mutex: RunMutex | None = None,  # 会话运行互斥端口；None = 无锁（显式接线）
     ):
         """
         Args:
@@ -217,7 +217,7 @@ class Agent:
             skill_registry: Skill 注册表(可选)。提供时按 agent_type 计算 L1 <available_skills> 清单块注入 head(静态,每轮重建 head 时原样携带);None 时整块省略零开销
             trace_id: 继承的追踪 ID(可选)。spawn 工具传父 agent 的当前 trace_id,使子 agent 与父共享同一次用户任务的去重池与审计链;None 时每次 run 自行生成新 trace_id(默认,行为不变)
             memory_context: MemoryToolsContext | None(可选)。记忆工具 execute 时经 ContextVar 取的运行时绑定;多会话进程( web 适配层)里每个 Agent 构造时各自传入,run 入口绑定、finally 复位——替代「进程级单例被后装配会话覆盖」的旧语义。None 时 run 不绑定(工具降级或沿用装配期绑定)
-            run_mutex: RunMutex | None(可选)。会话运行互斥端口（``run:{conversation_id}`` 命名锁）;None 时 run 走内置降级路径(从 block_manager 的连接池惰性取锁,历史行为)
+            run_mutex: RunMutex | None(可选)。会话运行互斥端口（``run:{conversation_id}`` 命名锁）;None = 无锁执行（显式接线结果——spawn 子 agent 的 conversation_id 唯一，无需互斥）
 
         """
         # Pull 模式:从唯一注册表按类型加载完整配置
@@ -225,8 +225,8 @@ class Agent:
 
         #: 记忆工具运行时上下文（run 入口绑到 ContextVar，finally 复位）
         self._memory_context = memory_context
-        #: 会话运行互斥端口（run 入口拿 ``run:{conversation_id}`` 锁）；None 时
-        #: run 走内置降级路径（block_manager 的库上惰性取锁，历史行为）
+        #: 会话运行互斥端口（run 入口拿 ``run:{conversation_id}`` 锁）；None =
+        #: 无锁执行（显式接线结果，无运行期兜底构造）
         self._run_mutex = run_mutex
         #: agent 配置内容哈希（审计 agent_started 用）：AGENT.md 正文 + 工具全签名
         self._agent_version = _compute_agent_version(config)

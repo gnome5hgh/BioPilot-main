@@ -9,11 +9,10 @@ from __future__ import annotations
 from biopilot.engine.memory.adapters.agent_state import MySqlAgentStateRepository
 from biopilot.engine.memory.adapters.cursor import MySqlConsolidationCursorStore
 from biopilot.engine.memory.adapters.database import MemoryDB
-from biopilot.engine.memory.adapters.message import first_user_content
 
 __all__ = [
     "get_title", "set_title", "list_history", "list_context_rows",
-    "update_message_meta", "delete_conversation", "list_sessions",
+    "update_message_meta", "delete_conversation",
     "mark_user_deleting", "delete_consolidation_cursor", "purge_user",
 ]
 
@@ -117,35 +116,6 @@ def delete_conversation(user_id: str, conversation_id: str) -> int:
         " WHERE a.agent_id=? AND (a.user_id=? OR a.user_id LIKE CONCAT('deleting:', ?))",
         (conversation_id, user_id, user_id))
     return MySqlAgentStateRepository(db).delete_conversation(user_id, conversation_id)
-
-
-def list_sessions(user_id: str, limit: int = 10,
-                  project_id: str | None = None) -> list[dict]:
-    """列出该用户的历史会话（新→旧），供会话恢复菜单展示。
-
-    Args:
-        user_id: 归属用户。
-        limit: 最多返回的会话数。
-        project_id: 项目过滤（None 不过滤）。
-
-    Returns:
-        dict 列表：agent_id / created_at / message_count / preview。
-    """
-    db = MemoryDB.shared()
-    state = MySqlAgentStateRepository(db)
-    sessions = []
-    for r in state.list_session_rows(user_id, limit, project_id):
-        agent_id = r["agent_id"]
-        first = first_user_content(db, agent_id)
-        sessions.append({
-            "agent_id": agent_id,
-            "created_at": r["created_at"],
-            "message_count": db.execute(
-                "SELECT COUNT(*) AS c FROM bio_message WHERE agent_id=?",
-                (agent_id,)).fetchone()["c"],
-            "preview": (str(first).strip().replace("\n", " ")[:60] if first else ""),
-        })
-    return sessions
 
 
 def mark_user_deleting(target_id: str) -> None:

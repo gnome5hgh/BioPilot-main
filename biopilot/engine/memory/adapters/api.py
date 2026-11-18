@@ -17,7 +17,7 @@ from biopilot.engine.memory.adapters.agent_state import MySqlAgentStateRepositor
 from biopilot.engine.memory.adapters.block import MySqlBlockRepository
 from biopilot.engine.memory.adapters.conversation import (
     delete_consolidation_cursor, delete_conversation, get_title, list_context_rows,
-    list_history, list_sessions, mark_user_deleting, purge_user, set_title,
+    list_history, mark_user_deleting, purge_user, set_title,
     update_message_meta,
 )
 from biopilot.engine.memory.adapters.cursor import MySqlConsolidationCursorStore
@@ -64,7 +64,7 @@ __all__ = [
     "MemoryDB", "NamedLock",
     # 会话级轻量查询与清理
     "get_title", "set_title", "list_history", "list_context_rows",
-    "update_message_meta", "delete_conversation", "list_sessions",
+    "update_message_meta", "delete_conversation",
     "mark_user_deleting", "delete_consolidation_cursor", "purge_user",
     # 组装
     "build_memory", "MemoryHandle", "shared_db",

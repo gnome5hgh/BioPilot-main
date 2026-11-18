@@ -149,6 +149,9 @@ class MySqlAgentStateRepository:
         Args:
             agent_id: 会话标识。
             user_id: 归属过滤（None 不过滤）。
+
+        Returns:
+            AgentState | None：状态对象（memory 为空占位，由应用层动态构建）。
         """
         row = fetch_row(self._db, agent_id, user_id)
         if row is None:

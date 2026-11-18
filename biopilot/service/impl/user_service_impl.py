@@ -8,7 +8,6 @@ from pathlib import Path
 from biopilot.common.utils.paths import safe_component
 from biopilot.service.runtime_state import RuntimeState
 from biopilot.engine.memory.adapters.api import (
-    delete_consolidation_cursor,
     mark_user_deleting,
     purge_user,
 )
@@ -34,10 +33,6 @@ class UserServiceImpl(UserService):
         """物理清除该用户的全部引擎数据（幂等，可重复执行）。"""
         # 记忆域数据（消息/块/历史/游标/状态行）由 memory 适配层一次性清理
         purge_user(target_id)
-        try:
-            delete_consolidation_cursor(target_id)
-        except Exception:
-            logger.warning("删户清理跳过 bio_memory_consolidation_cursor")
         try:
             rag_index_mapper.delete_by_user(target_id)
         except Exception:

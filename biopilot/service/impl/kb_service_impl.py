@@ -115,9 +115,10 @@ class KbServiceImpl(KbService):
 
     def _index_user_kb_locked(self, user_id: str, cfg) -> dict:
         """持有该用户索引锁后执行一轮完整索引（对账 → 逐篇索引 → 清理）。"""
+        
+        db = shared_db()
         from biopilot.engine.rag.adapters.factory import get_rag_service
 
-        db = shared_db()
         svc = get_rag_service(cfg, user_id=user_id, db=db)
 
         # ---- 向量库 ↔ 状态表对账：向量库是块的存储形态，状态表是唯一落点 ----

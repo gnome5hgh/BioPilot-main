@@ -174,7 +174,7 @@ def build_figure_describer(config):
 
     llm = None
     if (getattr(config.vision, "api_key", "") or "").strip():
-        from biopilot.engine.vision.adapters.builders import build_vision_llm
+        from biopilot.engine.vision.adapters.api import build_vision
 
-        llm = build_vision_llm(config)
+        llm = build_vision(config)
     return FigureDescriber(config, llm=llm)

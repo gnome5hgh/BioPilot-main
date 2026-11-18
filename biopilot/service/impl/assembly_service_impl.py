@@ -15,7 +15,7 @@ from pathlib import Path
 
 from biopilot.config import BioPilotConfig, user_cache_root
 from biopilot.service.web_session import WebSession
-from biopilot.engine.agent import Agent, AgentRegistry
+from biopilot.engine.agent import AgentRegistry, build_agent
 from biopilot.engine.intent.adapters.api import (
     JevClient,
     JevUnavailable,
@@ -202,7 +202,7 @@ class AssemblyServiceImpl(AssemblyService):
             return False
         _web_confirm_callback = confirm_callback or _fail_safe_confirm
 
-        agent = Agent(
+        agent = build_agent(
             llm=llm, agent_registry=registry, agent_type="supervisor",
             run_mutex=NamedLock(db.dsn),
             skill_registry=skill_registry,
