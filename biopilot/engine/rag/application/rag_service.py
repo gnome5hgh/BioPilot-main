@@ -10,8 +10,8 @@ import threading
 import time
 
 from biopilot.config import BioPilotConfig
-from biopilot.engine.rag.adapters import components
 from biopilot.engine.rag.domain import IndexOutcome, IndexStatus
+from biopilot.engine.rag.domain.ports import RagComponents
 from biopilot.engine.rag.application.chunker import AcademicChunker
 from biopilot.engine.rag.application.breaker import RetrievalBreaker
 
@@ -37,18 +37,20 @@ class RAGService:
         _embedder/_reranker/_vector_store/_milvus_available/_bm25/_indexer/_retriever/_rewriter: 惰性组件槽位（None 表示未构造，首次访问经双重检查加锁构造）
     """
 
-    def __init__(self, config: BioPilotConfig, user_id: str, db=None):
-        """初始化门面：先把所有组件槽位置空，首次访问才惰性构造。
+    def __init__(self, config: BioPilotConfig, user_id: str,
+                 components: RagComponents):
+        """初始化门面：组件经 provider 包注入，槽位只缓存调用结果。
 
         除 chunker（纯逻辑、构造无副作用）外，编码器/重排器/向量库/BM25 都走
         懒加载——既避免启动时加载数秒的模型，也让不碰检索的测试完全不会导入重依赖。
+        构造细节（Milvus 连接、嵌入/精排客户端、状态库与降级）收在 adapters 的
+        组装缝（``adapters/factory.py``），本类只消费 provider。
 
         Args:
             config: 全局配置对象，包含工作区路径、模型名等。
             user_id: 归属用户（必填）。每个用户派生独立 collection，论文不落
                 本地文件——索引时由平台适配层取回字节、以 ``paper:<id>`` 作文档标识。
-            db: MemoryDB 实例（索引状态落库）；None 时首次用状态才按
-                ``runtime.memory_dsn`` 懒建共享连接池。
+            components: RagComponents，一组惰性 provider（见 domain/ports.py）。
 
         Raises:
             ValueError: user_id 为空——引擎没有无用户的运行形态。
@@ -57,7 +59,7 @@ class RAGService:
             raise ValueError("RAGService 缺少归属用户（user_id）")
         self.user_id = user_id
         self.config = config
-        self._db = db
+        self._components = components
         # 可重入锁，保护整个索引/检索流程，确保并发下状态一致
         self.lock = threading.RLock()
 
@@ -73,6 +75,9 @@ class RAGService:
         self._rewriter = None          # 改写器 (QueryRewriter)
         self._image_store = None       # 图表原图存取器 (ImageStore)
         self._state_store = None       # 索引状态存取器（MySQL / 进程内）
+        self._pdf_extractor = None     # PDF 版面抽取器
+        self._figure_extractor = None  # 图表定位/渲染器
+        self._figure_describer = None  # 检索用图注描述器
 
         # 纯逻辑组件，无副作用，直接构造。切块参数读配置（rag.chunker.*），
         # 配方哈希据此失效——改 YAML 即触发全量重索引。
@@ -96,7 +101,7 @@ class RAGService:
         if self._embedder is None:
             with self.lock:
                 if self._embedder is None:
-                    self._embedder = components.build_embedder(self.config)
+                    self._embedder = self._components.embedder()
         return self._embedder
 
     def _ensure_reranker(self):
@@ -108,7 +113,7 @@ class RAGService:
         if self._reranker is None:
             with self.lock:
                 if self._reranker is None:
-                    self._reranker = components.build_reranker(self.config)
+                    self._reranker = self._components.reranker()
         return self._reranker
 
     def _ensure_vector_store(self):
@@ -127,10 +132,10 @@ class RAGService:
         if self._vector_store is None:
             with self.lock:
                 if self._vector_store is None:
-                    dim = self._ensure_embedder().dim
                     try:
-                        self._vector_store = components.build_vector_store(
-                            self.config, self.user_id, dim)
+                        # 维度从编码器读（建集合时定死）；测试注入假件后维度随假件
+                        self._vector_store = self._components.vector_store(
+                            self._ensure_embedder().dim)
                     except Exception as e:
                         raise RuntimeError(
                             f"Milvus 未连接（{self.config.rag.storage.uri}）：{e}。"
@@ -162,6 +167,36 @@ class RAGService:
             self._milvus_checked_at = now
         return self._milvus_available
 
+    def _ensure_pdf_extractor(self):
+        """惰性获取 PDF 版面抽取器（provider 交付）。
+
+        Returns:
+            PdfExtractor 端口实现。
+        """
+        if self._pdf_extractor is None:
+            self._pdf_extractor = self._components.pdf_extractor()
+        return self._pdf_extractor
+
+    def _ensure_figure_extractor(self):
+        """惰性获取图表定位/渲染器（vision 域的重型依赖随 provider 惰性导入）。
+
+        Returns:
+            FigureExtractor 端口实现。
+        """
+        if self._figure_extractor is None:
+            self._figure_extractor = self._components.figure_extractor()
+        return self._figure_extractor
+
+    def _ensure_figure_describer(self):
+        """惰性获取检索用图注描述器（视觉模型不可用时 available=False）。
+
+        Returns:
+            FigureDescriberPort 端口实现。
+        """
+        if self._figure_describer is None:
+            self._figure_describer = self._components.figure_describer()
+        return self._figure_describer
+
     def _ensure_bm25(self):
         """惰性获取 BM25 索引：首次访问时创建。
 
@@ -191,7 +226,7 @@ class RAGService:
         Returns:
             list[Figure]: 检测到的图与表区域；检测不出（扫描件/纯图）为空列表。
         """
-        extractor = components.build_figure_extractor()
+        extractor = self._ensure_figure_extractor()
         return extractor.extract(source, render_images=False)
 
     def render_figures(self, source: str | bytes, figures) -> None:
@@ -204,7 +239,7 @@ class RAGService:
             source: PDF 文件绝对路径，或 PDF 字节（平台论文不落盘）。
             figures: 要渲染的 Figure 列表（就地修改）。
         """
-        components.build_figure_extractor().render(source, figures)
+        self._ensure_figure_extractor().render(source, figures)
 
     @property
     def image_store(self):
@@ -214,7 +249,7 @@ class RAGService:
             ImageStore: 存取器。
         """
         if self._image_store is None:
-            self._image_store = components.build_image_store(self.config)
+            self._image_store = self._components.image_store()
         return self._image_store
 
     @property
@@ -232,39 +267,21 @@ class RAGService:
         if self._state_store is None:
             with self.lock:
                 if self._state_store is None:
-                    from biopilot.engine.rag.adapters.index_state_store import (
-                        IndexStateStore, MemoryIndexStateStore,
-                    )
-                    try:
-                        db = self._db or components.default_db(self.config)
-                    except Exception as e:
-                        logger.warning(
-                            "索引状态库不可用，本次运行使用进程内状态"
-                            "（重启后会全量重扫）：%s", e)
-                        self._state_store = MemoryIndexStateStore()
-                    else:
-                        self._state_store = IndexStateStore(db, self.user_id)
+                    self._state_store = self._components.state_store()
         return self._state_store
 
-    def bind_db(self, db) -> None:
-        """补挂索引状态连接池（首次构造没传、之后的调用方有现成池时）。
+    def rebind_state_store(self, store) -> None:
+        """替换索引状态存取器（组装缝在拿到现成连接池后升级实现用）。
 
         进程内实现会就地换成 MySQL 实现；已经是 MySQL 实现就不动——它连着同一个
         库，换池没有收益，反而会丢掉正在使用的对象。
 
         Args:
-            db: MemoryDB 实例；None 表示不做任何事。
+            store: IndexStateStore 端口实现；None 表示不做任何事。
         """
-        if db is None:
+        if store is None:
             return
-        self._db = db
-        if self._state_store is None:
-            return
-        from biopilot.engine.rag.adapters.index_state_store import (
-            IndexStateStore, MemoryIndexStateStore,
-        )
-        if isinstance(self._state_store, MemoryIndexStateStore):
-            self._state_store = IndexStateStore(db, self.user_id)
+        self._state_store = store
 
     # ---------- 索引器/检索器视图（延迟创建） ----------
     def get_indexer(self):
@@ -306,7 +323,7 @@ class RAGService:
         if self._rewriter is None:
             from biopilot.engine.rag.application.query_rewriter import QueryRewriter
             self._rewriter = QueryRewriter(
-                components.build_rewriter_llm(self.config),
+                self._components.rewriter_llm(),
                 history_limit=self.config.rag.query_rewrite.history_messages,
                 rewrite_num=self.config.rag.query_rewrite.rewrite_num,
                 max_queries=self.config.rag.query_rewrite.max_queries,

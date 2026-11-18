@@ -18,8 +18,8 @@ from biopilot.engine.rag.adapters.pdf_extract import extract_pdf, extract_pdf_by
 
 __all__ = [
     "build_embedder", "build_reranker", "build_vector_store", "build_image_store",
-    "build_figure_extractor", "build_rewriter_llm", "default_db",
-    "extract_pdf", "extract_pdf_bytes",
+    "build_figure_extractor", "build_figure_describer", "build_rewriter_llm",
+    "default_db", "extract_pdf", "extract_pdf_bytes",
 ]
 
 
@@ -156,3 +156,25 @@ def build_rewriter_llm(config):
         model=qr.model or config.llm.model,
     )
     return LLMClient(llm_cfg)
+
+
+def build_figure_describer(config):
+    """构造检索用图注描述器（视觉模型客户端由组装缝注入）。
+
+    视觉模型未配 api_key 时 llm 传 None——FigureDescriber 以 ``available=False``
+    暴露不可用，索引照常进行、媒体块不带描述（降级语义保留）。
+
+    Args:
+        config: BioPilotConfig，取 ``vision`` 段。
+
+    Returns:
+        FigureDescriber：检索用图注描述器。
+    """
+    from biopilot.engine.vision.adapters.api import FigureDescriber
+
+    llm = None
+    if (getattr(config.vision, "api_key", "") or "").strip():
+        from biopilot.engine.vision.adapters.builders import build_vision_llm
+
+        llm = build_vision_llm(config)
+    return FigureDescriber(config, llm=llm)

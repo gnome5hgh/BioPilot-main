@@ -47,7 +47,6 @@ from biopilot.engine.rag.domain import (
     Section,
     indexed_text,
 )
-from biopilot.engine.rag.adapters import components
 from biopilot.engine.rag.application.table import table_markdown
 
 from concurrent.futures import ThreadPoolExecutor
@@ -298,9 +297,10 @@ class RagIndexer:
             _FileContent: 解析产物（title/sections）。
         """
         if data is not None:
-            extracted = components.extract_pdf_bytes(data, title or "", digest=digest)
+            extracted = self.service._ensure_pdf_extractor().extract_bytes(
+                data, title or "", digest=digest)
         else:
-            extracted = components.extract_pdf(str(path), title or "")
+            extracted = self.service._ensure_pdf_extractor().extract(str(path), title or "")
         # 每个渲染块的位置随它拆出的每一行重复出现，分节后即成为该章节的
         # 位置集合（一个块内的行同属一段，位置相同是准确的）。
         lines: list[tuple[str, tuple[int, int, int, int, int]]] = []
@@ -425,9 +425,7 @@ class RagIndexer:
         并发跑（一次全量重建有数百张图，串行会把建索引拖到不可接受）；单张失败只让那一块
         退回原形态。
         """
-        from biopilot.engine.vision.application.describer import FigureDescriber
-
-        describer = FigureDescriber(self.service.config)
+        describer = self.service._ensure_figure_describer()
         if not describer.available:
             logger.warning("视觉模型未配置，媒体块不带描述入库（图块将只剩图注可检索）")
             return

@@ -48,28 +48,22 @@ class FigureDescriber:
     （未配 api_key）时由调用方走降级——这里用 :attr:`available` 显式暴露可用性，不抛异常。
 
     Attributes:
-        _config: BioPilotConfig（取 ``vision`` 段建客户端）。
-        _llm: 视觉模型客户端；可注入（测试传假件）。
+        _llm: 视觉模型客户端（``ModelClient`` 端口；组装缝注入，测试传假件）。
     """
 
     def __init__(self, config=None, llm=None):
         """Args:
-            config: BioPilotConfig；None 时从环境装载（便于直接手跑）。
-            llm: 视觉模型客户端；None 时按 ``config.vision`` 惰性构造。
+            config: 保留参数位（历史签名兼容；不再用于构造客户端）。
+            llm: 视觉模型客户端；None = 视觉模型未配置（available=False）。
+                客户端的构造收在组装缝（``adapters/builders.py`` / rag 的
+                ``components.build_figure_describer``），本类只消费注入的实例。
         """
-        if config is None:
-            from biopilot.config import BioPilotConfig
-
-            config = BioPilotConfig.from_env()
-        self._config = config
         self._llm = llm
 
     @property
     def available(self) -> bool:
-        """视觉模型是否可用（未配 api_key 即不可用——索引照常，只是不带描述）。"""
-        if self._llm is not None:
-            return True
-        return bool((getattr(self._config.vision, "api_key", "") or "").strip())
+        """视觉模型是否可用（未注入即不可用——索引照常，只是不带描述）。"""
+        return self._llm is not None
 
     def describe(self, figure) -> str:
         """描述一张图，返回纯文本；拿不到完整描述就退回能拿到的最好结果。
@@ -113,11 +107,6 @@ class FigureDescriber:
         from biopilot.engine.llm import UserMessage
 
         llm = self._llm
-        if llm is None:
-            from biopilot.engine.vision.adapters.builders import build_vision_llm
-
-            llm = build_vision_llm(self._config)
-            self._llm = llm
         message = UserMessage(content=[
             {"type": "text", "text": _DESCRIBE_PROMPT},
             {"type": "image_url", "image_url": {"url": data_url}},
