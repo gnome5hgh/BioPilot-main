@@ -2,7 +2,7 @@
 
 ## Scope
 
-- 覆盖 `engine/` 核心运行层——按三层架构组织的 agent 系统（领域 / 应用 / 适配）。子包内部实现以源码为准。
+- 覆盖 `engine/` 核心运行层——按三层架构组织的 agent 系统，**适配层 = 模块对外面**（对外功能 + 出向实现都在其中）。子包内部实现以源码为准。
 - 各子包各有自己的 manifest（见 Routing）；根 manifest 的硬红线在本层同样成立，这里不重复。
 
 ## Module Positioning
@@ -34,9 +34,14 @@
 ## Core Logic
 
 - **只放子包**，不放裸 `.py` 模块（外加本 manifest 与 `__init__.py`）。散在根下的模块按「服务于谁」收进子包；跨包共享的叶子进 `biopilot/common/`，不要让 engine 兼任 common 层。
-- **子包内部按三层分**：`domain/`（本域词汇与契约：实体/DTO/schema/**端口**，零外部依赖；第三方词汇库仅 pydantic/yaml——数据校验与随包知识库解析，无 I/O 无协议，类型词汇用 TYPE_CHECKING 守卫）、`application/`（编排与用例：流程、循环、状态机；**不得构造外部世界适配器**）、`adapters/`（外部世界翻译：模型协议、SQL、对象存储、子进程、HTTP 判定服务）。另有 `config/`（组件行为参数，跟组件走）与 `constants/`（本包词汇）——这两者不属于三层，是正交的参数与词汇载体。新增子包照这套分。
+- **子包内部按三层分**：`domain/`（本域词汇与契约：实体/DTO/schema/**端口**，零外部依赖零 I/O；第三方词汇库仅 pydantic/yaml——数据校验与随包知识库解析，类型词汇用 TYPE_CHECKING 守卫）、`application/`（编排与用例：流程、循环、状态机；**不得构造外部世界适配器、不得 import 本模块 adapters**）、`adapters/`（**模块对外面**：对外功能入口 `api.py` + 出向实现（模型协议、SQL、对象存储、子进程、HTTP 判定服务），二者都供模块外调用）。另有 `config/`（组件行为参数，跟组件走）与 `constants/`（本包词汇）——这两者不属于三层，是正交的参数与词汇载体。新增子包照这套分。
+- **适配层 = 模块对外面（R1）**：模块外（FastAPI 侧、其它 engine 模块、`agents/` 插件）只许 import `<M>`（根 = 公开面别名）或 `<M>.adapters.*`；`<M>.application` / `.domain` / `.config` / `.constants` 一律不可见。模块根 `__init__.py` 只准再导出 `.adapters` 的公开契约（`adapters/api.py`）。出向实现与对外功能**同住 adapters、不拆 infrastructure**（既定裁定）。
+- **适配器判据（可测）**：模块 import 外部世界客户端库（`openai` / `httpx` / `pymysql` / `pymilvus` / `minio` / `fitz` / `subprocess`）→ adapters；纯编排与算法 → application；词汇/契约/端口 → domain。本地文件系统、`importlib` 动态加载、ContextVar 不算外部世界（插件发现、技能物化因此归 application）。
 - **适配器判据**：模块 import 外部世界客户端库（`openai` / `httpx` / `pymysql` / `pymilvus` / `minio` / `fitz` / `subprocess`）→ adapters；纯编排与算法 → application；词汇/契约/端口 → domain。本地文件系统、`importlib` 动态加载、ContextVar 不算外部世界（插件发现、技能物化因此归 application）。
-- **应用层依赖端口，不依赖适配器实现**：跨「外部世界」的依赖（模型、存储、对象存储、判定服务、互斥锁）在 domain/ 里以 Protocol/ABC 声明端口（`llm/domain/port.py` 的 `ModelClient`、`memory/domain/ports.py`、`agent/domain/ports.py` 的 `RunMutex`、`rag/domain/ports.py`），实现放 adapters，组装根注入。例外白名单（application → adapters 直接 import）：① 目标适配器模块自身无客户端库 import（纯函数翻译，如 `llm/adapters/wire.py`）；② 自有持久化（memory 的 database/message/block/agent_state/named_lock、rag 的 index_state_store——MySQL 是硬依赖自有设施，非可替换外部服务）；③ 各域的构造工厂（`rag/adapters/components.py`、`vision/adapters/builders.py`——组装根在域内的延伸，惰性构造语义的落点）。白名单是唯一豁免清单：新增豁免必须同步更新架构守护测试（tests/core/test_architecture.py）。
+- **端口两族，实现归 adapters**：跨「外部世界」的端口在 domain/ 里以 Protocol/ABC 声明——消费面端口（`llm/domain/port.py` 的 `ModelClient`、`memory/domain/ports.py` 的三存储消费口、`agent/domain/ports.py` 的 `RunMutex`）由另一个应用子系统实现；存储面端口（memory 的 Block/Message/AgentState/Cursor 仓储、security 的 `AuditSink`、skills 的 `SkillSource` 族、rag 的组件五口）由 adapters 实现并经组装缝注入。**application → 本模块 adapters 的 import 为零**（旧「自有持久化/域内工厂」白名单已废除，无豁免）；跨模块一律 import 对方 `adapters.api`（对方 application/domain 私有）。共享词汇包 `engine/constants/` 与 `biopilot/common` 任何层可用。
+- **组装缝唯一**：每个模块在 `adapters/api.py` 提供 `build_xxx(...)`，是本模块唯一的构造入口；FastAPI 侧 `service/impl/assembly_service_impl.py` 是全系统组装根（唯一调用各模块 build 的地方）。域内低层 builder（`rag/adapters/components.py`、`vision/adapters/builders.py`）只被本域组装缝调用。
+- **mapper 纯委托**：平台侧 `mapper/` 对引擎表不持有 SQL，逐条委托模块适配层（memory 的会话查询、rag 的索引状态）；新增引擎表访问先落到模块 adapters，再由 mapper 委托。
+- **领域层零 I/O**：`domain/` 禁 `open`/`read_text`/`yaml.safe_load`/DB/HTTP（随包知识库 YAML 的读取在 `intent/adapters/taxonomy_loader.py`）。
 - **枚举一枚举一文件**：各子包的 `constants/` 里，枚举放 `enums/<snake_case>.py`，其余常量放同层 `constants.py`；`constants/__init__.py` 只做再导出。判据是「有没有第二个消费方」。
 - **两类 `config/`**：顶层 `biopilot/config/` 是设置页（数据库）与环境变量可调的全局参数；子包的 `config/` 放该包**组件自己的行为参数**（调用点各给一套、不进全局配置）。后者不是层间搬运的数据，故不住 `domain/dto/`。
 - **`rag` 与 `vision` 必须同层**：rag 的媒体块要向 vision 取图与视觉描述（core 内部的惰性 import），分开摆会让包级依赖成环。
@@ -46,7 +51,7 @@
 
 - `agent/application/runtime.py` — ReAct 主循环
 - `security/application/middleware/base.py` — 安全中间件协议与异常体系
-- `rag/application/rag_service.py` — RAG 门面（构造收口见 `rag/adapters/factory.py`）
+- `rag/application/rag_service.py` — RAG 门面（组件构造收口见 `rag/adapters/factory.py` 的 `build_components`）
 - `tools/domain/entity/tool.py` — Tool 抽象与安全元数据
 - `llm/domain/port.py` — ModelClient 端口
 
@@ -59,7 +64,7 @@
 ## Dependencies And Collaboration
 
 - 本层被 `api/`（入口与装配）与 `service/` 依赖；本层不反向依赖它们。
-- 子包之间的主要依赖：`agent` → `llm` / `tools`（契约）/ `skills` / `memory` / `security` / `intent`；`rag` → `vision`；`security` → `biopilot/common` 与 `constants`；`intent` 与 `memory` 互相独立。
+- 子包之间的主要依赖（全部经对方 adapters）：`agent` → `llm` / `tools` / `skills` / `memory` / `security` / `intent`；`rag` → `vision` / `llm` / `memory`；`security` / `skills` → `tools`；`intent` 与 `memory` 互相独立。
 - 与各 agent 通过 `Tool` 抽象协作（`tools/domain/entity/tool.py`），不是硬编码调用链。
 
 ## Investigation Rule

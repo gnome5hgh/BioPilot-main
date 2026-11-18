@@ -25,6 +25,7 @@ intent/
 - 用两层判定产出单类别信号（+ 置信度、来源、确定性实体）。
 - 装载并校验随包发布的意图知识库。
 - 在根 agent 构造 head 时按需注入判定结果。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（IntentService/Taxonomy/load_taxonomy/JevClient + `build_intent`），根 `__init__` 只做它的别名；YAML 装载在 `adapters/taxonomy_loader.py`（领域层零 I/O）。
 
 ## Core Logic
 

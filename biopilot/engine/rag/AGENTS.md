@@ -27,6 +27,7 @@ rag/
 - 本地版面解析 PDF，按节切块并丢弃残渣，产出带页码与坐标的块。
 - 把块写进向量库与 BM25 索引（两者用同一份带前缀文本），并维护索引状态（MySQL，每用户一行）。
 - 对外提供混合检索：稀疏 + 稠密融合后精排，返回有序块。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（RAGService/get_rag_service/索引状态操作/文档词汇 + `build_rag`/`build_components`），根 `__init__` 只做它的别名；组件构造收在 factory.build_components（RagComponents provider 包）。
 
 ## Core Logic
 

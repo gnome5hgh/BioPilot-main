@@ -27,6 +27,7 @@
   - `orchestration/` — 子 agent 派发（唯一的调度工具）
   - `tool_result_store.py` — 大工具结果写 MinIO（本地回退）
 - `constants/` — 摘要里跨模块读写的键名（`SUMMARY_TERMINAL` 等）与语义根词表
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（Tool/ToolResult/校验/runtime_context/make_tools/外置/常用工具类），根 `__init__` 只做它的别名；**spawn 不进 api.py**（反向依赖 agent，按叶子路径单独 import）。
 
 ## Responsibilities
 

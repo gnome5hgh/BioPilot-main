@@ -26,6 +26,7 @@ security/
 - 定义工具调用的上下文与中间件协议，串成 before / 执行 / after 的洋葱。
 - 拦下不该进上下文的内容、不该执行的命令，并校验平台资源引用。
 - 合并全部升级因后统一弹一次确认，并把决策落审计。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（四中间件 + 类型 + AuditSink/MySqlAuditSink + build_classifier + `build_middlewares`），根 `__init__` 只做它的别名；审计中间件只收 AuditSink。
 
 ## Core Logic
 
@@ -37,10 +38,10 @@ security/
 
 ## Key Entry Points
 
-- `application/application/middleware/base.py` — `SecurityMiddleware` 协议与异常体系
-- `application/application/middleware/command_guard.py` — 命令防护（接管 `format="shell_command"` 参数）
-- `application/application/middleware/policy_engine.py` — 唯一的确认决策点
-- `application/application/middleware/audit.py` — 审计落盘（SQL 翻译在 `adapters/audit_store.py`）
+- `application/middleware/base.py` — `SecurityMiddleware` 协议与异常体系
+- `application/middleware/command_guard.py` — 命令防护（接管 `format="shell_command"` 参数）
+- `application/middleware/policy_engine.py` — 唯一的确认决策点
+- `application/middleware/audit.py` — 审计编排（落盘经 `AuditSink` 端口；MySQL 实现在 `adapters/audit_store.py`）
 - `adapters/sandbox.py` — 进程外执行能力（`run_python` / `run_shell` 的容器墙）
 
 ## Usage And Change Notes

@@ -28,6 +28,7 @@ agent/
 - 保持会话的 in-context 窗口，并在超限时触发压缩。
 - 发现 agent 插件并加载其工具与系统提示词。
 - 唯一持有跨调用状态的包（两个容器都在这里）。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（Agent/AgentRegistry/context_usage/get_run_state + `build_agent`），根 `__init__` 只做它的别名；本模块无出向实现（模型/记忆/工具都经别的模块的功能面）。
 
 ## Core Logic
 

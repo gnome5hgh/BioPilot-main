@@ -28,6 +28,7 @@ memory/
 - 落盘全部会话消息，并按 in-context 窗口回放（Recall 完整）；消息按 `session_id` 分组，同一会话的 supervisor 与子 agent 共享分组、各自独立 `agent_id`。
 - 提供记忆块的增删改查、版本快照与并发保护。
 - 在窗口过长时压缩 in-context（只改窗口，不删 SQL 行）。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（四个 manager + 压缩助手 + 消费/存储端口 + MemoryDB/NamedLock + 会话查询 + `build_memory`），根 `__init__` 只做它的别名；application 只收存储端口，SQL 全部在 adapters。
 - 每轮收尾把新对话排进后台 debounce 队列，空闲窗口后整合进记忆块。
 
 ## Core Logic

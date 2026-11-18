@@ -27,6 +27,7 @@ vision/
 - 用 pdffigures2 式管线从页面拿到图区候选，做打分选优与互斥。
 - 提供图区图像、图注、编号、坐标词等字段给消费方。
 - 调视觉模型做结构化看图，并承担全链路降级。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（FigureAnalyzer/FigureDescriber/FigureExtractor/render_figure/FigureType + `build_vision`），根 `__init__` 只做它的别名；describer 只收注入的 ModelClient。
 
 ## Core Logic
 

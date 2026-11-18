@@ -27,6 +27,7 @@ llm/
 - 提供 `chat()` 与 `chat_stream()`，以及把工具转成 OpenAI function calling JSON Schema 的出口。
 - 定义消息的进出漏斗与角色的类型化表达。
 - 承载响应信封：结束原因、token 用量、模型快照、思维链、拒答、补全 id。
+- **模块公开面（R1，守护测试锁死）**：公开面 = `adapters/api.py`（LLMClient/StructuredOutput/消息家族/ModelClient 端口/tool_to_openai_schema + `build_llm`），根 `__init__` 只做它的别名。
 
 ## Core Logic
 
