@@ -13,6 +13,9 @@ from biopilot.engine.memory.domain.errors import ConcurrentUpdateError
 from biopilot.engine.memory.adapters.database import MemoryDB
 from biopilot.engine.memory.domain.schemas.block import Block
 
+#: CAS 冲突后的重试上限：重试意味着重读最新值并重放 mutator（要求 mutator 是纯函数）。
+_CAS_MAX_RETRIES = 3
+
 __all__ = ["insert_block", "select_block", "select_block_by_label", "select_blocks",
            "update_block", "update_block_label", "delete_block", "checkpoint_block",
            "select_block_history", "restore_block_history"]
@@ -231,3 +234,114 @@ def restore_block_history(db: MemoryDB, history_id: int, user_id: str) -> dict:
     if row is None:
         raise KeyError(f"bio_memory_block_history id={history_id} not found")
     return dict(row)
+
+
+class MySqlBlockRepository:
+    """``BlockRepository`` 的 MySQL 实现：SQL 翻译 + 事务/行锁/CAS 重放。
+
+    应用层不变式（read_only / limit）不在这里——``mutate`` 只负责存储机制，
+    业务校验由应用层传入的 mutator 抛领域错误。行 → Block 的翻译也收在本类，
+    应用层只见领域对象。
+    """
+
+    def __init__(self, db: MemoryDB, user_id: str):
+        """绑定连接与归属用户（用户域实例：所有读写都限定在该用户名下）。
+
+        Args:
+            db: 数据库连接（需已初始化）。
+            user_id: 归属用户（行级隔离键，必填）。
+        """
+        if not user_id:
+            raise ValueError("MySqlBlockRepository 需要 user_id（行级隔离键）")
+        self._db = db
+        self._user_id = user_id
+
+    @staticmethod
+    def _to_block(row: dict) -> Block:
+        """把 DB 行转回 Block（metadata_ / read_only 从 JSON/整型还原）。"""
+        return Block(
+            id=row["id"], label=row["label"], value=row["value"], limit=row["limit"],
+            description=row["description"],
+            metadata_=json.loads(row["metadata_"]) if row["metadata_"] else {},
+            read_only=bool(row["read_only"]),
+            version=row["version"],
+        )
+
+    def list_blocks(self) -> list[Block]:
+        """全部块（按创建时间升序，保证 list_blocks 顺序稳定）。"""
+        return [self._to_block(r) for r in select_blocks(self._db, self._user_id)]
+
+    def get_by_label(self, label: str) -> Block | None:
+        """按 label 取块（首个命中）；不存在返回 None。"""
+        row = select_block_by_label(self._db, label, self._user_id)
+        return self._to_block(row) if row else None
+
+    def get_by_id(self, block_id: str) -> Block | None:
+        """按 id 取块；不存在返回 None。"""
+        row = select_block(self._db, block_id, self._user_id)
+        return self._to_block(row) if row else None
+
+    def create(self, block: Block) -> None:
+        """插入新块（初始版本号 1）。"""
+        insert_block(self._db, block, self._user_id, version=1)
+
+    def mutate(self, label: str, mutator) -> Block | None:
+        """一次持锁事务内读-改-写；CAS 冲突在最新值上重放 mutator。
+
+        Args:
+            label: 目标块标签。
+            mutator: 接收当前 Block、返回新值的纯函数；None 表示不改。
+
+        Returns:
+            更新后的 Block；mutator 返回 None 时为 None。
+        """
+        for _ in range(_CAS_MAX_RETRIES):
+            try:
+                with self._db.transaction():
+                    row = select_block_by_label(self._db, label, self._user_id,
+                                                for_update=True)
+                    if row is None:
+                        raise KeyError(f"block {label} not found")
+                    block = self._to_block(row)
+                    new_value = mutator(block)
+                    if new_value is None:
+                        return None
+                    # 快照 → CAS 写入（版本被并发推进时 update_block 抛冲突）
+                    checkpoint_block(self._db, block.id, block.label, block.value,
+                                     block.limit, block.description, {},
+                                     block.version, user_id=self._user_id)
+                    update_block(self._db, block.id, new_value,
+                                 expected_version=block.version,
+                                 user_id=self._user_id)
+                    block_id = block.id
+                return self._to_block(select_block(self._db, block_id, self._user_id))
+            except ConcurrentUpdateError:
+                continue          # 重读最新值后重放 mutator（纯函数，重放无损）
+        raise ConcurrentUpdateError(label)
+
+    def update_value(self, block_id: str, value: str, expected_version: int) -> None:
+        """CAS 写入原语（回滚路径用）。"""
+        update_block(self._db, block_id, value,
+                     expected_version=expected_version, user_id=self._user_id)
+
+    def update_label(self, block_id: str, label: str) -> None:
+        """原地改写块 label（迁移专用）。"""
+        update_block_label(self._db, block_id, label, self._user_id)
+
+    def delete(self, block_id: str) -> None:
+        """物理删除块行。"""
+        delete_block(self._db, block_id, self._user_id)
+
+    def checkpoint(self, block: Block, version: int = 0) -> None:
+        """手动快照（version=0 区分于「更新前自动快照」）。"""
+        checkpoint_block(self._db, block.id, block.label, block.value, block.limit,
+                         block.description, block.metadata_, version,
+                         user_id=self._user_id)
+
+    def history(self, block_id: str) -> list[dict]:
+        """该块的全部历史快照行（从旧到新）。"""
+        return select_block_history(self._db, block_id, self._user_id)
+
+    def restore_snapshot(self, history_id: int) -> dict:
+        """取指定历史快照行；不存在抛 KeyError。"""
+        return restore_block_history(self._db, history_id, self._user_id)

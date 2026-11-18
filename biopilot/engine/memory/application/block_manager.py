@@ -5,17 +5,18 @@
 +1；写入走 CAS（带期望版本的条件更新），版本被并发推进时拒绝而非静默覆盖。
 读-改-写类操作（追加/替换/删除行）必须走 `mutate_block`——它把整段序列放进一次
 持锁事务，避免两个并发写者各自基于同一份旧值计算后互相抹掉。
+
+本类只依赖 ``BlockRepository`` 端口（MySQL 实现在 adapters），业务不变式
+（read_only / limit / 纯函数重放）全部在这里持有。
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Callable
 
 from biopilot.engine.memory.constants import DEFAULT_ASSISTANT, DEFAULT_PROFILE
 from biopilot.engine.memory.domain.errors import BlockLimitExceeded, ConcurrentUpdateError
-from biopilot.engine.memory.adapters import block as block_orm
-from biopilot.engine.memory.adapters.database import MemoryDB
+from biopilot.engine.memory.domain.ports import BlockRepository
 from biopilot.engine.memory.domain.schemas.block import Block
 
 __all__ = ["BlockManager"]
@@ -23,9 +24,6 @@ __all__ = ["BlockManager"]
 logger = logging.getLogger(__name__)
 
 _READ_ONLY = "block is read-only"
-
-#: CAS 冲突后的重试上限：重试意味着重读最新值并重放 mutator（要求 mutator 是纯函数）。
-_CAS_MAX_RETRIES = 3
 
 #: 旧核心块 label → 新 label（一次性迁移映射：human/persona 收敛为 profile/assistant）
 _LEGACY_LABELS = {"human": "profile", "persona": "assistant"}
@@ -39,14 +37,15 @@ class BlockManager:
     """核心块业务层：持有 read_only / limit 不变式，维护写前快照历史链。
 
     Attributes:
-        db: MemoryDB，bio_memory_block/bio_memory_block_history 表的连接
+        blocks: BlockRepository，块与历史快照的存储端口
+        user_id: 归属用户（行级隔离键）
     """
 
-    def __init__(self, db: MemoryDB, user_id: str):
+    def __init__(self, blocks: BlockRepository, user_id: str):
         """初始化块管理器（用户域实例：本实例所有块读写都限定在该用户名下）。
 
         Args:
-            db: 数据库连接（需已初始化）。
+            blocks: 块存储端口（MySqlBlockRepository 或测试假件）。
             user_id: 归属用户（行级隔离键，必填）。装配层传网关携带的 user_id
                 （信任边界：内网带入即真相）。
 
@@ -55,28 +54,30 @@ class BlockManager:
         """
         if not user_id:
             raise ValueError("BlockManager 需要 user_id（多用户行级隔离的键，缺省即拒绝）")
-        self.db = db
+        self.blocks = blocks
         self.user_id = user_id
 
-    def _to_schema(self, row: dict) -> Block:
-        """把 DB 行转回 Block 模型（metadata_ / read_only 从 JSON/整型还原）。
+    def _invariants(self, block: Block, new_value: str | None) -> str | None:
+        """写前业务校验：read_only 拒写、limit 超限拒绝。
 
         Args:
-            row: 数据库行（dict 形式，含 id, label, value, limit, description,
-                metadata_, read_only, version）。
+            block: 当前块（含 read_only 与 limit）。
+            new_value: mutator 算出的新值；None 表示「判定不改」，直接放行。
 
         Returns:
-            填充好的 Block 实例。
+            new_value 原样（校验通过）。
 
-        注意：metadata_ 在 DB 中为 JSON 字符串，需反序列化为 dict。
+        Raises:
+            ValueError: 块为 read_only。
+            BlockLimitExceeded: 新值超过块上限。
         """
-        return Block(
-            id=row["id"], label=row["label"], value=row["value"], limit=row["limit"],
-            description=row["description"],
-            metadata_=json.loads(row["metadata_"]) if row["metadata_"] else {},
-            read_only=bool(row["read_only"]),
-            version=row["version"],
-        )
+        if new_value is None:
+            return None
+        if block.read_only:
+            raise ValueError(_READ_ONLY)
+        if len(new_value) > block.limit:
+            raise BlockLimitExceeded(block.label, block.limit)
+        return new_value
 
     def _db_history(self, label: str) -> list[dict]:
         """测试辅助：按 label 取该块的历史快照。
@@ -87,10 +88,10 @@ class BlockManager:
         Returns:
             该块的历史快照列表（bio_memory_block_history 表行），若块不存在返回空列表。
         """
-        row = block_orm.select_block_by_label(self.db, label, self.user_id)
-        if row is None:
+        block = self.blocks.get_by_label(label)
+        if block is None:
             return []
-        return self.get_block_history(row["id"])
+        return self.blocks.history(block.id)
 
     def create_block(self, label: str, value: str, limit: int = 2000,
                      description: str | None = None,
@@ -111,7 +112,7 @@ class BlockManager:
         b.limit = limit
         b.description = description
         b.read_only = read_only
-        block_orm.insert_block(self.db, b, user_id=self.user_id, version=1)
+        self.blocks.create(b)
         return b
 
     def get_block(self, block_id: str) -> Block:
@@ -126,10 +127,10 @@ class BlockManager:
         Raises:
             KeyError: 当 block_id 不存在时。
         """
-        row = block_orm.select_block(self.db, block_id, self.user_id)
-        if row is None:
+        block = self.blocks.get_by_id(block_id)
+        if block is None:
             raise KeyError(f"block {block_id} not found")
-        return self._to_schema(row)
+        return block
 
     def get_block_by_label(self, label: str) -> Block | None:
         """按 label 取块；不存在返回 None（工具层据此判断「该建还是该报错」）。
@@ -140,8 +141,7 @@ class BlockManager:
         Returns:
             块对象或 None。
         """
-        row = block_orm.select_block_by_label(self.db, label, self.user_id)
-        return self._to_schema(row) if row else None
+        return self.blocks.get_by_label(label)
 
     def get_block_history(self, block_id: str) -> list[dict]:
         """按块 id 返回其全部历史快照（从旧到新，即 bio_memory_block_history 表行）。
@@ -152,7 +152,7 @@ class BlockManager:
         Returns:
             该块的历史快照列表（含 version/value 等列）；无历史时为空列表。
         """
-        return block_orm.select_block_history(self.db, block_id, self.user_id)
+        return self.blocks.history(block_id)
 
     def migrate_legacy_labels(self) -> list[str]:
         """把旧核心块 label（human/persona）迁移为 profile/assistant（幂等）。
@@ -171,7 +171,7 @@ class BlockManager:
             if self.get_block_by_label(new) is not None:
                 logger.warning("label 迁移跳过：%s 与 %s 并存，请人工处理", old, new)
                 continue
-            block_orm.update_block_label(self.db, old_block.id, new, self.user_id)
+            self.blocks.update_label(old_block.id, new)
             migrated.append(new)
         return migrated
 
@@ -215,7 +215,7 @@ class BlockManager:
         Returns:
             所有块的列表（按 DB 插入顺序，即创建时间升序）。
         """
-        return [self._to_schema(r) for r in block_orm.select_blocks(self.db, self.user_id)]
+        return self.blocks.list_blocks()
 
     def update_block_value(self, label: str, value: str) -> Block:
         """把块值整体设为 value（原子：读取、快照、写入在一次持锁内完成）。
@@ -232,25 +232,11 @@ class BlockManager:
             BlockLimitExceeded: 新 value 超过块上限。
             ConcurrentUpdateError: 读取后写入前版本被其他写者推进（CAS 拒绝）。
         """
-        with self.db.transaction():
-            # 读取当前块并校验不变式（FOR UPDATE 行锁：锁到事务退出，防并发写者插队）
-            row = block_orm.select_block_by_label(self.db, label, self.user_id,
-                                                  for_update=True)
-            if row is None:
-                raise KeyError(f"block {label} not found")
-            if row["read_only"]:
-                raise ValueError(_READ_ONLY)
-            if len(value) > row["limit"]:
-                raise BlockLimitExceeded(row["label"], row["limit"])
-            # checkpoint：改动前快照 → block_history（撤销/重做依据）
-            block_orm.checkpoint_block(self.db, row["id"], row["label"], row["value"],
-                                       row["limit"], row["description"],
-                                       {}, row["version"], user_id=self.user_id)
-            # CAS 写入：期望版本仍为读到的版本，否则抛冲突
-            block_orm.update_block(self.db, row["id"], value,
-                                   expected_version=row["version"], user_id=self.user_id)
-        block = self.get_block(row["id"])
-        return block
+        def _set(block: Block) -> str:
+            self._invariants(block, value)
+            return value
+
+        return self.blocks.mutate(label, _set)
 
     def mutate_block(self, label: str,
                      mutate: Callable[[str], str | None]) -> Block | None:
@@ -274,32 +260,12 @@ class BlockManager:
             BlockLimitExceeded: 新值超过块上限（含 mutator 抛出的校验错误）。
             ConcurrentUpdateError: 连续重试仍冲突（说明有绕过本入口的写者）。
         """
-        for _ in range(_CAS_MAX_RETRIES):
-            try:
-                with self.db.transaction():
-                    row = block_orm.select_block_by_label(self.db, label, self.user_id,
-                                                  for_update=True)
-                    if row is None:
-                        raise KeyError(f"block {label} not found")
-                    if row["read_only"]:
-                        raise ValueError(_READ_ONLY)
-                    new_value = mutate(row["value"])
-                    if new_value is None:
-                        return None
-                    if len(new_value) > row["limit"]:
-                        raise BlockLimitExceeded(row["label"], row["limit"])
-                    block_orm.checkpoint_block(
-                        self.db, row["id"], row["label"], row["value"],
-                        row["limit"], row["description"], {}, row["version"],
-                        user_id=self.user_id)
-                    block_orm.update_block(self.db, row["id"], new_value,
-                                           expected_version=row["version"],
-                                           user_id=self.user_id)
-                block = self.get_block(row["id"])
-                return block
-            except ConcurrentUpdateError:
-                continue          # 重读最新值后重放 mutate（纯函数，重放无损）
-        raise ConcurrentUpdateError(label)
+        def _runner(block: Block) -> str | None:
+            if block.read_only:
+                raise ValueError(_READ_ONLY)
+            return self._invariants(block, mutate(block.value))
+
+        return self.blocks.mutate(label, _runner)
 
     def delete_block(self, block_id: str) -> None:
         """删除块。read_only 块拒绝（与 update_block_value 一致），防误删保护块。
@@ -310,25 +276,13 @@ class BlockManager:
         Raises:
             KeyError: block_id 不存在。
             ValueError: 块为 read_only。
-
-        注意：实际删除委托给 _delete() 钩子（rename 复用）。
         """
-        row = block_orm.select_block(self.db, block_id, self.user_id)
-        if row is None:
+        block = self.blocks.get_by_id(block_id)
+        if block is None:
             raise KeyError(f"block {block_id} not found")
-        if row["read_only"]:
+        if block.read_only:
             raise ValueError(_READ_ONLY)
-        self._delete(block_id)
-
-    def _delete(self, block_id: str) -> None:
-        """底层删除钩子（rename 复用）：不检查 read_only。
-
-        Args:
-            block_id: 块的唯一标识。
-
-        设计意图：将实际删除逻辑抽离成独立方法，与只读校验入口分离。
-        """
-        block_orm.delete_block(self.db, block_id, self.user_id)
+        self.blocks.delete(block_id)
 
     def checkpoint_block(self, block_id: str) -> None:
         """手动快照：把当前块状态写进 bio_memory_block_history（version 记为 0，表示非更新前快照）。
@@ -340,9 +294,7 @@ class BlockManager:
         version=0 用于区分「手动检查点」和「更新前自动快照」（更新前快照的 version 为旧版本号）。
         """
         b = self.get_block(block_id)
-        block_orm.checkpoint_block(self.db, b.id, b.label, b.value, b.limit,
-                                   b.description, b.metadata_, 0,
-                                   user_id=self.user_id)
+        self.blocks.checkpoint(b, version=0)
 
     def restore_block(self, block_history_id: int) -> Block:
         """按历史快照回滚块：把快照的值写回 bio_memory_block 行，返回回滚后的块。
@@ -364,11 +316,11 @@ class BlockManager:
             - 注意：回滚不会生成新的历史记录（不记录“回滚操作”本身），
               如需可撤销的回滚，调用方可在回滚后手动调用 checkpoint_block。
         """
-        snap = block_orm.restore_block_history(self.db, block_history_id, self.user_id)
-        cur = block_orm.select_block(self.db, snap["block_id"], self.user_id)
+        snap = self.blocks.restore_snapshot(block_history_id)
+        cur = self.blocks.get_by_id(snap["block_id"])
         if cur is None:
             # 块行已删、只剩历史快照：报「块不存在」，与 get_block 的失败语义一致。
             raise KeyError(f"block {snap['block_id']} not found")
-        block_orm.update_block(self.db, snap["block_id"], snap["value"],
-                               expected_version=cur["version"], user_id=self.user_id)
+        self.blocks.update_value(snap["block_id"], snap["value"],
+                                 expected_version=cur.version)
         return self.get_block(snap["block_id"])

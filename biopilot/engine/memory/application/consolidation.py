@@ -24,11 +24,11 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 from biopilot.engine.memory.domain.errors import (
     BlockLimitExceeded, MemoryEditTargetNotFound, MemoryEditValidationError)
-from biopilot.engine.memory.adapters.named_lock import NamedLock
+from biopilot.engine.memory.domain.ports import ConsolidationCursorStore, RunMutex
 from biopilot.engine.memory.domain.dto.memory_edit import MemoryEdit
 from biopilot.engine.memory.domain.dto.memory_edit_batch import MemoryEditBatch
 
@@ -157,7 +157,8 @@ class MemoryConsolidator:
     """
 
     def __init__(self, agent_state, block_manager, message_manager,
-                 structured, enable: bool = False):
+                 cursor_store: ConsolidationCursorStore,
+                 lock_factory=None, structured=None, enable: bool = False):
         """装配整合器依赖。
 
         Args:
@@ -167,6 +168,9 @@ class MemoryConsolidator:
                 可写块的旧值。
             message_manager: MessageManager，读对话消息、推导游标（size = 该会话
                 消息总数）。
+            cursor_store: ConsolidationCursorStore，整合游标端口（水合与推进）。
+            lock_factory: Callable[[], RunMutex] | None，跨进程消费权锁的构造工厂
+                （每次整合现取一把锁，不能复用实例）；None 时退化为仅进程内互斥。
             structured: StructuredOutput，LLM 抽取编辑指令的通道；LLM 输出不可信，
                 指令须经校验才应用。
             enable: 总开关；False 时 consolidate 直接返回（不调 LLM）。
@@ -174,24 +178,21 @@ class MemoryConsolidator:
         self.agent_state = agent_state
         self.block_manager = block_manager
         self.message_manager = message_manager
+        self.cursors = cursor_store
+        self._lock_factory = lock_factory
         self.structured = structured
         self.enable = enable
         self._running = False
         self._failures = 0
         #: 已处理到的消息数量游标（工作副本；真身落 bio_memory_consolidation_cursor 表，
-        #: consolidate() 入口在持锁状态下从 DB 水合——跨进程游标不靠内存）
+        #: consolidate() 入口在持锁状态下从游标端口水合——跨进程游标不靠内存）
         self._cursor = 0
-        # 跨进程消费锁的连接串：取块管理器背后的 MemoryDB；缺失（纯 mock）时
-        # 退化为仅进程内互斥
-        self._lock_dsn = getattr(getattr(block_manager, "db", None), "dsn", None)
 
     def _hydrate_cursor(self) -> None:
-        """持锁状态下从 DB 水合游标；行不存在按当前消息数初次回填（自愈语义）。"""
-        row = self.block_manager.db.execute(
-            "SELECT `cursor` FROM bio_memory_consolidation_cursor WHERE agent_id=?",
-            (self.agent_state.agent_id,)).fetchone()
-        if row is not None:
-            self._cursor = int(row["cursor"])
+        """持锁状态下从游标端口水合游标；行不存在按当前消息数初次回填（自愈语义）。"""
+        stored = self.cursors.load(self.agent_state.agent_id)
+        if stored is not None:
+            self._cursor = stored
             return
         self._save_cursor(self.message_manager.size(self.agent_state.agent_id))
 
@@ -202,11 +203,7 @@ class MemoryConsolidator:
             value: 新的游标值（该 agent 已消费的消息数）。
         """
         self._cursor = value
-        self.block_manager.db.execute(
-            "REPLACE INTO bio_memory_consolidation_cursor (agent_id, `cursor`, updated_at)"
-            " VALUES (?,?,?)",
-            (self.agent_state.agent_id, value,
-             datetime.now(timezone.utc).isoformat()))
+        self.cursors.save(self.agent_state.agent_id, value)
 
     async def consolidate(self) -> None:
         """本轮收尾调用一次：有新消息就整合，没有就直接返回。
@@ -218,9 +215,8 @@ class MemoryConsolidator:
             return
         # 跨进程消费权：命名锁拿不到说明另一进程正在整合同一会话——本轮放弃
         # （对端会推进游标；若对端崩溃，锁随连接自愈，游标行未推进 → 下轮重消费）。
-        lock = None
-        if self._lock_dsn:
-            lock = NamedLock(self._lock_dsn)
+        lock: RunMutex | None = self._lock_factory() if self._lock_factory else None
+        if lock is not None:
             acquired = await asyncio.to_thread(
                 lock.acquire, f"consolidation:{self.agent_state.agent_id}", 0)
             if not acquired:

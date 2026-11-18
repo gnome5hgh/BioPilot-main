@@ -1,15 +1,18 @@
 """bio_message 表操作：对话消息的落盘与查询（窗口回放与审计的数据源）。
 
-本文件只有裸 SQL 函数，不含业务规则；surrogate 清洗等语义由
-services/message_manager.py 持有。
+裸 SQL 函数 + ``MySqlMessageRepository``（``MessageRepository`` 端口的 MySQL
+实现）。wire 消息 → StoredMessage 的翻译与 surrogate 清洗在本文件完成——
+「翻译」是适配层职责；业务规则（窗口选择策略）在 application/message_manager。
 """
 from __future__ import annotations
 
 import json
+from dataclasses import fields, replace
 from datetime import datetime, timezone
 
 from biopilot.common.constants import MessageRole
-from biopilot.engine.llm.domain.dto import response_meta_from_dict, response_meta_to_dict
+from biopilot.common.utils.text import sanitize_surrogates
+from biopilot.engine.llm.adapters.api import response_meta_from_dict, response_meta_to_dict
 from biopilot.engine.memory.adapters.database import MemoryDB
 from biopilot.engine.memory.domain.schemas.stored_message import StoredMessage
 
@@ -193,3 +196,130 @@ def count_messages(db: MemoryDB, agent_id: str) -> int:
     """
     cur = db.execute("SELECT COUNT(*) AS c FROM bio_message WHERE agent_id=?", (agent_id,))
     return cur.fetchone()["c"]
+
+def first_user_content(db: MemoryDB, agent_id: str) -> str | None:
+    """取该会话首条用户消息的 content（会话列表预览用）；无消息返回 None。
+
+    Args:
+        db: 数据库连接。
+        agent_id: 会话标识。
+
+    Returns:
+        str | None：首条用户消息原文；该会话还没有消息时 None。
+    """
+    row = db.execute(
+        "SELECT content FROM bio_message WHERE agent_id=? AND role='user'"
+        " ORDER BY created_at, seq LIMIT 1", (agent_id,)).fetchone()
+    return None if row is None else row["content"]
+
+
+class MySqlMessageRepository:
+    """``MessageRepository`` 的 MySQL 实现：wire 消息 → StoredMessage 的翻译、
+    surrogate 清洗与落盘/查询。
+
+    「翻译」属于适配层职责：wire 消息（llm 层）→ StoredMessage 的映射、信封
+    清洗都在这里完成，应用层只见领域对象与原始行。
+    """
+
+    def __init__(self, db: MemoryDB):
+        """绑定连接。
+
+        Args:
+            db: 数据库连接（需已初始化）。
+        """
+        self._db = db
+
+    def append(self, agent_id: str, wire, session_id: str | None,
+               user_id: str) -> StoredMessage:
+        """清洗并落盘一条 wire 消息，返回持久化版本。
+
+        清洗是全角色并集：content 与响应信封（思维链/拒答）一视同仁——
+        bio_message 表严格 UTF-8，代理码点写入会炸（整条消息落盘失败）。
+        replace 生成副本，不改调用方 wire。
+
+        Args:
+            agent_id: 所属 agent 标识。
+            wire: LLM 层的原始消息。
+            session_id: 会话分组标识；None 回退为 agent_id。
+            user_id: 归属用户（必填）。
+
+        Returns:
+            StoredMessage：补齐 id/created_at 的持久化版本。
+        """
+        wire = replace(wire, content=sanitize_surrogates(wire.content))
+        meta = getattr(wire, "meta", None)
+        if meta is not None:
+            meta = _sanitize_response_meta(meta)
+            wire = replace(wire, meta=meta)
+        m = _wire_to_schema(wire, session_id or agent_id)
+        insert_message(self._db, agent_id, m, user_id=user_id)
+        return m
+
+    def by_agent(self, agent_id: str, limit: int | None = None) -> list[StoredMessage]:
+        """按 agent 取全部消息（升序）；limit 可选。"""
+        rows = select_messages_by_agent(self._db, agent_id, limit=limit)
+        return [row_to_schema(r) for r in rows]
+
+    def by_ids(self, ids: list[str]) -> list[StoredMessage]:
+        """按 id 列表取消息，顺序与 ids 一致。"""
+        rows = select_messages_by_ids(self._db, ids)
+        return [row_to_schema(r) for r in rows]
+
+    def by_session(self, session_id: str, limit: int | None = None) -> list[StoredMessage]:
+        """按会话分组取消息（覆盖 supervisor 与子 agent）。"""
+        rows = select_messages_by_session(self._db, session_id, limit=limit)
+        return [row_to_schema(r) for r in rows]
+
+    def count(self, agent_id: str) -> int:
+        """该 agent 已落盘消息总数。"""
+        return count_messages(self._db, agent_id)
+
+    def user_messages(self, agent_id: str) -> list[StoredMessage]:
+        """该 agent 的全部 user 消息（升序）。"""
+        rows = select_messages_by_agent(self._db, agent_id)
+        return [row_to_schema(r) for r in rows if r["role"] == "user"]
+
+    def first_user_content(self, agent_id: str) -> str | None:
+        """首条用户消息原文（会话列表预览）；无消息返回 None。"""
+        return first_user_content(self._db, agent_id)
+
+
+def _sanitize_response_meta(meta) -> object:
+    """清洗信封里的文本字段（思维链与拒答是模型自由文本，同样可能带未配对代理）。
+
+    Args:
+        meta: 从端点响应派生的信封。
+
+    Returns:
+        文本字段已清洗的副本（数字字段原样）。
+    """
+    values = {f.name: getattr(meta, f.name) for f in fields(meta)}
+    for name, value in values.items():
+        if isinstance(value, str):
+            values[name] = sanitize_surrogates(value)
+    return replace(meta, **values)
+
+
+def _wire_to_schema(wire, session_id: str | None = None) -> StoredMessage:
+    """把 wire 消息转成 StoredMessage：补 role 枚举 / 空 tool_calls / 时间戳。
+
+    持久化是全角色的**并集**：表里 tool_calls / tool_call_id / meta 每一行都有列，
+    非本角色的行存空值。故这里按属性取（wire 侧这些字段只存在于 assistant / tool
+    子类上），取不到即归一为空。meta 是被落盘的响应信封（token 用量/结束原因等）。
+
+    Args:
+        wire: LLM 层的原始消息（各角色子类之一）。
+        session_id: 会话分组标识；None 时由调用方回退为 agent_id。
+
+    Returns:
+        StoredMessage 对象，自动填充当前 UTC 时间作为 created_at。
+    """
+    return StoredMessage(
+        session_id=session_id,
+        role=MessageRole(wire.role),
+        content=wire.content,
+        tool_calls=getattr(wire, "tool_calls", None) or [],  # 确保为列表，避免 None
+        tool_call_id=getattr(wire, "tool_call_id", None),
+        meta=getattr(wire, "meta", None),
+        created_at=datetime.now(timezone.utc),
+    )

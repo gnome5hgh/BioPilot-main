@@ -188,7 +188,22 @@ CREATE TABLE IF NOT EXISTS bio_config_history (
     PRIMARY KEY (id),
     KEY idx_config_history_scope_version (scope, version)
 );
+
+-- bio_agent_state 表：会话状态（窗口 id 列表与角色定义；此前由应用层自建，现统一入 _SCHEMA）
+CREATE TABLE IF NOT EXISTS bio_agent_state (
+    agent_id VARCHAR(64) PRIMARY KEY,   -- 会话标识（主键）
+    name TEXT,                           -- 会话标题
+    description TEXT,                    -- 描述
+    `system` MEDIUMTEXT,                 -- 角色定义（system 是 MySQL 保留字，列名一律反引号）
+    model TEXT,                          -- 会话级模型名
+    context_window_limit INTEGER,        -- 窗口上限
+    message_ids MEDIUMTEXT,              -- in-context 窗口的消息 id 列表（JSON）
+    created_at VARCHAR(40),              -- 创建时间
+    user_id VARCHAR(191) NOT NULL,       -- 归属用户（行级隔离）
+    project_id VARCHAR(64) NULL          -- 归属项目
+);
 """
+
 
 # 增量列迁移清单：(表, 列名, 列定义)。建表脚本只能建出新库——已有库不会因为
 # _SCHEMA 多写一列就自动获得它，故给已有表**加列**时必须同时在这里登记一行，
@@ -196,8 +211,6 @@ CREATE TABLE IF NOT EXISTS bio_config_history (
 _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("bio_message", "meta", "meta MEDIUMTEXT NULL"),
     ("bio_message", "session_id", "session_id VARCHAR(191) NULL"),
-    # bio_agent_state 由 AgentManager 自建（不在 _SCHEMA 管辖）；此处登记使存量库在
-    # init_schema 时机补列——表尚未建时跳过，建表语句对新库自带该列。
     ("bio_agent_state", "project_id", "project_id VARCHAR(64) NULL"),
     # 平台表（bio_file/bio_schedule_task）的建表与
     # 加列归 Java（server/script/sql）；此处只维护引擎自己的表。
