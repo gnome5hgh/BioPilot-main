@@ -46,7 +46,7 @@ BioPilot/
 ### 当前目录分层含义
 
 - 三层调用链：`web/`（5173，Vite 原样代理 `/api` → 8080）→ `server/`（8080，Sa-Token 鉴权 + 业务表 + 引擎接入）→ `biopilot/api/`（8300，SSE 对话与数据端点）→ 引擎本体。`server/` 与 `biopilot/` 之间是**信任边界**：内网头 `X-User-Id` 即真相，适配层不二次鉴权、只绑回环/内网。
-- `biopilot/` 是引擎主包；`main.py` 是启动类，`api/` 是 FastAPI 装配层（`app`/`deps`/`router`/`lifespan`/异常映射），`controller/` 是路由层，`service/` 是应用服务（ABC + `impl/`），`mapper/` 是 SQL 访问，`schema/` 是 HTTP 请求/响应模型，`domain/` 是应用层对象；`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（常量/纯函数/原子写/通用对象存储），`engine/` 是 agent 系统技术核心（`rag/` 与 `vision/` 已住进 `engine/` 内）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
+- `biopilot/` 是引擎主包；`main.py` 是启动类，`api/` 是 FastAPI 装配层（`app`/`deps`/`router`/`lifespan`/异常映射），`controller/` 是路由层，`service/` 是请求核心逻辑与全系统组装根（唯一调用各模块 `build_xxx`），`mapper/` 是请求级数据访问（对引擎表纯委托模块适配层），`schema/` 是 HTTP 请求/响应模型；`config/` 是参数唯一声明点，`common/` 是跨层共享基础设施（含 Python→Java 连接器），`engine/` 是 agent 系统（每模块三层：domain 私有 / application 私有 / **adapters = 模块对外面**：公开契约 `api.py` + 出向实现）。平台数据访问（论文/文件/文档）已迁 Java `bio-file`。
 - `server/` 按 SpringBoot + cde-common 惯例分三块：`bio-admin`（只放启动类、配置与健康检查，纯装配）、`bio-modules`（按业务域拆分的模块，外加技术适配层 bio-gateway；域清单以目录为准）、`bio-common`（跨域共享的基础设施模块，按单一关注点拆分）。
 - 浏览器接口统一挂在 `/api/v1/**`（管理端 `/api/v1/admin/**`），`/internal/**` 是 Java↔Python 的跨栈契约、不版本化；**URL 按资源命名，不跟模块名走**——模块拆分/改名不牵动前端路由。
 - `agents/` 是 Agent 插件目录，每个子目录一个角色；它的 `description` 会被自动收进运行时的可派发清单。
