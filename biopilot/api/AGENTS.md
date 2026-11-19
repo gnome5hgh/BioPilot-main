@@ -22,7 +22,7 @@
 
 ## 分层约定
 
-- `api → controller → service → mapper → common/engine/tools`；本层只依赖 controller 与 `service/container.py`。
+- `api → controller → service → mapper → common` 与 engine 各模块适配层（经 service，本层不直接 import engine）；本层只依赖 controller 与 `service/container.py`。
 - 新增端点：在 `controller/` 加路由，在 `schema/` 加请求/响应模型；**不要在 `app.py` 里堆处理器**。
 - 新增服务：在 `service/` 写 ABC、`service/impl/` 写实现，在 `service/container.py` 装配；controller 通过 `Depends(get_services)` 取用。
 
